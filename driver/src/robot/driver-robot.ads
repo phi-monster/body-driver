@@ -736,6 +736,10 @@ private
       Tracks       : Real_Vectors.Vector;
       Track_Known  : Flag_Vectors.Vector;
       Track_Sigmas : Real_Vectors.Vector;
+      --  Per track, as many numbers as Covariance has terms: how the logarithm of its depth moves with each, the
+      --  other tracks' depths at their best (Fit.Fit_Report.Depth_Gains); Track_Sigmas is what is left of its
+      --  uncertainty with the terms held (Kinematics.Offer_Of).
+      Track_Gains  : Real_Vectors.Vector;
       --  Where its reference frame is in the world (Kinematics.In_World):
       --  X_world = Placement * (Scale * X). The world is the first arm's
       --  reference frame, so that arm is placed as it is.

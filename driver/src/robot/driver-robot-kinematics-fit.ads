@@ -123,7 +123,8 @@ package Driver.Robot.Kinematics.Fit is
    --  joint its Joint_Terms: the tilt of its axis along the two directions
    --  across it (Across), the point on it nearest the reference eye moved
    --  along the same two, and its reading scale.
-   Lens_Terms : constant := 6;
+   type Lens_Term is (Log_Fx, Log_Fy, Centre_X, Centre_Y, Radial_1, Radial_2);
+   Lens_Terms : constant := Lens_Term'Pos (Lens_Term'Last) + 1;
    type Joint_Term is (Tilt_1, Tilt_2, Point_1, Point_2, Scale);
    Joint_Terms : constant := Joint_Term'Pos (Joint_Term'Last) + 1;
    function Moves_The_Fit (Decrease : Real) return Boolean is
@@ -184,6 +185,12 @@ package Driver.Robot.Kinematics.Fit is
    --  parameters, each moved by its standard deviation either way. Turn and
    --  Place are Real'Last on the diagonal when the covariance is not the
    --  fit's of these joints.
+
+   procedure Move_Term (J : in out Joint_Array; L : in out Lens; Term : Positive; By : Real)
+     with Pre => Term <= Terms (J'Length);
+   --  The fit's term Term, in its covariance's order (the lens's Lens_Terms, then each joint's Joint_Terms), moved by
+   --  By: the logarithm of a focal length, the principal point or a distortion term of L, or a joint's tilt along the
+   --  two directions across its axis (Across), its point moved along them, or its reading scale.
 
    function Step_Covariance
      (Joints     : Joint_Array;

@@ -949,18 +949,20 @@ package body Driver.Robot.Kinematics is
    function Fit_Lens (L : Lens_Fit) return Fit.Lens is
      ((Fx => L.Fx, Fy => L.Fy, Cx => L.Cx, Cy => L.Cy, K1 => L.K1, K2 => L.K2));
 
-   function Axis (A : Positive) return Vec3 is
-     (case A is when 1 => [1.0, 0.0, 0.0], when 2 => [0.0, 1.0, 0.0], when others => [0.0, 0.0, 1.0]);
-
    type Pixel_Derivative is array (1 .. 2) of Real;   --  of the pixel's u and v
-   type Derivative_Array is array (1 .. 7) of Pixel_Derivative;
-   --  By the eye's turn about each axis (1 to 3), its place along each (4 to 6) and the point's depth (7).
 
    --  The fitted arm's own prediction of where its reference's query points are in a keyframe at those readings.
    --  A query the fit gave a depth is a point in the reference eye's frame; the eye at the readings (the fit's
-   --  joints) sees it where the lens puts it. The prediction's uncertainty is what the fit's own leaves the eye's
-   --  turn and place at those readings (Pose_Covariance) and the point's depth, carried to the pixel by the
-   --  derivative of the projection; the warp is the plane's homography, the table's for a track that lies on it
+   --  joints) sees it where the lens puts it. The prediction's uncertainty is the fit's whole covariance carried to
+   --  the pixel: each term moves the eye at those readings, the lens, and the point's depth by its gain together,
+   --  and the depth's own uncertainty with the terms held is added. Taken apart, the turn's uncertainty and the
+   --  place's (the lens left out, and what each depth shares with the terms) stated three times the errors: u25 (servo
+   --  seed 3 of the fake robot, 10-19), replayed, the arm's points lay 0.51 px from the truth on the median of an
+   --  axis and stated 2.26 px, the error over it 0.20 on the median for the Gaussian's 0.67, and 12 of the 29
+   --  keyframes the arm predicted found no point. Carried whole: 0.60 px, 0.67 on the median (2.31 and 3.55 at the
+   --  90th and 99th percentiles, for 1.64 and 2.58), 3 of 94 keyframes found none, and to beat 10373 its keyframes
+   --  found a quarter more sightings, as close to the truth (0.84 px on the median, 3.4 % beyond 2 px, against 0.90
+   --  and 3.6 %). The warp is the plane's homography, the table's for a track that lies on it
    --  and else the plane across the line of sight at the track's depth. A point without a depth is not
    --  predicted: its uncertainty is unbounded. Known is False when the arm is not fitted.
    procedure Offer_Of
@@ -972,7 +974,6 @@ package body Driver.Robot.Kinematics is
       Unbounded : constant Real := Real'Last / 4.0;
       Pose      : constant Rigid := Eye_In_Reference (M, R.Arm, Readings);
       Step      : constant Real := Ada.Numerics.Long_Elementary_Functions."**" (Real'Model_Epsilon, 1.0 / 3.0);
-      Turn, Place : Mat3;
 
       --  Where the eye stands at the readings under each order of the joints the fit does not tell from its own
       --  (Arm_Fit.Untold_Orders), its joints as fitted: a point is as uncertain as the farthest of them puts it.
@@ -1012,6 +1013,56 @@ package body Driver.Robot.Kinematics is
       end Untold_Poses;
       Others_At : constant Pose_List := Untold_Poses;
 
+      --  Each term of the fit (Fit.Move_Term) moved by its standard deviation either way, and the lens and the eye at
+      --  the readings so moved: a point moves with a term through both, and through its depth by its gain.
+      Whole     : constant Natural := Fit.Terms (Size);
+      Covariant : constant Boolean :=
+        R.Result.Fitted and then Natural (R.Result.Covariance.Length) = Whole * Whole
+        and then Natural (R.Result.Joints.Length) = Size and then Natural (R.Result.Reference.Length) = Size
+        and then Natural (R.Result.Chain.Length) = Size and then Natural (R.Result.Track_Gains.Length) >= Queries * Whole;
+      function Term_Covariance (P, Q : Positive) return Real is
+        (R.Result.Covariance (R.Result.Covariance.First_Index + (P - 1) * Whole + Q - 1));
+      type Moved_Term is record
+         Sigma              : Real := 0.0;
+         Up_Lens, Down_Lens : Fit.Lens;
+         Up_Eye, Down_Eye   : Rigid := Identity;
+      end record;
+      type Moved_Terms is array (Positive range <>) of Moved_Term;
+      function Moves_Of return Moved_Terms is
+         Moves  : Moved_Terms (1 .. (if Covariant then Whole else 0));
+         Joints : Fit.Joint_Array (1 .. Size);
+         Change : Real_Array (1 .. Size);
+      begin
+         if Moves'Length = 0 then
+            return Moves;
+         end if;
+         for J in Joints'Range loop
+            declare
+               F : constant Joint_Fit := R.Result.Joints (J);
+            begin
+               Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
+               Change (J) := Readings (Readings'First + J - 1) - R.Result.Reference (J - 1);
+            end;
+         end loop;
+         for P in Moves'Range loop
+            if Term_Covariance (P, P) > 0.0 then
+               declare
+                  Sigma        : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (Term_Covariance (P, P));
+                  Up, Down     : Fit.Joint_Array := Joints;
+                  Up_L, Down_L : Fit.Lens := Lens;
+               begin
+                  Fit.Move_Term (Up, Up_L, P, Sigma);
+                  Fit.Move_Term (Down, Down_L, P, -Sigma);
+                  Moves (P) := (Sigma => Sigma, Up_Lens => Up_L, Down_Lens => Down_L,
+                                Up_Eye => Fit.Eye_At (Up, Chain_Of (R.Result), Change),
+                                Down_Eye => Fit.Eye_At (Down, Chain_Of (R.Result), Change));
+               end;
+            end if;
+         end loop;
+         return Moves;
+      end Moves_Of;
+      Moves : constant Moved_Terms := Moves_Of;
+
       --  Where the point X of the reference eye's frame lands when the eye's turn is moved by Omega (a rotation
       --  vector, in the reference frame) and its place by Shift.
       procedure Land (X, Omega, Shift : Vec3; Where : out Driver.Images.Pixel; Front : out Boolean) is
@@ -1033,7 +1084,6 @@ package body Driver.Robot.Kinematics is
          end if;
       end Through_Plane;
    begin
-      Pose_Covariance (M, R.Arm, Readings, Turn, Place);
       Known := R.Result.Fitted and then Natural (R.Result.Track_Known.Length) >= Queries
         and then Natural (R.Result.Tracks.Length) >= 3 * Queries;
       for K in Into'Range loop
@@ -1046,8 +1096,7 @@ package body Driver.Robot.Kinematics is
                          Cov => (UU => Unbounded, UV => 0.0, VV => Unbounded), others => <>);
             if Known and then Q < Queries and then R.Result.Track_Known (Q)
               and then Q < Natural (R.Result.Track_Sigmas.Length)
-              and then R.Result.Track_Sigmas (Q) < Unbounded and then Turn (1, 1) < Real'Last
-              and then Place (1, 1) < Real'Last
+              and then R.Result.Track_Sigmas (Q) < Unbounded and then Covariant
             then
                declare
                   X     : constant Vec3 :=
@@ -1058,8 +1107,9 @@ package body Driver.Robot.Kinematics is
                   Land (X, Zero3, Zero3, Here, Front);
                   if Front then
                      declare
-                        Scale : constant Real := abs X;
-                        J     : Derivative_Array := [others => [0.0, 0.0]];
+                        --  How the pixel moves with each term, and with the point's own depth (its logarithm).
+                        Rate  : array (Moves'Range) of Pixel_Derivative := [others => [0.0, 0.0]];
+                        Along : Pixel_Derivative;
                         Plane : constant Vec3 :=
                           (if Q < Natural (R.Result.Table_On.Length) and then R.Result.Table_On (Q)
                               and then R.Result.Table_A * X > 0.0
@@ -1068,32 +1118,25 @@ package body Driver.Robot.Kinematics is
                         P1, P2 : Driver.Images.Pixel;
                         Ok1, Ok2 : Boolean;
                         Variance : array (1 .. 3) of Real := [others => 0.0];   --  UU, UV, VV
-
-                        function Pair (A, B : Positive) return Real is
-                           Sum : Real := 0.0;
-                        begin
-                           for I in 1 .. 3 loop
-                              for L in 1 .. 3 loop
-                                 Sum := Sum + J (I) (A) * Turn (I, L) * J (L) (B)
-                                   + J (3 + I) (A) * Place (I, L) * J (3 + L) (B);
-                              end loop;
-                           end loop;
-                           return Sum + J (7) (A) * J (7) (B) * R.Result.Track_Sigmas (Q) ** 2;
-                        end Pair;
                      begin
-                        for A in 1 .. 3 loop
-                           declare
-                              Up, Down : Driver.Images.Pixel;
-                              F1, F2   : Boolean;
-                           begin
-                              Land (X, Step * Axis (A), Zero3, Up, F1);
-                              Land (X, -Step * Axis (A), Zero3, Down, F2);
-                              J (A) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];
-                              Land (X, Zero3, (Step * Scale) * Axis (A), Up, F1);
-                              Land (X, Zero3, (-Step * Scale) * Axis (A), Down, F2);
-                              J (3 + A) := [(Up.U - Down.U) / (2.0 * Step * Scale),
-                                            (Up.V - Down.V) / (2.0 * Step * Scale)];
-                           end;
+                        for P in Moves'Range loop
+                           if Moves (P).Sigma > 0.0 then
+                              declare
+                                 Gain     : constant Real :=
+                                   R.Result.Track_Gains (R.Result.Track_Gains.First_Index + Q * Whole + P - 1);
+                                 Width    : constant Real := Moves (P).Sigma + Moves (P).Sigma;
+                                 Up, Down : Driver.Images.Pixel;
+                                 F1, F2   : Boolean;
+                              begin
+                                 Fit.Project (Moves (P).Up_Lens, Inverse (Moves (P).Up_Eye)
+                                              * ((X (3) * Ada.Numerics.Long_Elementary_Functions.Exp (Moves (P).Sigma * Gain))
+                                                 * Fit.Ray (Moves (P).Up_Lens, U0, V0)), Up.U, Up.V, F1);
+                                 Fit.Project (Moves (P).Down_Lens, Inverse (Moves (P).Down_Eye)
+                                              * ((X (3) * Ada.Numerics.Long_Elementary_Functions.Exp (-Moves (P).Sigma * Gain))
+                                                 * Fit.Ray (Moves (P).Down_Lens, U0, V0)), Down.U, Down.V, F2);
+                                 Rate (P) := [(Up.U - Down.U) / Width, (Up.V - Down.V) / Width];
+                              end;
+                           end if;
                         end loop;
                         declare
                            Up, Down : Driver.Images.Pixel;
@@ -1101,9 +1144,22 @@ package body Driver.Robot.Kinematics is
                         begin
                            Land ((1.0 + Step) * X, Zero3, Zero3, Up, F1);
                            Land ((1.0 - Step) * X, Zero3, Zero3, Down, F2);
-                           J (7) := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];
+                           Along := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];
                         end;
-                        Variance := [Pair (1, 1), Pair (1, 2), Pair (2, 2)];
+                        for P in Moves'Range loop
+                           for P2 in Moves'Range loop
+                              declare
+                                 C : constant Real := Term_Covariance (P, P2);
+                              begin
+                                 Variance := [Variance (1) + Rate (P) (1) * C * Rate (P2) (1),
+                                              Variance (2) + Rate (P) (1) * C * Rate (P2) (2),
+                                              Variance (3) + Rate (P) (2) * C * Rate (P2) (2)];
+                              end;
+                           end loop;
+                        end loop;
+                        Variance := [Variance (1) + (Along (1) * R.Result.Track_Sigmas (Q)) ** 2,
+                                     Variance (2) + Along (1) * Along (2) * R.Result.Track_Sigmas (Q) ** 2,
+                                     Variance (3) + (Along (2) * R.Result.Track_Sigmas (Q)) ** 2];
                         --  The order the fit does not tell: the farthest place an untold order puts the point, as the
                         --  outer product of its difference from this one over the window's multiple, squared: the
                         --  window then reaches that place at its edge, and the prediction's own uncertainty beside it.
@@ -3174,6 +3230,9 @@ package body Driver.Robot.Kinematics is
                            begin
                               while Natural (Report.Depth_Gains.Length) < Queries * Terms loop
                                  Report.Depth_Gains.Append (0.0);
+                              end loop;
+                              for X of Report.Depth_Gains loop
+                                 Result.Track_Gains.Append (X);
                               end loop;
                            end;
                            --  The table: the plane most of them lie on, with its

@@ -77,6 +77,15 @@ need. A keyframe is searched in the window that reaches every untold order's pla
 window: the median, over the points, of the farthest place an untold order puts each, within what a narrow window
 follows (`Kinematics.Fit`, the active planner's `Spread_Of`). While many orders are untold, the turns are small.
 
+The arm's own uncertainty was itself three times too wide. Its turn's and its place's were added as if apart, though a
+turn of the eye and a shift of it that move the view alike are told apart by little; the lens's was left out, and so was
+what each point's depth shares with the arm's terms. Replayed on u25 (servo seed 3, 10-19), the arm's points lay 0.51 px
+from the truth on the median of an axis and it stated 2.26 px for them, the untold orders' part 0.18 px of it. The
+prediction now carries the fit's whole covariance: every term moves the eye, the lens and the point's depth together
+(`Kinematics.Offer_Of`). It states 0.60 px, the error over it 0.67 on the median as the Gaussian's, though more often far
+out (3.55 at the 99th percentile for 2.58). The keyframes the arm predicted that found no point went from 12 of 29 to 3
+of 94, and the keyframes found a quarter more sightings, as close to the truth.
+
 A keyframe aligned again from the fitted arm (`Keyframes.Realign`) takes the arm's prediction at every point, and its
 points found narrowly where the arm put them stand, as in `Add`.
 

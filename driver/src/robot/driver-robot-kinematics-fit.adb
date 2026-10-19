@@ -5468,6 +5468,34 @@ package body Driver.Robot.Kinematics.Fit is
       return Place;
    end Place_Covariance_In_Unit;
 
+   procedure Move_Term (J : in out Joint_Array; L : in out Lens; Term : Positive; By : Real) is
+   begin
+      if Term <= Lens_Terms then
+         case Lens_Term'Val (Term - 1) is
+            when Log_Fx   => L.Fx := L.Fx * Exp (By);
+            when Log_Fy   => L.Fy := L.Fy * Exp (By);
+            when Centre_X => L.Cx := L.Cx + By;
+            when Centre_Y => L.Cy := L.Cy + By;
+            when Radial_1 => L.K1 := L.K1 + By;
+            when Radial_2 => L.K2 := L.K2 + By;
+         end case;
+      else
+         declare
+            A      : Joint renames J (J'First + (Term - Lens_Terms - 1) / Joint_Terms);
+            E1, E2 : Vec3;
+         begin
+            Perp (A.W, E1, E2);
+            case Joint_Term'Val ((Term - Lens_Terms - 1) mod Joint_Terms) is
+               when Tilt_1  => A.W := Unit (A.W + By * E1);
+               when Tilt_2  => A.W := Unit (A.W + By * E2);
+               when Point_1 => A.P := A.P + By * E1;
+               when Point_2 => A.P := A.P + By * E2;
+               when Scale   => A.C := A.C + By;
+            end case;
+         end;
+      end if;
+   end Move_Term;
+
    procedure Pose_Covariance
      (Joints      : Joint_Array;
       Chain       : Chain_Order;
@@ -5499,18 +5527,10 @@ package body Driver.Robot.Kinematics.Fit is
                if Sigma > 0.0 then
                   declare
                      function Moved (H : Real) return Rigid is
-                        Jx     : Joint_Array := Joints;
-                        A      : Joint renames Jx (Jx'First + J - 1);
-                        E1, E2 : Vec3;
+                        Jx : Joint_Array := Joints;
+                        Lx : Lens;
                      begin
-                        Perp (A.W, E1, E2);
-                        case T is
-                           when Tilt_1  => A.W := Unit (A.W + H * E1);
-                           when Tilt_2  => A.W := Unit (A.W + H * E2);
-                           when Point_1 => A.P := A.P + H * E1;
-                           when Point_2 => A.P := A.P + H * E2;
-                           when Scale   => A.C := A.C + H;
-                        end case;
+                        Move_Term (Jx, Lx, P, H);
                         return Eye_At (Jx, Chain, Change);
                      end Moved;
                      Up    : constant Rigid := Moved (Sigma);
