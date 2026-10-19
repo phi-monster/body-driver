@@ -3054,7 +3054,7 @@ driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) >
 driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
 driver-robot-kinematics.adb	if Driver.Pixels.Frames (W.Gathering) >= 2 then	2	structure	a view is judged by two frames at least (Views.Gathered)
 driver-robot-kinematics.adb	if Driver.Uncertain.Significant (Driver.Uncertain.Vector_Gate (Terms), Length, 1.0) then	1.0	statistics	the length is in sigmas already: the difference is whitened by the two covariances
-driver-robot-kinematics.adb	if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From then	2	structure	the evidence doubled, as the heavier estimates are due (Estimates_Due)
+driver-robot-kinematics.adb	if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From and then not Moved_On then	2	structure	the evidence doubled, as the heavier estimates are due (Estimates_Due)
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	the last of a track's three numbers
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	3	structure	a track's three coordinates in a flat list

@@ -54,6 +54,7 @@ package body Driver.Robot.Kinematics is
    Fixed_Terms : constant := Fit.Lens_Terms + Hand.Pose_Terms;
 
    use type Real_Vectors.Vector;
+   use type Count_Vectors.Vector;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
@@ -3424,6 +3425,14 @@ package body Driver.Robot.Kinematics is
       end loop;
       declare
          F : Fixed_Fit renames M.Fixed_Eyes (H);
+         --  An arm placed on another chain than its own now (Hand_Fit.Chain): what the eye was fitted to is gone,
+         --  however little the evidence grew, and the eye is fitted again (the links and the pose of that fit stood in
+         --  the arm's view, predicting its points, until then).
+         Moved_On : constant Boolean :=
+           (for some K in 1 .. Count =>
+              M.Kinematics (Kin_Of (K)).Views (View_Of (K)).Result.Placed
+              and then M.Kinematics (Kin_Of (K)).Views (View_Of (K)).Result.Chain
+                       /= M.Kinematics (Kin_Of (K)).Result.Chain);
       begin
          if Count = 0 then
             F := (Judged => True,
@@ -3433,14 +3442,14 @@ package body Driver.Robot.Kinematics is
                   others => <>);
             return;
          end if;
-         if F.Judged and then F.From = Evidence then
+         if F.Judged and then F.From = Evidence and then not Moved_On then
             return;
          end if;
          --  An eye the last fit did not determine is fitted again once its evidence has doubled, as the heavier
          --  estimates are (Estimates_Due): the search over its turns and lenses ran at every estimate, 22 to 31 s each
          --  on s41 (servo seed 6 of the fake robot, 10-17; 2 eyes, 26 and 7 tracks), and found nothing each time; at the
          --  rounds of one estimate whose keyframes were aligned again it ran again, 53 to 213 s a round, 610 s in all.
-         if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From then
+         if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From and then not Moved_On then
             return;
          end if;
       end;
@@ -3461,19 +3470,27 @@ package body Driver.Robot.Kinematics is
                Result   : Hand_Fit renames M.Kinematics (Kin_Of (K)).Views (View_Of (K)).Result;
                Previous : Hand.Arm_Report;
             begin
-               Previous.Placed := Result.Placed;
-               Previous.Pose := Result.Pose;
-               for L of Result.Link loop
-                  Previous.Link.Append (L);
-               end loop;
-               for D of Result.Depth loop
-                  Previous.Depth.Append (D);
-               end loop;
-               Prior.Arms.Append (Previous);
-               if Result.Placed then
-                  Prior.L := (Fx => Result.Lens.Fx, Fy => Result.Lens.Fy, Cx => Result.Lens.Cx, Cy => Result.Lens.Cy,
-                              K1 => Result.Lens.K1, K2 => Result.Lens.K2);
+               --  A fit made on another chain of the arm is no start: its links count joints along that chain, and its
+               --  pose and lens were found with them (q10, servo seed 7 of the fake robot, replayed: the eye was
+               --  searched for once, at beat 2281, with arm 1's joints in the order 5 6 2 4 3 1; the arm's order
+               --  became 4 6 3 2 1 5 at 2914 and the true 2 6 3 5 1 4 at 3499, and every later fit of the eye started
+               --  from the first, never searched again; at 6647 it stood determined at focal 79.5 x 189.8 px, centre
+               --  247.4, 111.0, where the simulator's truth has 140.9 x 141.2, centre 159.0, 117.2).
+               if Result.Chain = M.Kinematics (Kin_Of (K)).Result.Chain then
+                  Previous.Placed := Result.Placed;
+                  Previous.Pose := Result.Pose;
+                  for L of Result.Link loop
+                     Previous.Link.Append (L);
+                  end loop;
+                  for D of Result.Depth loop
+                     Previous.Depth.Append (D);
+                  end loop;
+                  if Result.Placed then
+                     Prior.L := (Fx => Result.Lens.Fx, Fy => Result.Lens.Fy, Cx => Result.Lens.Cx, Cy => Result.Lens.Cy,
+                                 K1 => Result.Lens.K1, K2 => Result.Lens.K2);
+                  end if;
                end if;
+               Prior.Arms.Append (Previous);
             end;
          end loop;
          Hand.Fit_Eye (Arms, Eye.Grid.Width, Eye.Grid.Height, Prior, Report);
@@ -3502,6 +3519,7 @@ package body Driver.Robot.Kinematics is
                   Result.Covariance.Append (X);
                end loop;
                Result.Slot := K;
+               Result.Chain := M.Kinematics (Kin_Of (K)).Result.Chain;
                V.Result := Result;
             end;
          end loop;

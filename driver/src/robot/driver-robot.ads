@@ -801,6 +801,9 @@ private
       --  the Slot-th. Empty when it has none.
       Covariance : Real_Vectors.Vector;
       Slot     : Natural := 0;
+      Chain    : Count_Vectors.Vector;
+      --  the arm's joints along it, from its base, as the arm's fit had them when the eye was fitted (Arm_Fit.Chain):
+      --  Link counts joints along that chain, and the pose is of that chain's reference
    end record;
 
    package Image_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Image, Driver.Images."=");
