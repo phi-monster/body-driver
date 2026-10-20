@@ -1,6 +1,5 @@
 with Ada.Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
-with Ada.Numerics.Float_Random;
 with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Clock;
@@ -28,6 +27,7 @@ with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
+with Driver.Robot.Kinematics.Flow_Eye;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
@@ -8914,8 +8914,126 @@ package body Driver.Robot.Tests is
                    "a scale is the floor and the gain times what is stated, as variances");
    end Scales_Beside_Stated_Sigmas;
 
+   --  A fixed eye placed by the edge flow of a synthetic arm (Kinematics.Flow_Eye): three joints (a turn about the
+   --  vertical, two about level axes), points of its second and third links seen by an eye 0.9 away looking down at
+   --  the arm, each with a gradient of 30 levels a pixel in a direction of its own and, for every joint, the change of
+   --  the picture there a reading unit as the arm's motion has it (central differences of the point's projection, not
+   --  the fit's own formula) with Gaussian noise of the sigma each states; the joints that do not move a point change it
+   --  by noise alone. The lens and the pose come back within Z of their sigmas, and the eye is told.
+   procedure Flow_Eye_On_A_Synthetic_Arm is
+      package Flow renames Driver.Robot.Kinematics.Flow_Eye;
+      package KFit renames Driver.Robot.Kinematics.Fit;
+      Width  : constant := 320;
+      Height : constant := 240;
+      Focal  : constant Real := 150.0;
+      Joints : aliased constant KFit.Joint_Array :=
+        [(W => [0.0, 0.0, 1.0], P => [0.0, 0.0, 0.0], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.0, 0.1], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.25, 0.1], C => 0.001, Slide => False)];
+      Eye_At_Place : constant Vec3 := [0.15, -0.55, 0.75];
+      Target       : constant Vec3 := [0.0, 0.2, 0.08];
+      Forward      : constant Vec3 := Unit (Minus (Target, Eye_At_Place));
+      Right        : constant Vec3 := Unit (Cross (Forward, [0.0, 0.0, 1.0]));
+      Down         : constant Vec3 := Cross (Forward, Right);
+      Truth        : constant Rigid :=
+        (Rotation    => [[Right (1), Down (1), Forward (1)], [Right (2), Down (2), Forward (2)],
+                         [Right (3), Down (3), Forward (3)]],
+         Translation => Eye_At_Place);
+      Sigma  : constant Real := 0.04;
+      G      : Generator := (State => 7);
+      Poses  : constant := 5;
+      Points : constant := 60;
+      Views  : aliased Flow.Pose_Array := [1 .. Poses => null];
+      Result : Flow.Report (Arms => 1, Count => Flow.Terms_For (1));
+      --  Where the camera sees the point of link K (at the reference) with the joints at Readings.
+      procedure Project (Point : Vec3; K : Positive; Readings : Real_Array; U, V : out Real; Ahead : out Boolean) is
+         Moved : constant Rigid := KFit.Eye_At (Joints (1 .. K), [for I in 1 .. K => I], Readings (1 .. K));
+         C     : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (Moved * Point, Truth.Translation));
+      begin
+         Ahead := C (3) > 0.0;
+         U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
+         V := (if Ahead then Focal * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+      end Project;
+   begin
+      for P in 1 .. Poses loop
+         declare
+            Readings : Real_Array (1 .. 3);
+            View     : constant Flow.Pose_Access := new Flow.Pose_View (3, Points);
+         begin
+            for J in 1 .. 3 loop
+               Readings (J) := (if P = 1 then 0.0 else 300.0 * (2.0 * Uniform (G) - 1.0));
+            end loop;
+            View.Readings := Readings;
+            View.Back := [others => 0.0];
+            for I in 1 .. Points loop
+               declare
+                  K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
+                  Along : constant Real := Uniform (G);
+                  Point : constant Vec3 :=
+                    (if K = 2 then [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]
+                     else [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]);
+                  Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
+                  U, V  : Real;
+                  Ahead : Boolean;
+               begin
+                  Project (Point, K, Readings, U, V, Ahead);
+                  Check (Ahead, "a point of the synthetic arm is behind its eye");
+                  View.U (I) := U;
+                  View.V (I) := V;
+                  View.Gu (I) := 30.0 * Cos (Angle);
+                  View.Gv (I) := 30.0 * Sin (Angle);
+                  View.Link (I) := K;
+                  for J in 1 .. 3 loop
+                     View.Sigma (I, J) := Sigma;
+                     if J <= K then
+                        declare
+                           Step     : constant Real := 1.0E-3;
+                           Up, Back : Real_Array := Readings;
+                           U1, V1, U2, V2 : Real;
+                           A1, A2   : Boolean;
+                        begin
+                           Up (J) := Readings (J) + Step;
+                           Back (J) := Readings (J) - Step;
+                           Project (Point, K, Up, U1, V1, A1);
+                           Project (Point, K, Back, U2, V2, A2);
+                           View.Rate (I, J) := -(View.Gu (I) * (U1 - U2) + View.Gv (I) * (V1 - V2)) / (2.0 * Step)
+                             + Sigma * Gaussian (G);
+                        end;
+                     else
+                        View.Rate (I, J) := Sigma * Gaussian (G);
+                     end if;
+                  end loop;
+               end;
+            end loop;
+            Views (P) := View;
+         end;
+      end loop;
+      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access)], Width, Height,
+                    Result);
+      Check (Result.Determined, "the synthetic arm's eye is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
+      if Result.Determined then
+         declare
+            Off_F  : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Focal);
+            Off_C  : constant Vec3 := Minus (Result.Poses (1).Translation, Truth.Translation);
+            Turned : constant Vec3 :=
+              Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (1).Rotation));
+         begin
+            Check (abs Off_F <= Driver.Conventions.Z * Sqrt (Result.Covariance (1, 1)),
+                   "the focal length is off its sigma:" & Real'Image (Result.Lens.Fx));
+            for A in 1 .. 3 loop
+               Check (abs Off_C (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (6 + A, 6 + A)),
+                      "the centre is off its sigma along axis" & A'Image & ":" & Real'Image (Off_C (A)));
+               Check (abs Turned (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (3 + A, 3 + A)),
+                      "the turn is off its sigma about axis" & A'Image & ":" & Real'Image (Turned (A)));
+            end loop;
+         end;
+      end if;
+   end Flow_Eye_On_A_Synthetic_Arm;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("robot.flow.eye", "a fixed eye placed by a synthetic arm's edge flow is not told or comes "
+                             & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.kinematics.scales", "the floor and gain of the scales residuals are judged at are "
                              & "read beside what their sightings state, whatever part of it the residuals bear out, so "
                              & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);
