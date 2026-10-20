@@ -155,7 +155,10 @@ begin
       Noise : constant Real :=
         Noise_Level * EF.Sqrt (0.299 ** 2 + 0.587 ** 2 + 0.114 ** 2) / EF.Sqrt (Real (Frames)) * EF.Sqrt (2.0);
 
-      procedure Gather (Number : Positive; Cache_Name : String; Set : out Arm_Set) is
+      --  Double_Name (FLOW_RICHARDSON, FLOW_RICHARDSON2; a study): a cache of the same poses turned twice as far, each
+      --  joint's change taken by Richardson's extrapolation, (4 D (d) - D (2 d)) / 3: the central difference's error
+      --  of the second order in the turn taken off.
+      procedure Gather (Number : Positive; Cache_Name : String; Set : out Arm_Set; Double_Name : String := "") is
          Group : Natural := 0;
       begin
          Set.Number := Number;
@@ -174,6 +177,8 @@ begin
             package SIO renames Ada.Streams.Stream_IO;
             Cached : constant Boolean := Cache_Name /= "" and then Ada.Directories.Exists (Cache_Name);
             File   : SIO.File_Type;
+            Doubled : constant Boolean := Double_Name /= "" and then Ada.Directories.Exists (Double_Name);
+            Double  : SIO.File_Type;
             --  Every pose's pictures, kept until all are in: the background is their stills' per-pixel median.
             type Luma_Matrix is array (1 .. Poses) of Flow.Luma_Array (1 .. N);
             type Reading_Matrix is array (1 .. Poses) of Real_Array (1 .. N);
@@ -196,6 +201,9 @@ begin
             --  so that the fit can be studied again in seconds.
             if Cached then
                SIO.Open (File, SIO.In_File, Cache_Name);
+               if Doubled then
+                  SIO.Open (Double, SIO.In_File, Double_Name);
+               end if;
             elsif Cache_Name /= "" then
                SIO.Create (File, SIO.Out_File, Cache_Name);
             end if;
@@ -217,6 +225,26 @@ begin
                         Plus (J) := new Real_Array (1 .. Width * Height);
                         Real_Array'Read (SIO.Stream (File), Plus (J).all);
                      end loop;
+                     if Doubled then
+                        declare
+                           R2, S2 : Real_Array (1 .. N);
+                           P2     : Real_Array (1 .. Width * Height);
+                           M2     : Real_Array (1 .. Width * Height);
+                        begin
+                           Real_Array'Read (SIO.Stream (Double), R2);
+                           Real_Array'Read (SIO.Stream (Double), S2);
+                           Real_Array'Read (SIO.Stream (Double), P2);   --  its still, unused
+                           for J in 1 .. N loop
+                              Real_Array'Read (SIO.Stream (Double), M2);
+                              Real_Array'Read (SIO.Stream (Double), P2);
+                              --  (Plus - Minus) / (2 d) made (4 D (d) - D (2 d)) / 3 with D (h) the change over 2 h
+                              for K in M2'Range loop
+                                 Plus (J) (K) := Minus (J) (K)
+                                   + (8.0 * (Plus (J) (K) - Minus (J) (K)) - (P2 (K) - M2 (K))) / 6.0;
+                              end loop;
+                           end loop;
+                        end;
+                     end if;
                   else
                      for J in 1 .. N loop
                         declare
@@ -276,6 +304,9 @@ begin
             end loop;
             if Cache_Name /= "" then
                SIO.Close (File);
+            end if;
+            if Doubled then
+               SIO.Close (Double);
             end if;
             --  The arm back at rest: the other arm is seen at its own rest by this one's pictures.
             for J in 1 .. N loop
@@ -352,9 +383,9 @@ begin
       function Cache_Of (Name : String) return String is
         (if Ada.Environment_Variables.Exists (Name) then Ada.Environment_Variables.Value (Name) else "");
    begin
-      Gather (Arm, Cache_Of ("FLOW_CACHE"), Sets (1));
+      Gather (Arm, Cache_Of ("FLOW_CACHE"), Sets (1), Cache_Of ("FLOW_RICHARDSON"));
       if Both then
-         Gather (3 - Arm, Cache_Of ("FLOW_CACHE2"), Sets (2));
+         Gather (3 - Arm, Cache_Of ("FLOW_CACHE2"), Sets (2), Cache_Of ("FLOW_RICHARDSON2"));
       end if;
       --  The model at the truth (the first arm): the residuals the true eye leaves, with the joints as given and with
       --  every joint's sense the other way (a convention of the fake's turns against the fit's).
