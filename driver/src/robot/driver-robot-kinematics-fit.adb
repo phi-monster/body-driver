@@ -14,6 +14,7 @@ with Driver.Robot.Kinematics.Errors;
 with Driver.Alignment;
 with Driver.Stats;
 with Driver.Uncertain;
+with Driver.Workers;
 
 package body Driver.Robot.Kinematics.Fit is
 
@@ -58,7 +59,7 @@ package body Driver.Robot.Kinematics.Fit is
       Perp (W, E1, E2);
    end Across;
 
-   function Rot (W : Vec3; Theta : Real) return Mat3 is (Driver.Numerics.Exp (Theta * W));
+   function Rot (W : Vec3; Theta : Real) return Mat3 is (Driver.Numerics.Exp (Scaled (Theta, W)));
 
    function Dot (A, B : Vec3) return Real renames Driver.Numerics.Dot;
 
@@ -82,6 +83,20 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
       return T;
    end Eye_At;
+
+   --  A joint's step at a reading change: its turn about its axis through its point, or its slide along it.
+   function Step_Of (A : Joint; Change : Real) return Rigid is
+      Theta : constant Real := A.C * Change;
+   begin
+      if A.Slide then
+         return (Rotation => Identity3, Translation => [Theta * A.W (1), Theta * A.W (2), Theta * A.W (3)]);
+      end if;
+      declare
+         R : constant Mat3 := Rot (A.W, Theta);
+      begin
+         return (Rotation => R, Translation => Minus (A.P, Times (R, A.P)));
+      end;
+   end Step_Of;
 
    --  How a point of eye A's frame appears in eye B's: X_B = R X_A + T.
    procedure Relative (A, B : Rigid; R : out Mat3; T : out Vec3) is
@@ -171,7 +186,8 @@ package body Driver.Robot.Kinematics.Fit is
    --  search of stage 1 bent the lens to 123 px to meet it). The penalty for a sighting behind its vanishing
    --  point (Reprojected's Dv) is one-sided and is not shared out.
    procedure Share_Out (Du : in out Real_Array) is
-      Mu : constant Real := Driver.Stats.Median (Du);
+      Copy : Real_Array := Du;   --  a keyframe's sightings: on the stack
+      Mu   : constant Real := Driver.Stats.Median_In_Place (Copy);
    begin
       for I in Du'Range loop
          Du (I) := Du (I) - Mu;
@@ -271,6 +287,56 @@ package body Driver.Robot.Kinematics.Fit is
    --  noise whose median is Median: the median of |r| is q sigma with q the
    --  normal's upper quartile, and a sample median varies by
    --  1 / (2 sqrt (N) f) with f the density there, 2 phi (q) / sigma.
+   --  Whether the sightings determine a joint, by the variances of its axis's tilt along the two directions across
+   --  it and of its reading scale C: the axis known to a cone whose Z-sigma edge stays within a quarter turn of it,
+   --  and the scale significant against its uncertainty.
+   function Joint_Determined (Tilt_1, Tilt_2, Scale_Variance, C : Real) return Boolean is
+     (Driver.Conventions.Z * Sqrt (Tilt_1 + Tilt_2) < Ada.Numerics.Pi / 2.0
+      and then Driver.Uncertain.Significant (C, Sqrt (Scale_Variance)));
+
+   --  Whether a lens's aspect and distortion (the logarithm of Fy over Fx, K1, K2) are significant together by the
+   --  fit's covariance (R.Covariance, which holds how the sightings' errors depend on each other): a chi square on
+   --  the three as rare as Z. Not when the covariance is not the fit's of N joints.
+   function Extras_Significant (L : Lens; R : Fit_Report; N : Natural) return Boolean is
+      Reduced : constant Natural := Terms (N);
+   begin
+      if Natural (R.Covariance.Length) /= Reduced * Reduced then
+         return False;
+      end if;
+      declare
+         function V (P, Q : Positive) return Real is
+           (R.Covariance (R.Covariance.First_Index + (P - 1) * Reduced + Q - 1));
+         X  : constant Real_Vector (1 .. 3) := [Ln (L.Fy / L.Fx), L.K1, L.K2];
+         C  : Driver.Numerics.Arrays.Real_Matrix (1 .. 3, 1 .. 3);
+         Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. 3, 1 .. 3);
+         Pd : Boolean;
+      begin
+         --  The aspect's logarithm is the second focal length's less the first's.
+         C (1, 1) := V (1, 1) + V (2, 2) - 2.0 * V (1, 2);
+         C (1, 2) := V (2, 5) - V (1, 5);
+         C (1, 3) := V (2, 6) - V (1, 6);
+         C (2, 2) := V (5, 5);
+         C (2, 3) := V (5, 6);
+         C (3, 3) := V (6, 6);
+         C (2, 1) := C (1, 2);
+         C (3, 1) := C (1, 3);
+         C (3, 2) := C (2, 3);
+         Driver.Numerics.Dense.Cholesky (C, Lf, Pd);
+         if not Pd then
+            return False;
+         end if;
+         declare
+            Y   : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, X);
+            Chi : Real := 0.0;
+         begin
+            for I in X'Range loop
+               Chi := Chi + X (I) * Y (I);
+            end loop;
+            return Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, X'Length) > Driver.Conventions.Z;
+         end;
+      end;
+   end Extras_Significant;
+
    function Median_Error (Median : Real; Count : Positive) return Real is
       Q     : constant Real := Upper_Quartile;
       Sigma : constant Real := Median / Q;
@@ -279,84 +345,91 @@ package body Driver.Robot.Kinematics.Fit is
       return Sigma / (2.0 * Sqrt (Real (Count)) * F);
    end Median_Error;
 
-   --  The scale a residual is judged at, whose own sighting has a stated standard deviation Own: what the model leaves
-   --  of any sighting (Floor) and what the matcher states of this one, as variances.
-   function Scale_Of (Floor, Own : Real) return Real is (Real'Max (Sqrt (Floor ** 2 + Own ** 2), Real'Model_Small));
+   function Scale_Of (Model : Error_Model; Own : Real) return Real is
+     (Real'Max (Sqrt (Model.Floor ** 2 + (Model.Gain * Own) ** 2), Real'Model_Small));
 
-   --  How many degrees of freedom the scale a residual is judged at rests on, as Scale_Of makes it: the sighting's own
-   --  standard deviation rests on Own_Freedom of them and the floor on none to speak of (it is read from thousands of
-   --  residuals), so the scale's variance has as many as the Welch-Satterthwaite formula gives; none (the scale is
-   --  known) when the sighting's own is.
-   function Scale_Freedom (Floor, Own : Real; Own_Freedom : Natural) return Natural is
-     (if Own_Freedom = 0 or else Own <= 0.0 then 0
-      else Driver.Uncertain.Satterthwaite_Count (Real (Own_Freedom) * ((Floor ** 2 + Own ** 2) / Own ** 2) ** 2));
-
-   --  The floor of the scales the residuals R are judged at, beside the standard deviations Own their sightings
-   --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
-   --  residual of the size typical of its sighting is typical. With none stated it is Noise_Of; a floor of zero
-   --  when what the sightings state accounts for the residuals by itself.
-   function Floor_Of (R, Own : Real_Array) return Real is
+   --  What the matcher states of a sighting rests on up to three other fits of its patch (the aligner's variants) and
+   --  says little of how far the sighting errs: against the fake robot's truth (10-19), the sightings stating under a
+   --  quarter of a pixel erred a median 0.37 to 0.64 px, those stating 1 to 2 px 0.66 to 2.1 px (w18's two arms and
+   --  q15's second). How much of it the residuals bear out is read beside the floor, and both, read from thousands of
+   --  residuals, are judged as known. Judged beside a floor alone at Student's t of the variants' three degrees of
+   --  freedom (nine scales at Z), a sighting stating 1.4 px stood 13 px off its fit and was kept; the tracks' fits kept
+   --  76 and 91 % of the sightings the truth puts more than 4 px off (w18's arm 1, q15's arm 2) and dropped 0.6 and
+   --  5.8 % of those within 1.5 px; at the floor and gain read so (gains of 0.50 and none), 46 and 45 % kept and 3.1
+   --  and 1.7 % dropped, and w18's arm 2, its order untold among 17, untold among 2 (its dumped fits replayed).
+   --  At a gain, the floor is a median: a residual lies within Typical scales when the part of its square, over
+   --  Typical's, that the gain times what is stated leaves is at most the floor's square, and half of them do at the
+   --  median of those parts. The gain is then halved toward the one at which the half that states the more lies at
+   --  Typical scales by its median: the larger the gain, the larger that half's scales against the rest's, whose
+   --  median the floor holds.
+   function Model_Of (R, Own : Real_Array) return Error_Model is
       Typical : constant Real := Upper_Quartile;
-      High    : constant Real := Noise_Of (R);
-      Low     : Real := 0.0;
-      Top     : Real := High;
+      N       : constant Natural := R'Length;
+      Cut     : Real := 0.0;   --  the median of what is stated: the half that states the more stands at or above it
+      Part    : Real_Access;
 
-      --  Whether the median of the residuals over their scales at that floor is above the Gaussian's, told by
-      --  counting them as Driver.Stats.Median would take it, without selecting it: of an odd count it is above
-      --  when fewer than its rank lie at or below; of an even count, when fewer than half do, or when exactly half
-      --  do and the mean of the greatest of them and the least of the rest is above. Each step of the bisection took
-      --  a median of every residual: 1.1 s of the fit's thread of 19 s (s02's dump replayed and sampled, 10-16).
-      function Above_Typical (Floor : Real) return Boolean is
-         N       : constant Natural := R'Length;
+      function Floor_At (Gain : Real) return Real is
+      begin
+         for I in 1 .. N loop
+            Part (I) := (R (R'First + I - 1) / Typical) ** 2 - (Gain * Own (Own'First + I - 1)) ** 2;
+         end loop;
+         return Sqrt (Real'Max (0.0, Driver.Stats.Median (Part.all)));
+      end Floor_At;
+
+      --  Whether the half that states the more lies beyond Typical scales by its median, at Gain and its floor.
+      function Above_Typical (Gain : Real) return Boolean is
+         Model   : constant Error_Model := (Floor => Floor_At (Gain), Gain => Gain);
          At_Most : Natural := 0;
-         Lower   : Real := -Real'Last;   --  the greatest ratio at or below Typical
-         Upper   : Real := Real'Last;    --  the least above it
+         Total   : Natural := 0;
       begin
          for I in 1 .. N loop
             declare
-               X : constant Real := abs R (R'First + I - 1) / Scale_Of (Floor, Own (Own'First + I - 1));
+               O : constant Real := Own (Own'First + I - 1);
             begin
-               if X <= Typical then
-                  At_Most := At_Most + 1;
-                  Lower := Real'Max (Lower, X);
-               else
-                  Upper := Real'Min (Upper, X);
+               if O > 0.0 and then O >= Cut then
+                  Total := Total + 1;
+                  if abs R (R'First + I - 1) <= Typical * Scale_Of (Model, O) then
+                     At_Most := At_Most + 1;
+                  end if;
                end if;
             end;
          end loop;
-         if N mod 2 = 1 then
-            return At_Most < (N + 1) / 2;
-         elsif At_Most /= N / 2 then
-            return At_Most < N / 2;
-         else
-            return (Lower + Upper) / 2.0 > Typical;
-         end if;
+         return 2 * At_Most < Total;
       end Above_Typical;
+
+      Low, High : Real := 0.0;
+      Result    : Error_Model;
    begin
-      if R'Length = 0 or else High <= 0.0 then
-         return 0.0;
+      if N = 0 then
+         return (Floor => 0.0, Gain => 1.0);
+      elsif (for all O of Own => O = 0.0) then
+         return (Floor => Noise_Of (R), Gain => 1.0);
       end if;
-      if (for all O of Own => O = 0.0) then
-         return High;
+      Cut := Driver.Stats.Median (Own);
+      Part := new Real_Array (1 .. N);
+      if Above_Typical (0.0) then
+         High := 1.0;
+         while Above_Typical (High) loop
+            Low := High;
+            High := 2.0 * High;
+         end loop;
+         for Step in 1 .. Real'Machine_Mantissa loop
+            declare
+               Middle : constant Real := (Low + High) / 2.0;
+            begin
+               exit when Middle <= Low or else Middle >= High;
+               if Above_Typical (Middle) then
+                  Low := Middle;
+               else
+                  High := Middle;
+               end if;
+            end;
+         end loop;
       end if;
-      if not Above_Typical (0.0) then
-         return 0.0;
-      end if;
-      --  The ratio falls as the floor rises, from above the Gaussian's at none to below it at High.
-      for Step in 1 .. Real'Machine_Mantissa loop
-         declare
-            Middle : constant Real := (Low + Top) / 2.0;
-         begin
-            exit when Middle <= Low or else Middle >= Top;
-            if Above_Typical (Middle) then
-               Low := Middle;
-            else
-               Top := Middle;
-            end if;
-         end;
-      end loop;
-      return Top;
-   end Floor_Of;
+      Result := (Floor => Floor_At (High), Gain => High);
+      Free (Part);
+      return Result;
+   end Model_Of;
 
    function Huber (Z_Value : Real) return Real is
      (if abs Z_Value <= Driver.Conventions.Z then 1.0 else Driver.Conventions.Z / abs Z_Value);
@@ -635,6 +708,11 @@ package body Driver.Robot.Kinematics.Fit is
    --  it: measuring how the sightings' errors depend on each other cost a third of every refinement's time, made
    --  for the profile's every step and never read (the fit's profile, 10-15). Without it the estimate is reported
    --  not determined.
+   --  Pinhole: the lens is a pinhole with square pixels, its second focal length its first and no distortion; the
+   --  terms it does not have stay out of the solution and of the covariance (Fit's stage 5 keeps them only when
+   --  they are significant).
+   --  Judge_Floor, Judge_Gain: the error model Report.Cost_Judged is taken at (another fit's, to compare with it);
+   --  the refinement's own when the floor is 0.
    procedure Refine_Tracks
      (Changes      : Driver.Numerics.Arrays.Real_Matrix;
       Sight        : Sighting_Array;
@@ -643,7 +721,10 @@ package body Driver.Robot.Kinematics.Fit is
       L            : in out Lens;
       Report       : in out Fit_Report;
       Focal_Within : Real := 0.0;
-      Spread       : Boolean := True)
+      Spread       : Boolean := True;
+      Pinhole      : Boolean := False;
+      Judge_Floor  : Real := 0.0;
+      Judge_Gain   : Real := 0.0)
    is
       N         : constant Natural := Joints'Length;
       --  The focal lengths the fit is given are the focal search's (stage 1), told within Focal_Within in the
@@ -676,8 +757,9 @@ package body Driver.Robot.Kinematics.Fit is
       end Changes_Of;
 
       function Lens_Of (X : Real_Array) return Lens is
-        ((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + 1)), Cx => X (X'First + 2), Cy => X (X'First + 3),
-          K1 => X (X'First + 4), K2 => X (X'First + 5)));
+        ((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + (if Pinhole then 0 else 1))), Cx => X (X'First + 2),
+          Cy => X (X'First + 3), K1 => (if Pinhole then 0.0 else X (X'First + 4)),
+          K2 => (if Pinhole then 0.0 else X (X'First + 5))));
 
       function Joints_Of (X : Real_Array) return Joint_Array is
          Out_J : Joint_Array := Base;
@@ -843,7 +925,22 @@ package body Driver.Robot.Kinematics.Fit is
          --  nonlinear descent then starts from lengths that agree with one another, which the stages before it, that
          --  tell the axes' directions and not their distances apart, leave to chance.
          procedure Linear_Start is
-            Reduced : constant Positive := 2 * N;
+            --  The unknowns: a turning joint's two (its axis point across its axis, on E_1 and E_2), a sliding
+            --  joint's one (its length per reading unit along its direction, E_1 that direction).
+            function Slides (J : Positive) return Boolean is (Joints (Joints'First + J - 1).Slide);
+            function Firsts return Natural_Array is
+               Result : Natural_Array (1 .. N);
+               Before : Natural := 0;
+            begin
+               for K in 1 .. N loop
+                  Result (K) := Before + 1;
+                  Before := Before + (if Slides (K) then 1 else 2);
+               end loop;
+               return Result;
+            end Firsts;
+            First_Index : constant Natural_Array (1 .. N) := Firsts;
+            function First_Of (J : Positive) return Positive is (First_Index (J));
+            Reduced : constant Positive := First_Of (N) + (if Slides (N) then 0 else 1);
             type Mat3_Array is array (Positive range <>) of Mat3;
             type Mat3_Access is access Mat3_Array;
             procedure Free is new Ada.Unchecked_Deallocation (Mat3_Array, Mat3_Access);
@@ -868,7 +965,8 @@ package body Driver.Robot.Kinematics.Fit is
 
             --  The axes' points of q, in the frame of the eye at rest.
             function Point_Of (J : Positive; V : Real_Vector) return Vec3 is
-              (V (2 * J - 1) * E_1 (J) + V (2 * J) * E_2 (J));
+              (if Slides (J) then V (First_Of (J)) * E_1 (J)
+               else V (First_Of (J)) * E_1 (J) + V (First_Of (J) + 1) * E_2 (J));
 
             --  Where the keyframe's eye stands for the points q gives the joints.
             function Translation_Of (F : Positive; V : Real_Vector) return Vec3 is
@@ -993,14 +1091,14 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   declare
-                     Floor : constant Real := (if Used > 0 then Floor_Of (Sub (1 .. Used), Own_Sub (1 .. Used)) else 0.0);
+                     Model : constant Error_Model :=
+                       (if Used > 0 then Model_Of (Sub (1 .. Used), Own_Sub (1 .. Used)) else (Floor => 0.0, Gain => 1.0));
                   begin
                      for I in 1 .. S loop
                         declare
-                           Scale : constant Real := Scale_Of (Floor, Own (I));
+                           Scale : constant Real := Scale_Of (Model, Own (I));
                            Seen  : constant Boolean := Rho (I) < Real'Last and then Scale > Real'Model_Small;
-                           Fits  : constant Boolean := Seen and then not Driver.Uncertain.Significant (Rho (I), Scale,
-                                    Scale_Freedom (Floor, Own (I), Sight (Sight'First + I - 1).Own_Freedom));
+                           Fits  : constant Boolean := Seen and then not Driver.Uncertain.Significant (Rho (I), Scale);
                         begin
                            Weight (I) := (if Seen then Huber (Rho (I) / Scale) else 0.0);
                            if Fits /= Fit_Now (I) then
@@ -1027,9 +1125,10 @@ package body Driver.Robot.Kinematics.Fit is
                   for J of Chain loop
                      declare
                         A    : Joint renames Joints (Joints'First + J - 1);
-                        Step : constant Mat3 := Rot (A.W, A.C * Change (J));
+                        Step : constant Mat3 := (if A.Slide then Identity3 else Rot (A.W, A.C * Change (J)));
                      begin
-                        Maps ((F - 1) * N + J) := Turn * (Identity3 - Step);
+                        --  A slide moves the eye by its reading change along its direction, its length the unknown.
+                        Maps ((F - 1) * N + J) := (if A.Slide then Change (J) * Turn else Turn * (Identity3 - Step));
                         Turn := Turn * Step;
                      end;
                   end loop;
@@ -1038,7 +1137,12 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end loop;
             for J in 1 .. N loop
-               Perp (Joints (Joints'First + J - 1).W, E_1 (J), E_2 (J));
+               if Slides (J) then
+                  E_1 (J) := Joints (Joints'First + J - 1).W;
+                  E_2 (J) := Zero3;
+               else
+                  Perp (Joints (Joints'First + J - 1).W, E_1 (J), E_2 (J));
+               end if;
             end loop;
             for I in 1 .. S loop
                declare
@@ -1053,13 +1157,13 @@ package body Driver.Robot.Kinematics.Fit is
                      Along (I, D) := A (D);
                   end loop;
                   for J in 1 .. N loop
-                     for Axis in 1 .. 2 loop
+                     for Axis in 1 .. (if Slides (J) then 1 else 2) loop
                         declare
                            Col : constant Vec3 :=
                              Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));
                         begin
                            for D in 1 .. 3 loop
-                              Across_Columns (3 * I - 3 + D, 2 * J - 2 + Axis) := Col (D);
+                              Across_Columns (3 * I - 3 + D, First_Of (J) + Axis - 1) := Col (D);
                            end loop;
                         end;
                      end loop;
@@ -1082,15 +1186,13 @@ package body Driver.Robot.Kinematics.Fit is
                   end;
                end loop;
                declare
-                  Floor : constant Real := Floor_Of (Rs.all, Own.all);
+                  Model : constant Error_Model := Model_Of (Rs.all, Own.all);
                begin
                   for I in 1 .. S loop
                      declare
-                        Scale : constant Real := Scale_Of (Floor, Own (I));
+                        Scale : constant Real := Scale_Of (Model, Own (I));
                      begin
-                        if not Driver.Uncertain.Significant (Rs (I), Scale,
-                                                          Scale_Freedom (Floor, Own (I), Sight (Sight'First + I - 1).Own_Freedom))
-                        then
+                        if not Driver.Uncertain.Significant (Rs (I), Scale) then
                            Weight (I) := 1.0;
                         end if;
                      end;
@@ -1126,7 +1228,11 @@ package body Driver.Robot.Kinematics.Fit is
                   Size : constant Real := (if Now > 0.0 and then Old > 0.0 then Sqrt (Old / Now) else 1.0);
                begin
                   for J in 1 .. N loop
-                     Joints (Joints'First + J - 1).P := Size * Point_Of (J, Q);
+                     if Slides (J) then
+                        Joints (Joints'First + J - 1).C := Size * Q (First_Of (J));
+                     else
+                        Joints (Joints'First + J - 1).P := Size * Point_Of (J, Q);
+                     end if;
                   end loop;
                   for T in 1 .. Tracks loop
                      Has (T) := Saa (T) > 0.0 and then Lengths (T) > 0.0;
@@ -1174,7 +1280,6 @@ package body Driver.Robot.Kinematics.Fit is
                   Owns  : Real_Access := new Real_Array (1 .. 2 * Used);   --  what the matcher stated, per residual
                   Scales : Real_Access := new Real_Array (1 .. 2 * Used);  --  what each residual is judged at
                   K     : Natural := 0;
-                  Sigma : Real;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
                   --  The sightings' cost at the parameters Xv, and the focal search's measurement's (Prior_W).
@@ -1196,10 +1301,13 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   Residuals (X, Depth.all, Index, R0.all);
-                  Sigma := Floor_Of (R0.all, Owns.all);
-                  for I in 1 .. 2 * Used loop
-                     Scales (I) := Scale_Of (Sigma, Owns (I));
-                  end loop;
+                  declare
+                     Model : constant Error_Model := Model_Of (R0.all, Owns.all);
+                  begin
+                     for I in 1 .. 2 * Used loop
+                        Scales (I) := Scale_Of (Model, Owns (I));
+                     end loop;
+                  end;
                   if (for all Scale of Scales.all => Scale <= Real'Model_Small) then
                      Free (Index);
                      Free (R0);
@@ -1228,12 +1336,21 @@ package body Driver.Robot.Kinematics.Fit is
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
                            Rp : Real_Access := new Real_Array'(R0.all);
                         begin
-                           Xp (P) := Xp (P) + H;
-                           Residuals (Xp, Depth.all, Index, Rp.all,
-                                      Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));
-                           for I in 1 .. 2 * Used loop
-                              Jp (I, P) := (Rp (I) - R0 (I)) / H;
-                           end loop;
+                           --  The terms a pinhole with square pixels has not, the lens's second focal length and its two
+                           --  distortion terms, have no column, and a term with none stays where it is (a sliding joint's
+                           --  axis point's).
+                           if Pinhole and then P in 2 | 5 | 6 then
+                              for I in 1 .. 2 * Used loop
+                                 Jp (I, P) := 0.0;
+                              end loop;
+                           else
+                              Xp (P) := Xp (P) + H;
+                              Residuals (Xp, Depth.all, Index, Rp.all,
+                                         Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));
+                              for I in 1 .. 2 * Used loop
+                                 Jp (I, P) := (Rp (I) - R0 (I)) / H;
+                              end loop;
+                           end if;
                            Free (Rp);
                         end Column;
                         procedure Columns is new Driver.Parallel_For (Column);
@@ -1276,6 +1393,8 @@ package body Driver.Robot.Kinematics.Fit is
                         declare
                            Weights  : Real_Access := new Real_Array (1 .. 2 * Used);
                            Track_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
+                           Frame_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
+                           Moved_In : Flag_Grid_Access := new Flag_Grid (1 .. Frames, 1 .. N);
                            procedure Row (P : Positive) is
                            begin
                               if P > Count then
@@ -1292,11 +1411,19 @@ package body Driver.Robot.Kinematics.Fit is
                                        if Jp (I, P) /= 0.0 then
                                           declare
                                              W : constant Real := Weights (I);
+                                             F : constant Positive := Frame_Of (I);
                                           begin
                                              Sum_G := Sum_G - W * Jp (I, P) * R0 (I);
                                              Bm (P, Track_Of (I)) := Bm (P, Track_Of (I)) + W * Jp (I, P) * Jd (I);
-                                             for Q in P .. Count loop
+                                             for Q in P .. Natural'Min (6, Count) loop
                                                 Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                             end loop;
+                                             for J in 1 .. N loop
+                                                if Moved_In (F, J) and then 6 + Per_Joint * J >= P then
+                                                   for Q in Natural'Max (P, 7 + Per_Joint * (J - 1)) .. 6 + Per_Joint * J loop
+                                                      Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                                   end loop;
+                                                end if;
                                              end loop;
                                           end;
                                        end if;
@@ -1313,10 +1440,18 @@ package body Driver.Robot.Kinematics.Fit is
                            for I in 1 .. 2 * Used loop
                               Weights (I) := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
                               Track_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                              Frame_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Frame;
+                           end loop;
+                           for F in 1 .. Frames loop
+                              for J in 1 .. N loop
+                                 Moved_In (F, J) := Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1) /= 0.0;
+                              end loop;
                            end loop;
                            Rows (1, Count + 1);
                            Free (Weights);
                            Free (Track_Of);
+                           Free (Frame_Of);
+                           Free (Moved_In);
                         end;
                         --  The focal search's measurement of the two focal lengths (Prior_W, the header).
                         if Prior_W > 0.0 then
@@ -1494,6 +1629,31 @@ package body Driver.Robot.Kinematics.Fit is
                                        end loop;
                                     end if;
                                  end loop;
+                                 --  A sliding joint has no axis point: its two terms of one are no terms of it, each
+                                 --  apart from every other with information of its own unit (its covariance then
+                                 --  nought, the sandwich's gradients of it being nought).
+                                 for J in 1 .. N loop
+                                    if Joints (Joints'First + J - 1).Slide then
+                                       for P in 6 + 5 * (J - 1) + 3 .. 6 + 5 * (J - 1) + 4 loop
+                                          for Q in 1 .. Reduced loop
+                                             Ar (P, Q) := 0.0;
+                                             Ar (Q, P) := 0.0;
+                                          end loop;
+                                          Ar (P, P) := 1.0;
+                                       end loop;
+                                    end if;
+                                 end loop;
+                                 if Pinhole then
+                                    for P in 1 .. 6 loop
+                                       if P in 2 | 5 | 6 then
+                                          for Q in 1 .. Reduced loop
+                                             Ar (P, Q) := 0.0;
+                                             Ar (Q, P) := 0.0;
+                                          end loop;
+                                          Ar (P, P) := 1.0;
+                                       end if;
+                                    end loop;
+                                 end if;
                                  declare
                                     Scaled : Driver.Numerics.Arrays.Real_Matrix (1 .. Reduced, 1 .. Reduced);
                                  begin
@@ -1706,6 +1866,7 @@ package body Driver.Robot.Kinematics.Fit is
                All_R     : Real_Access := new Real_Array (1 .. 2 * S);
                All_Own   : Real_Access := new Real_Array (1 .. 2 * S);
                Sigma     : Real;
+               Model     : Error_Model;
                Now_Changed : Natural := 0;
                Fit_Abs   : Real_Access;
                Kf        : Natural := 0;
@@ -1715,16 +1876,63 @@ package body Driver.Robot.Kinematics.Fit is
                   All_Own (2 * I - 1) := Sight (Sight'First + I - 1).Own;
                   All_Own (2 * I) := Sight (Sight'First + I - 1).Own;
                end loop;
+               --  A track none of whose sightings fit has its depth again from the parameters as they stand, by least
+               --  squares along the lines of sight of its sightings (as the start solves every depth), before they are
+               --  judged: the depth it kept was made for parameters long gone, and judged by it they never fit again. A
+               --  drone's fit begun at the focal search's 234 px (the truth 173) ended with 2900 of its 3755 sightings
+               --  fitting, where the profile's steps begun from its end kept 3360 (the bench, 10-20).
+               declare
+                  Lx      : constant Lens := Lens_Of (X);
+                  Jx      : constant Joint_Array := Joints_Of (X);
+                  Views   : Rigid_Access := new Rigid_Array (1 .. Frames);
+                  Fitting : Flags_Access := new Flags'(1 .. Tracks => False);
+                  Saa_T   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+                  Sac_T   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+               begin
+                  for I in 1 .. S loop
+                     if Inlier (I) then
+                        Fitting (Sight (Sight'First + I - 1).Track) := True;
+                     end if;
+                  end loop;
+                  for F in 1 .. Frames loop
+                     Views (F) := Eye_At (Jx, Chain, Changes_Of (F));
+                  end loop;
+                  for I in 1 .. S loop
+                     declare
+                        Sg : Sighting renames Sight (Sight'First + I - 1);
+                     begin
+                        if Has (Sg.Track) and then not Fitting (Sg.Track) then
+                           declare
+                              Back : constant Mat3 := Transpose (Views (Sg.Frame).Rotation);
+                              B    : constant Vec3 := Ray (Lx, Sg.U, Sg.V);
+                              A    : constant Vec3 := Cross (B, Back * Ray (Lx, Sg.U0, Sg.V0));
+                              C    : constant Vec3 := Cross (B, Back * Views (Sg.Frame).Translation);
+                           begin
+                              Saa_T (Sg.Track) := Saa_T (Sg.Track) + A * A;
+                              Sac_T (Sg.Track) := Sac_T (Sg.Track) + A * C;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+                  for T in 1 .. Tracks loop
+                     if Has (T) and then not Fitting (T) and then Saa_T (T) > 0.0 and then Sac_T (T) > 0.0 then
+                        Depth (T) := Ln (Sac_T (T) / Saa_T (T));
+                     end if;
+                  end loop;
+                  Free (Views);
+                  Free (Fitting);
+                  Free (Saa_T);
+                  Free (Sac_T);
+               end;
                Residuals (X, Depth.all, All_Index, All_R.all);
-               Sigma := Floor_Of (All_R.all, All_Own.all);
+               Model := Model_Of (All_R.all, All_Own.all);
+               Sigma := Model.Floor;
                for I in 1 .. S loop
                   declare
-                     Scale : constant Real := Scale_Of (Sigma, All_Own (2 * I));
-                     Freedom : constant Natural :=
-                       Scale_Freedom (Sigma, All_Own (2 * I), Sight (Sight'First + I - 1).Own_Freedom);
+                     Scale : constant Real := Scale_Of (Model, All_Own (2 * I));
                      Fits  : constant Boolean := Has (Sight (Sight'First + I - 1).Track) and then Scale > Real'Model_Small
-                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale, Freedom)
-                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale, Freedom);
+                       and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)
+                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);
                   begin
                      if Fits /= Inlier (I) then
                         Now_Changed := Now_Changed + 1;
@@ -1736,6 +1944,7 @@ package body Driver.Robot.Kinematics.Fit is
                   end;
                end loop;
                Report.Sigma_Px := Sigma;
+               Report.Own_Gain := Model.Gain;
                Report.Used := Kf;
                --  Once the inliers stand (none changed in this pass), what the model leaves unexplained, by
                --  keyframe, for the log: the root mean square of the inliers' residuals in pixels. A keyframe
@@ -1793,6 +2002,30 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                   Report.All_Median_Px := Driver.Stats.Median (Fit_Abs.all);
                   Report.All_Count := S;
+                  --  And the robust cost of every sighting at the scales asked for, by which the focal length's profile
+                  --  tells a step from the solution.
+                  declare
+                     Judge : constant Error_Model :=
+                       (if Judge_Floor > 0.0 then (Floor => Judge_Floor, Gain => Judge_Gain) else Model);
+                     Cost  : Real := 0.0;
+                  begin
+                     for I in 1 .. S loop
+                        declare
+                           Scale : constant Real := Scale_Of (Judge, All_Own (2 * I));
+                        begin
+                           if Scale > Real'Model_Small then
+                              --  Beyond Z sigmas a residual counts as one at Z: a sighting that fits neither of two
+                              --  fits counts alike in both (one with no point, its residual a placeholder, made the
+                              --  desktop arm's solution 95345 above its own profile's steps, 10-20).
+                              Cost := Cost + Real'Min (Huber_Cost (All_R (2 * I - 1) / Scale), Huber_Cost (Driver.Conventions.Z))
+                                + Real'Min (Huber_Cost (All_R (2 * I) / Scale), Huber_Cost (Driver.Conventions.Z));
+                           end if;
+                        end;
+                     end loop;
+                     Report.Cost_Judged := Cost;
+                     Report.Judge_Floor := Judge.Floor;
+                     Report.Judge_Gain := Judge.Gain;
+                  end;
                   Free (Fit_Abs);
                end if;
                Free (All_Index);
@@ -1856,12 +2089,13 @@ package body Driver.Robot.Kinematics.Fit is
          --  significant against its uncertainty, and each axis known to a
          --  cone whose Z-sigma edge stays within a quarter turn of it.
          Report.Determined := Determined;
+         Report.Pinhole := Pinhole;
          if not Determined then
             Report.Why := Why_Not;
          else
             Report.Focal_Sigma := L.Fx * Sqrt (Variance (1));
             if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (Variance (1)))
-              or else not Driver.Uncertain.Significant (L.Fy, L.Fy * Sqrt (Variance (2)))
+              or else not Driver.Uncertain.Significant (L.Fy, L.Fy * Sqrt (Variance (if Pinhole then 1 else 2)))
             then
                Report.Determined := False;
                Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
@@ -1876,8 +2110,7 @@ package body Driver.Robot.Kinematics.Fit is
                   C    : constant Real := Joints (Joints'First + J - 1).C;
                begin
                   if Report.Determined
-                    and then (Driver.Conventions.Z * Tilt >= Ada.Numerics.Pi / 2.0
-                              or else not Driver.Uncertain.Significant (C, Sqrt (Variance (O + 5))))
+                    and then not Joint_Determined (Variance (O + 1), Variance (O + 2), Variance (O + 5), C)
                   then
                      declare
                         --  What the joint had to show itself by: the sightings that fit in the keyframes that moved
@@ -2035,6 +2268,12 @@ package body Driver.Robot.Kinematics.Fit is
          Put (File, C'Image);
       end loop;
       New_Line (File);
+      for T of From.Slide_Turns loop
+         for X of T loop
+            Put_Real (X);
+         end loop;
+      end loop;
+      New_Line (File);
       Close (File);
    end Dump_Inputs;
 
@@ -2137,9 +2376,13 @@ package body Driver.Robot.Kinematics.Fit is
       Counts : array (1 .. N) of Natural := [others => 0];
       --  The joints along the arm, from the base (stage 4 finds it; the joints alone are fitted before it).
       Order  : Chain_Order (1 .. N) := [for K in 1 .. N => K];
-      --  Every track's depth from the keyframes of one joint each (stage 4).
-      Track_Depths : Real_Lists.Vector;
       Usable : Flags (1 .. N) := [others => False];
+      --  Every track's depth from the keyframes of one joint each (stage 4's start), which no order changes.
+      Alone_Depths : Real_Lists.Vector;
+      --  Per joint taken for a slide, the turn per reading unit (its axis times its rate) its own keyframes were
+      --  explained by nearly as well: stage 1's, or the fit's begun from (Fit_Start); weighed against the slide once
+      --  the lens is refined (stage 4's start).
+      Slide_Turns : Vec3_Array (1 .. N) := [others => Zero3];
 
       --  How long each stage took, for the boot's account of where its time went (A98's second arm sat in its fit
       --  for more than 45 minutes with nothing to say where).
@@ -2176,21 +2419,21 @@ package body Driver.Robot.Kinematics.Fit is
 
       --  The eye at every keyframe under the joints.
       subtype Pose_Array is Rigid_Array (1 .. Frames);
-      procedure Poses_Of (Jx : Joint_Array; P : out Pose_Array) is
+      procedure Poses_Of (Jx : Joint_Array; P : out Pose_Array; C : Chain_Order := Order) is
       begin
          for Frame in 1 .. Frames loop
-            P (Frame) := Eye_At (Jx, Order, Changes_Of (Frame));
+            P (Frame) := Eye_At (Jx, C, Changes_Of (Frame));
          end loop;
       end Poses_Of;
 
       --  Lengths in model units: the eye positions over the unit's keyframes
       --  have a root mean square of one.
-      procedure Normalize (Jx : in out Joint_Array) is
+      procedure Normalize (Jx : in out Joint_Array; C : Chain_Order := Order) is
          Sum : Real := 0.0;
       begin
          for Frame in 1 .. Unit_Count loop
             declare
-               T : constant Vec3 := Eye_At (Jx, Order, Changes_Of (Frame)).Translation;
+               T : constant Vec3 := Eye_At (Jx, C, Changes_Of (Frame)).Translation;
             begin
                Sum := Sum + T * T;
             end;
@@ -2221,6 +2464,214 @@ package body Driver.Robot.Kinematics.Fit is
       Untold        : Joint_Pair_Lists.Vector;   --  the joints next to each other in it whose swap stage 4 did not tell
       Untold_Orders : Joint_Lists.Vector;        --  every order stage 4 did not tell from it (Fit_Report.Untold_Orders)
       Untold_Turns : Real_Lists.Vector;          --  per pair of Untold, its two joints' turns that tell it best
+
+      --  The every-joint fit of the joints Jx in order C (the text where it is called says what it is and why): Jx in
+      --  model units after it, the noise its sightings that fit leave (Sigma_Out), how many fit, and the median
+      --  residual of those (Median). A procedure for the order search to fit each order it weighs as the fit does its
+      --  own (Search_Order): the tracks' refinement begun from the joints of the keyframes of one joint each, in an
+      --  order those keyframes cannot tell, set the keyframes of several joints aside as not fitting and never
+      --  fitted them (the bench's s36, 10-20: 1.2 px on them, the same order fitted after this 0.4).
+      procedure Together
+        (C : Chain_Order; Jx : in out Joint_Array; Lx : Lens; Sigma_Out : out Real; Used_Count : out Natural;
+         Median : out Real)
+      is
+         Per_Joint : constant := 6;
+         Count     : constant Positive := Per_Joint * N;
+         Inlier    : Flags_Access := new Flags'(1 .. S => False);
+         Base      : Joint_Array := Jx;
+         --  The choices of sightings made so far: a round that comes back to one of them is a cycle.
+         package Selection_Lists is new Ada.Containers.Vectors (Positive, Flags_Access);
+         procedure Free_Flags is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
+         Seen      : Selection_Lists.Vector;
+
+
+         function Joints_Of (X : Real_Array) return Joint_Array is
+            Out_J : Joint_Array := Base;
+         begin
+            for J in 1 .. N loop
+               declare
+                  O : constant Natural := X'First + Per_Joint * (J - 1);
+                  E1, E2 : Vec3;
+               begin
+                  Perp (Base (Base'First + J - 1).W, E1, E2);
+                  Out_J (Out_J'First + J - 1).W := Unit (Base (Base'First + J - 1).W + X (O) * E1 + X (O + 1) * E2);
+                  Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];
+                  Out_J (Out_J'First + J - 1).C := X (O + 5);
+               end;
+            end loop;
+            return Out_J;
+         end Joints_Of;
+
+         procedure To_X (Jx : Joint_Array; X : out Real_Array) is
+         begin
+            for J in 1 .. N loop
+               declare
+                  O : constant Natural := X'First + Per_Joint * (J - 1);
+               begin
+                  X (O) := 0.0;
+                  X (O + 1) := 0.0;
+                  X (O + 2) := Jx (Jx'First + J - 1).P (1);
+                  X (O + 3) := Jx (Jx'First + J - 1).P (2);
+                  X (O + 4) := Jx (Jx'First + J - 1).P (3);
+                  X (O + 5) := Jx (Jx'First + J - 1).C;
+               end;
+            end loop;
+         end To_X;
+
+         procedure Residuals_Of (Lx : Lens; Jx : Joint_Array; R : out Real_Array) is
+            Poses : Rigid_Access := new Pose_Array;
+         begin
+            Poses_Of (Jx, Poses.all, C);
+            for I in 1 .. S loop
+               declare
+                  Rr : Mat3;
+                  Tt : Vec3;
+               begin
+                  Relative (Poses (1), Poses (Sight (I).Frame), Rr, Tt);
+                  R (R'First + I - 1) := Sampson (Rr, Tt, Ray (Lx, Sight (I).U0, Sight (I).V0),
+                                                  Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);
+               end;
+            end loop;
+            Free (Poses);
+         end Residuals_Of;
+
+         X : Real_Array (1 .. Count);
+      begin
+         Sigma_Out := 0.0;
+         Used_Count := 0;
+         To_X (Jx, X);
+         loop
+            declare
+               All_R : Real_Access := new Real_Array (1 .. S);
+               Sigma : Real;
+               Now_Changed : Natural := 0;
+               Used  : Natural := 0;
+            begin
+               Residuals_Of (Lx, Joints_Of (X), All_R.all);
+               Sigma := Noise_Of (All_R.all);
+               --  A sighting fits when its residual is not significant against
+               --  the noise of all of them.
+               for I in 1 .. S loop
+                  declare
+                     Fits : constant Boolean := Sigma > 0.0 and then not Driver.Uncertain.Significant (All_R (I), Sigma);
+                  begin
+                     if Fits /= Inlier (I) then
+                        Now_Changed := Now_Changed + 1;
+                        Inlier (I) := Fits;
+                     end if;
+                     if Fits then
+                        Used := Used + 1;
+                     end if;
+                  end;
+               end loop;
+               Free (All_R);
+               Sigma_Out := Sigma;
+               Used_Count := Used;
+               --  Re-chosen until the choice no longer changes, or comes back to one made before (a cycle between
+               --  choices, each giving the same fit again: no round after it tells more; item 3), or too few are
+               --  left to fit.
+               exit when Now_Changed = 0 or else Used <= Count
+                 or else (for some Earlier of Seen => Earlier.all = Inlier.all);
+               Seen.Append (new Flags'(Inlier.all));
+               declare
+                  Kept : Sighting_Access := new Sighting_Array (1 .. Used);
+                  K    : Natural := 0;
+                  --  The lines of sight of every kept sighting's pixel and of its reference pixel through the lens the
+                  --  stage holds, made once: made again in every column of the Jacobian (Ray, Newton's method through the
+                  --  distortion) they were most of the stage's time (s29's driver sampled for 10 s in its fit, 10-17: 6165
+                  --  of the 6686 samples of this Evaluate in Ray).
+                  type Vec3_Array_Access is access Vec3_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Vec3_Array, Vec3_Array_Access);
+                  Own_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
+                  Ref_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
+                  Focal     : constant Real := (Lx.Fx + Lx.Fy) / 2.0;
+
+                  procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
+                     Poses : Rigid_Access := new Pose_Array;
+                     --  Per keyframe, its motion from the reference eye.
+                     type Motion is record
+                        Rr : Mat3;
+                        Tt : Vec3;
+                     end record;
+                     type Motion_Array is array (1 .. Frames) of Motion;
+                     type Motion_Access is access Motion_Array;
+                     procedure Free is new Ada.Unchecked_Deallocation (Motion_Array, Motion_Access);
+                     Motions : Motion_Access := new Motion_Array;
+                  begin
+                     Poses_Of (Joints_Of (Xv), Poses.all, C);
+                     for Frame in 1 .. Frames loop
+                        Relative (Poses (1), Poses (Frame), Motions (Frame).Rr, Motions (Frame).Tt);
+                     end loop;
+                     for I in 1 .. Used loop
+                        R (R'First + I - 1) := Sampson (Motions (Kept (I).Frame).Rr, Motions (Kept (I).Frame).Tt,
+                                                        Ref_Lines (I), Own_Lines (I), Focal);
+                     end loop;
+                     Free (Motions);
+                     Free (Poses);
+                  end Evaluate;
+
+                  procedure Solve is new Robust_Fit
+                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True, To_The_End => True);
+               begin
+                  for I in 1 .. S loop
+                     if Inlier (I) then
+                        K := K + 1;
+                        Kept (K) := Sight (I);
+                     end if;
+                  end loop;
+                  for I in 1 .. Used loop
+                     Own_Lines (I) := Ray (Lx, Kept (I).U, Kept (I).V);
+                     Ref_Lines (I) := Ray (Lx, Kept (I).U0, Kept (I).V0);
+                  end loop;
+                  Solve (X, Sigma);
+                  Free (Kept);
+                  Free (Own_Lines);
+                  Free (Ref_Lines);
+                  --  The axes' tangent planes anew at the solution, the points
+                  --  on them nearest the reference eye.
+                  Base := Joints_Of (X);
+                  for J of Base loop
+                     J.P := J.P - Dot (J.P, J.W) * J.W;
+                  end loop;
+                  To_X (Base, X);
+               end;
+            end;
+         end loop;
+         for Earlier of Seen loop
+            declare
+               F : Flags_Access := Earlier;
+            begin
+               Free_Flags (F);
+            end;
+         end loop;
+         Jx := Joints_Of (X);
+         Normalize (Jx, C);
+         declare
+            All_R : Real_Access := new Real_Array (1 .. S);
+            Fit_R : Real_Access := new Real_Array (1 .. S);
+            K     : Natural := 0;
+         begin
+            Residuals_Of (Lx, Jx, All_R.all);
+            for I in 1 .. S loop
+               if Inlier (I) then
+                  K := K + 1;
+                  Fit_R (K) := abs All_R (I);
+               end if;
+            end loop;
+            Median := 0.0;
+            if K > 0 then
+               declare
+                  Part : Real_Access := new Real_Array'(Fit_R (1 .. K));
+               begin
+                  Median := Driver.Stats.Median (Part.all);
+                  Free (Part);
+               end;
+            end if;
+            Free (All_R);
+            Free (Fit_R);
+         end;
+         Free (Inlier);
+      end Together;
 
       procedure Finish (Profiled : Boolean) is
       begin
@@ -2275,7 +2726,36 @@ package body Driver.Robot.Kinematics.Fit is
 
          --  Stage 5: the tracks.
          Enter (5);
-         Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
+         --  The lens's aspect and distortion are kept only when the fit with them is determined and they are significant
+         --  together by its covariance (Extras_Significant: which holds how the sightings' errors depend on each other,
+         --  as a fixed eye's distortion is kept, Hand_Eye); the pinhole otherwise, refined from the same start. Judged by
+         --  the sightings' residuals instead, the median over every sighting kept the pinhole for the desktop arm's wide
+         --  barrel lens, its centre 33 px off, and a likelihood ratio of their robust costs counts every sighting's
+         --  error as its own, the errors a keyframe's points share and a point's in every keyframe as evidence (10-20).
+         --  One axis of turn (a drone's, a wheeled base's carrying its eye over the floor) tells
+         --  the focal length, the distortion and the turn's scale only along a valley, and the pixels' aspect not at all
+         --  where the eye looks level: free, they left the bench's drones and mast eyes undetermined, 5 of 6 and 2 of 3,
+         --  the focal length 73 +- 39 px of the true 171, where a pinhole told the mast eyes to 1 to 3 % (10-20).
+         declare
+            Joints_P : Joint_Array := Joints;
+            L_P      : Lens;
+            Report_P : Fit_Report := Report;
+         begin
+            Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
+            if not (Report.Determined and then Extras_Significant (L, Report, N)) then
+               --  The pinhole nearest the lens with them, refined from its joints: begun from the stage before, a
+               --  wheeled base's head (bench seed 1, 10-20) went from 166 px to 25 (the truth 171) in 18 passes while
+               --  the lens with them stayed at 166, and was fitted there.
+               Joints_P := Joints;
+               L_P := (Fx | Fy => Sqrt (L.Fx * L.Fy), Cx => L.Cx, Cy => L.Cy, others => 0.0);
+               Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True);
+               if Report_P.All_Count > 0 then
+                  Joints := Joints_P;
+                  L := L_P;
+                  Report := Report_P;
+               end if;
+            end if;
+         end;
          --  The focal length's profile. The covariance at the solution says how far the focal length can move within
          --  the basin the solution lies in, nothing of another basin along the direction the sightings tell worst:
          --  with a wide lens's barrel distortion free, the focal length, the distortion and the joints' turns per unit
@@ -2287,7 +2767,6 @@ package body Driver.Robot.Kinematics.Fit is
          --  again; a step above by as much ends that way, as does the range the focal search ranged over.
          declare
             type Sign_Way is (Up, Down);
-            pragma Unreferenced (Down);
             Moved : Boolean := True;
             Base  : Real;
          begin
@@ -2313,13 +2792,32 @@ package body Driver.Robot.Kinematics.Fit is
                         Moved  : Boolean := False;
                         L      : Lens;
                         Report : Fit_Report;
+                        --  The way reached the end of the search's range, a step or more from the solution, with no
+                        --  step's residual significantly above the solution's and none told from it by the keyframes
+                        --  (Told_Apart): the profile is flat to Flat_To.
+                        Flat    : Boolean := False;
+                        Flat_To : Real := 0.0;
+                        Told    : Boolean := False;   --  a step of the way the keyframes told from the solution
                      end record;
                      Walked        : array (Sign_Way) of Walk_Result;
                      Walked_Joints : array (Sign_Way) of Joint_Array (Joints'Range);
 
+                     --  Whether the sightings tell a step from the solution: the robust cost of every sighting at the
+                     --  solution's scales above the solution's by more than Z squared over two, the likelihood ratio of
+                     --  one term at Z. The median over every sighting cannot where the keyframes that tell the focal
+                     --  length are a few (a drone's turn, 14 of 33 keyframes, every one of whose sightings a step at
+                     --  117 px set aside, the median 0.009 px above the solution's, the bench's drone, 10-20); each
+                     --  keyframe's median cannot where a wide lens's distortion trades with its focal length over a
+                     --  narrow sweep (robot.kinematics.desktop, 10-20: from 404 px to 358 no keyframe's median moved, the
+                     --  median over all 1.727 against 1.726 px, where the covariance put the focal length at 401 +- 2.5).
+                     function Told_Apart (Step : Fit_Report) return Boolean is
+                       (Step.Cost_Judged - Report.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0);
+
                      procedure Walk (Index : Positive) is
                         Way    : constant Sign_Way := Sign_Way'Val (Index - 1);
                         Offset : Real := Driver.Conventions.Z * Held;
+                        Last_F : Real := 0.0;   --  the focal length of the last step taken, none yet
+                        Was_Told : Boolean := False;   --  the step before this one was told apart
                      begin
                         loop
                            declare
@@ -2328,11 +2826,26 @@ package body Driver.Robot.Kinematics.Fit is
                               Jp     : Joint_Array := Joints;
                               Rp     : Fit_Report;
                            begin
-                              exit when L.Fx * Factor < Searched_Least or else L.Fx * Factor > Searched_Most;
+                              --  Each way ends past the range searched on its own side: a solution below the range walks
+                              --  up into it (the base's head above, at 25 px of the range's least 39, ended its walk at
+                              --  its first step and was fitted there).
+                              if (Way = Down and then L.Fx * Factor < Searched_Least)
+                                or else (Way = Up and then L.Fx * Factor > Searched_Most)
+                              then
+                                 Walked (Way).Flat := Last_F > 0.0 and then not Walked (Way).Told;
+                                 Walked (Way).Flat_To := Last_F;
+                                 exit;
+                              end if;
                               Lp.Fx := L.Fx * Factor;
                               Lp.Fy := L.Fy * Factor;
-                              Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held, Spread => False);
+                              Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held, Spread => False,
+                                             Pinhole => Report.Pinhole, Judge_Floor => Report.Judge_Floor,
+                                             Judge_Gain => Report.Judge_Gain);
                               exit when Rp.All_Count = 0;
+                              --  Where the step's focal length went, held within its own sigma: a profile is flat as far
+                              --  as its steps went untold, not as far as they were asked (the sightings pulled a step at
+                              --  315 px back to 178, s22's arm 2, 10-20).
+                              Last_F := Lp.Fx;
                               declare
                                  Err : constant Real :=
                                    Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
@@ -2341,17 +2854,32 @@ package body Driver.Robot.Kinematics.Fit is
                                                   & Driver.Log.Image (Lp.Fx, 1) & " px leaves a median "
                                                   & Driver.Log.Image (Rp.All_Median_Px, 3) & " px over every sighting, "
                                                   & "against " & Driver.Log.Image (Base, 3) & " px at "
-                                                  & Driver.Log.Image (L.Fx, 1) & " (+- " & Driver.Log.Image (Err, 3) & ")");
-                                 if Rp.All_Median_Px + Driver.Conventions.Z * Err < Base then
-                                    --  A better basin: refitted from there, the focal length free within the search's width.
-                                    Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within);
-                                    if Rp.All_Count > 0 and then Rp.All_Median_Px < Base then
-                                       Walked (Way) := (Moved => True, L => Lp, Report => Rp);
+                                                  & Driver.Log.Image (L.Fx, 1) & " (+- " & Driver.Log.Image (Err, 3) & ")"
+                                                  & "; its cost over every sighting " & Driver.Log.Image (Rp.Cost_Judged - Report.Cost_Judged, 1)
+                                                  & " above the solution's" & (if Told_Apart (Rp) then ", told apart" else ""));
+                                 Walked (Way).Told := Walked (Way).Told or else Told_Apart (Rp);
+                                 --  A better basin: the step's cost below the solution's by a likelihood ratio at Z,
+                                 --  refitted from there, the focal length free within the search's width, and taken when
+                                 --  it stays below. The way ends at the second step told apart in a row, or where a step
+                                 --  leaves every sighting a median significantly above the solution's: one step past a ridge
+                                 --  falls into what lies beyond it or rises with the wall. Ended at its first step told
+                                 --  apart, the walk kept the desktop arm's wide lens at 327 px, between steps 8 and 11 above
+                                 --  the solution, where the next step (399 px) lay 884 below it (robot.kinematics.desktop,
+                                 --  10-20); ended by the median alone, which a step barely moves, the head rig's arm walked
+                                 --  twelve steps of 7693 sightings, to 1400 above the solution's cost, and the order exams
+                                 --  ran past the two-minute cap.
+                                 if Report.Cost_Judged - Rp.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0 then
+                                    Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
+                                                   Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                                    if Rp.All_Count > 0 and then Rp.Cost_Judged < Report.Cost_Judged then
+                                       Walked (Way) := (Moved => True, L => Lp, Report => Rp, others => <>);
                                        Walked_Joints (Way) := Jp;
                                     end if;
                                     exit;
                                  end if;
-                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
+                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err
+                                   or else (Was_Told and then Told_Apart (Rp));
+                                 Was_Told := Told_Apart (Rp);
                               end;
                               Offset := 2.0 * Offset;
                            end;
@@ -2362,13 +2890,43 @@ package body Driver.Robot.Kinematics.Fit is
                      Walks (1, Sign_Way'Pos (Sign_Way'Last) + 1);
                      for Way in Sign_Way loop
                         if Walked (Way).Moved then
-                           L := Walked (Way).L;
-                           Joints := Walked_Joints (Way);
-                           Report := Walked (Way).Report;
+                           --  The refit's report in place of the solution's, the fit's own account kept: the stage it
+                           --  reached, the seconds of each, the sign of its translations (a refit's report has none of
+                           --  them, and a drone's fit that moved to a better basin said it stopped at stage 0, 10-20).
+                           declare
+                              Stage_Was   : constant Natural := Report.Stage;
+                              Seconds_Was : constant Real_Lists.Vector := Report.Seconds;
+                              Flipped_Was : constant Boolean := Report.Flipped;
+                           begin
+                              L := Walked (Way).L;
+                              Joints := Walked_Joints (Way);
+                              Report := Walked (Way).Report;
+                              Report.Stage := Stage_Was;
+                              Report.Seconds := Seconds_Was;
+                              Report.Flipped := Flipped_Was;
+                           end;
                            Moved := True;
                            exit;
                         end if;
                      end loop;
+                     --  A profile that stays as low as the solution's to the end of the range the search ranged over
+                     --  leaves the focal length undetermined there, whatever the covariance at the solution says: its
+                     --  curvature is the basin's, not the valley's. A drone's eye (the fake robot's, its motors moving
+                     --  it along three axes and turning it about the upright) was fitted at 67 px for the true 163, as
+                     --  low in residual, and said fitted (10-20).
+                     if not Moved then
+                        for Way in Sign_Way loop
+                           if Walked (Way).Flat then
+                              Report.Determined := False;
+                              Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                                ("the sightings leave the focal length undetermined: its profile from "
+                                 & Driver.Log.Image (L.Fx, 1) & " px stays as low as there to "
+                                 & Driver.Log.Image (Walked (Way).Flat_To, 1) & " px, the end of the range searched");
+                              Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
+                              exit;
+                           end if;
+                        end loop;
+                     end if;
                   end;
                end;
             end loop;
@@ -2430,6 +2988,16 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Untold := Untold;
          Report.Untold_Turns := Untold_Turns;
          Report.Untold_Orders := (if Order_Is_Told then Joint_Lists.Empty_Vector else Untold_Orders);
+         Report.Slide_Turns.Clear;
+         for J in 1 .. N loop
+            declare
+               Turn : constant Vec3 := (if Joints (Joints'First + J - 1).Slide then Slide_Turns (J) else Zero3);
+            begin
+               for X of Turn loop
+                  Report.Slide_Turns.Append (X);
+               end loop;
+            end;
+         end loop;
          Chain := Order;
          Report.Fitted := Report.Determined;
          Close_Stage;
@@ -2615,7 +3183,9 @@ package body Driver.Robot.Kinematics.Fit is
       --  15052 px from the recognition's small pushes), and before the refinement, which from a focal length the
       --  joints alone did not tell can creep for most of an hour (A93's right arm at 3184 beats, its readings
       --  drawn: two replays on the box sat in it for more than half an hour).
-      if N > 1 and then (for all X of Sight => not Several (X.Frame)) then
+      --  A fit of one order kept as given (From.Fixed) needs none: the joints of the keyframes that moved one each
+      --  are the same in any order, and a search of the orders asks for them alone (10-20).
+      if N > 1 and then not From.Fixed and then (for all X of Sight => not Several (X.Frame)) then
          Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
          return;
       end if;
@@ -2636,6 +3206,7 @@ package body Driver.Robot.Kinematics.Fit is
          Searched_Least := From.Searched_Least;
          Searched_Most := From.Searched_Most;
          Order_Is_Told := From.Order_Told;
+         Slide_Turns := From.Slide_Turns;
          Finish (Profiled => False);
          return;
       end if;
@@ -2653,6 +3224,7 @@ package body Driver.Robot.Kinematics.Fit is
          Focal_Within := From.Focal_Within;
          Searched_Least := From.Searched_Least;
          Searched_Most := From.Searched_Most;
+         Slide_Turns := From.Slide_Turns;
          for J in 1 .. N loop
             declare
                Was  : Joint renames From.Joints (From.Joints'First + J - 1);
@@ -2784,7 +3356,7 @@ package body Driver.Robot.Kinematics.Fit is
                         A (P, Q) := A (Q, P);
                      end loop;
                   end loop;
-                  Eigensystem (A, Values, Vectors);
+                  Driver.Numerics.Dense.Small_Eigensystem (A, Values, Vectors);
                   for P in 2 .. Entries loop
                      if Values (P) < Values (Low) then
                         Low := P;
@@ -2853,7 +3425,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Ftf (P, Q) := Ftf (Q, P);
                      end loop;
                   end loop;
-                  Eigensystem (Ftf, Values, Vectors);
+                  Driver.Numerics.Dense.Small_Eigensystem (Ftf, Values, Vectors);
                   for P in 2 .. 3 loop
                      if Values (P) < Values (Low) then
                         Low := P;
@@ -3152,8 +3724,12 @@ package body Driver.Robot.Kinematics.Fit is
             --  the turns over the reading changes: 0 when no keyframe's turn is
             --  told (fewer sightings than the three a motion about W has, or none
             --  of the four entries' pairs is nonzero).
+            --  Beat: the score to beat. A direction whose median is surely not below it (no more than half of its
+            --  residuals below it) is scored Real'Last, its median not taken: the scan keeps a direction only when it
+            --  scores below the best so far, and the medians of every direction were a fifth of stage 1's time (the
+            --  order exam's arms, 10-20).
             procedure Planar_About
-              (J : Positive; F : Real; W : Vec3; Wt, Rs, Fits : in out Real_Array; Scale, Score : out Real)
+              (J : Positive; F : Real; W : Vec3; Wt, Rs, Fits : in out Real_Array; Beat : Real; Scale, Score : out Real)
             is
                L      : Sight_Line_Array renames Lines (J).all;
                K      : constant Natural := L'Length;
@@ -3231,7 +3807,7 @@ package body Driver.Robot.Kinematics.Fit is
                                        A (P, Q) := A (Q, P);
                                     end loop;
                                  end loop;
-                                 Eigensystem (A, Values, Vectors);
+                                 Driver.Numerics.Dense.Small_Eigensystem (A, Values, Vectors);
                                  for P in 2 .. 4 loop
                                     if Values (P) < Values (Least) then
                                        Least := P;
@@ -3244,7 +3820,7 @@ package body Driver.Robot.Kinematics.Fit is
                                  declare
                                     Turn : constant Real := Turn_Of (V);
                                     Rr   : constant Mat3 := Rot (W, -Turn);
-                                    Tt   : constant Vec3 := (-V (2)) * E1 + V (1) * E2;
+                                    Tt   : constant Vec3 := Plus (Scaled (-V (2), E1), Scaled (V (1), E2));
                                     M    : Natural := 0;
                                     Du, Dv : Real_Array (1 .. K);
                                  begin
@@ -3258,8 +3834,11 @@ package body Driver.Robot.Kinematics.Fit is
                                     for Q in 1 .. M loop
                                        Rs (Q) := Sqrt (Du (Q) ** 2 + Dv (Q) ** 2);
                                     end loop;
+                                    --  Noise_Of the residuals (each a length, none negative), Fits the scratch for its median
+                                    --  until the residuals fill it below.
+                                    Fits (1 .. M) := Rs (1 .. M);
                                     declare
-                                       Sigma : constant Real := Noise_Of (Rs (1 .. M));
+                                       Sigma : constant Real := Driver.Stats.Median_In_Place (Fits (1 .. M)) / Upper_Quartile;
                                     begin
                                        M := 0;
                                        for I in 1 .. K loop
@@ -3313,7 +3892,7 @@ package body Driver.Robot.Kinematics.Fit is
                                  begin
                                     for Q in 1 .. M loop
                                        declare
-                                          Y  : constant Vec3 := Rr * Before (Q) + Dot (Nm, Before (Q)) * Sh;
+                                          Y  : constant Vec3 := Plus (Times (Rr, Before (Q)), Scaled (Dot (Nm, Before (Q)), Sh));
                                           Hb : constant Vec3 := After (Q);
                                           A1 : constant Real := Dot (W, Hb) * Dot (E1, Y) - Dot (E1, Hb) * Dot (W, Y);
                                           A2 : constant Real := Dot (W, Hb) * Dot (E2, Y) - Dot (E2, Hb) * Dot (W, Y);
@@ -3360,7 +3939,7 @@ package body Driver.Robot.Kinematics.Fit is
                            Told_Of (Way) := True;
                            Frame_Of (Way) := Frame;
                            Rr_Of (Way) := Rot (W, -Turn_Of (V));
-                           T0_Of (Way) := (-V (2)) * E1 + V (1) * E2;
+                           T0_Of (Way) := Plus (Scaled (-V (2), E1), Scaled (V (1), E2));
                         end if;
                      end;
                   end if;
@@ -3380,7 +3959,7 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  sight are long, as Reprojected has it.
                                  declare
                                     Y : constant Vec3 :=
-                                      Rr_Of (Way) * L (I).H0 + Dot (Plane_Of (Way), L (I).H0) * T0_Of (Way);
+                                      Plus (Times (Rr_Of (Way), L (I).H0), Scaled (Dot (Plane_Of (Way), L (I).H0), T0_Of (Way)));
                                  begin
                                     if Y (3) > 0.0 and then L (I).H (3) > 0.0 then
                                        Du (M) := F * (Y (1) / Y (3) - L (I).H (1) / L (I).H (3));
@@ -3410,7 +3989,17 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end loop;
                Scale := (if Den > 0.0 then Num / Den else 0.0);
-               Score := (if Filled > 0 then Driver.Stats.Median (Fits (1 .. Filled)) else Real'Last);
+               declare
+                  Below : Natural := 0;
+               begin
+                  for Q in 1 .. Filled loop
+                     if Fits (Q) < Beat then
+                        Below := Below + 1;
+                     end if;
+                  end loop;
+                  Score := (if Filled = 0 or else 2 * Below < Filled then Real'Last
+                            else Driver.Stats.Median_In_Place (Fits (1 .. Filled)));
+               end;
             end Planar_About;
 
             --  The best direction of the grid refined, its tilt, its side and the size of its turn per
@@ -3505,15 +4094,119 @@ package body Driver.Robot.Kinematics.Fit is
                Free (Rm);
             end Refine;
 
+            --  Joint J as a slide at focal length F: the eye moved along one direction without turning, by its reading
+            --  change times a length of either sign. The direction is the least eigenvector of the sightings' rows
+            --  under a translation alone (the two lines of sight and the direction in one plane, (H0 x H) . D = 0),
+            --  refined by robust least squares on the residuals Refine scores a turn by (Reprojected, less what each
+            --  keyframe's sightings share), with either sign (a half-line's residual has one), the lesser median taken.
+            procedure Slide_Of (J : Positive; F : Real; D_Out : out Vec3; Score : out Real) is
+               L      : Sight_Line_Array renames Every (J).all;
+               M      : constant Positive := L'Length;
+               Rm     : Real_Access := new Real_Array (1 .. 2 * M);
+               D0     : Vec3 := [0.0, 0.0, 1.0];
+               E1, E2 : Vec3;
+               Sign   : Real := 1.0;
+
+               function D_Of (X : Real_Array) return Vec3 is (Unit (D0 + X (1) * E1 + X (2) * E2));
+
+               procedure Evaluate (X : Real_Array; R : out Real_Array) is
+                  D  : constant Vec3 := D_Of (X);
+                  Rr : Mat3;
+                  Tt : Vec3;
+               begin
+                  for I in L'Range loop
+                     Relative (Identity, (Rotation => Identity3, Translation => (Sign * L (I).Reading) * D), Rr, Tt);
+                     Reprojected (Rr, Tt, L (I).H0, L (I).H, F,
+                                  R (R'First + 2 * (I - L'First)), R (R'First + 2 * (I - L'First) + 1));
+                  end loop;
+                  declare
+                     From : Positive := L'First;
+                  begin
+                     while From <= L'Last loop
+                        declare
+                           To : Positive := From;
+                        begin
+                           while To < L'Last and then L (To + 1).Frame = L (From).Frame loop
+                              To := To + 1;
+                           end loop;
+                           declare
+                              Du, Dv : Real_Array (1 .. To - From + 1);
+                           begin
+                              for I in From .. To loop
+                                 Du (I - From + 1) := R (R'First + 2 * (I - L'First));
+                                 Dv (I - From + 1) := R (R'First + 2 * (I - L'First) + 1);
+                              end loop;
+                              Share_Out (Du);
+                              for I in From .. To loop
+                                 R (R'First + 2 * (I - L'First)) := Du (I - From + 1);
+                                 R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);
+                              end loop;
+                           end;
+                           From := To + 1;
+                        end;
+                     end loop;
+                  end;
+               end Evaluate;
+
+               procedure Solve is new Robust_Fit (2, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);
+            begin
+               declare
+                  A       : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];
+                  Values  : Real_Vector (1 .. 3);
+                  Vectors : Real_Matrix (1 .. 3, 1 .. 3);
+                  Low     : Positive := 1;
+               begin
+                  for I in L'Range loop
+                     declare
+                        G : constant Vec3 := Cross (L (I).H0, L (I).H);
+                     begin
+                        for P in 1 .. 3 loop
+                           for Q in 1 .. 3 loop
+                              A (P, Q) := A (P, Q) + G (P) * G (Q);
+                           end loop;
+                        end loop;
+                     end;
+                  end loop;
+                  Driver.Numerics.Dense.Small_Eigensystem (A, Values, Vectors);
+                  for P in 2 .. 3 loop
+                     if Values (P) < Values (Low) then
+                        Low := P;
+                     end if;
+                  end loop;
+                  D0 := Unit ([Vectors (1, Low), Vectors (2, Low), Vectors (3, Low)]);
+               end;
+               Perp (D0, E1, E2);
+               D_Out := D0;
+               Score := Real'Last;
+               for Way in 1 .. 2 loop
+                  Sign := (if Way = 1 then 1.0 else -1.0);
+                  declare
+                     X     : Real_Array (1 .. 2) := [0.0, 0.0];
+                     Norms : Real_Array (1 .. M);
+                  begin
+                     Evaluate (X, Rm.all);
+                     Solve (X, Noise_Of (Rm.all));
+                     Evaluate (X, Rm.all);
+                     for I in 1 .. M loop
+                        Norms (I) := Sqrt (Rm (2 * I - 1) ** 2 + Rm (2 * I) ** 2);
+                     end loop;
+                     declare
+                        Md : constant Real := Driver.Stats.Median (Norms);
+                     begin
+                        if Md < Score then
+                           Score := Md;
+                           D_Out := Sign * D_Of (X);
+                        end if;
+                     end;
+                  end;
+               end loop;
+               Free (Rm);
+            end Slide_Of;
+
             --  Every joint's best direction at focal length F, the joints scanned
             --  at once, one task each: their sightings are their own.
             Searches        : Natural := 0;          --  focal lengths tried, for the log
             F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
-            Warm            : Best_Array;            --  per joint: its axis at the focal length tried before
-            Warm_Angle      : array (1 .. N) of Real := [others => -1.0];   --  per joint, this search: see Scanner
-            Warm_Better     : array (1 .. N) of Boolean := [others => False];
-            Warm_Tries, Warm_Wins : Natural := 0;    --  over the searches, for the log
-            Warm_Far        : Real := 0.0;           --  the farthest a warm start lay from the scan, radians
             Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
             Tried_Ln, Tried_Total, Tried_Error : Real_Lists.Vector;   --  every focal length tried (its logarithm), its score and the score's error
 
@@ -3549,7 +4242,7 @@ package body Driver.Robot.Kinematics.Fit is
                            declare
                               Sc, Sd : Real;
                            begin
-                              Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Sc, Sd);
+                              Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Result.Score, Sc, Sd);
                               if Sc /= 0.0 and then Sd < Result.Score then
                                  Result := (Score => Sd, W => D, Phi => 0.0, Scale => Sc);
                               end if;
@@ -3568,23 +4261,6 @@ package body Driver.Robot.Kinematics.Fit is
                         if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
                            Refine (J, F, Result);
                         end if;
-                        --  Measured and not yet used: the joint's axis at the focal length tried before, refined at
-                        --  this one, and how far it lies from the scan's (whether the scan could be skipped between the
-                        --  focal lengths of one search). A lattice ladder in place of the scan was tried on 10-13 and
-                        --  put 7 of 16 fit tests red: a refined axis is as stable in a wrong basin as in the right one.
-                        if Result.Scale /= 0.0 and then Warm (J).Scale /= 0.0 and then Every (J)'Length > 4 then
-                           declare
-                              Again : Best_Record := Warm (J);
-                           begin
-                              Refine (J, F, Again);
-                              Warm_Angle (J) := Arccos (Real'Min (1.0, abs Dot (Again.W, Result.W)));
-                              Warm_Better (J) := Again.Score < Result.Score;
-                           end;
-                        else
-                           Warm_Angle (J) := -1.0;
-                           Warm_Better (J) := False;
-                        end if;
-                        Warm (J) := Result;
                         Free (Ga);
                         Free (Gb);
                         Free (Wt);
@@ -3600,15 +4276,6 @@ package body Driver.Robot.Kinematics.Fit is
                      Scanners (J).Start (J);
                   end loop;
                end;
-               for J in 1 .. N loop
-                  if Warm_Angle (J) >= 0.0 then
-                     Warm_Tries := Warm_Tries + 1;
-                     Warm_Far := Real'Max (Warm_Far, Warm_Angle (J));
-                     if Warm_Better (J) then
-                        Warm_Wins := Warm_Wins + 1;
-                     end if;
-                  end if;
-               end loop;
                --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
                --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
                --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
@@ -3647,6 +4314,10 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
                return Sqrt (Sum);
             end Total_Error;
+
+            --  Per joint: whether it slides (after the focal search), and its direction.
+            Slid    : array (1 .. N) of Boolean := [others => False];
+            Slide_W : array (1 .. N) of Vec3 := [others => [0.0, 0.0, 1.0]];
 
             Golden    : constant Real := (3.0 - Sqrt (5.0)) * Ada.Numerics.Pi;
             Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;
@@ -3848,13 +4519,41 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Driver.Log.Image (Total (Best), 4) & " +- " & Driver.Log.Image (Total_Error (Best), 4)
                                 & " px; the basin " & Driver.Log.Image (Exp (Low), 1) & " to " & Driver.Log.Image (Exp (High), 1)
                                 & ", told within " & Driver.Log.Image (Exp (Best_At - Told_Within), 1) & " to "
-                                & Driver.Log.Image (Exp (Best_At + Told_Within), 1) & "; warm starts" & Warm_Tries'Image
-                                & ", farthest " & Driver.Log.Image (Warm_Far * 180.0 / Ada.Numerics.Pi, 2)
-                                & " deg from the scan, better" & Warm_Wins'Image & " times");
+                                & Driver.Log.Image (Exp (Best_At + Told_Within), 1));
                Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " focal search curve, px:score"
                                 & Ada.Strings.Unbounded.To_String (Trace));
+               --  A joint that slides: one whose keyframes the eye's travel along one direction without turning
+               --  explains as well as a turn does, the turn's own freedom (its size) not lowering the median residual
+               --  of the joint's keyframes significantly (Z of the two medians' errors together): a wheeled base's
+               --  travel, a lift, a drone's motors. A turning joint turns the eye by its whole turn, which every
+               --  keyframe of it shows.
+               Prepare (Focal);
                for J in 1 .. N loop
-                  if Best (J).Scale = 0.0 then
+                  if Every (J)'Length > 4 then
+                     declare
+                        D  : Vec3;
+                        Sd : Real;
+                     begin
+                        Slide_Of (J, Focal, D, Sd);
+                        if Sd < Real'Last
+                          and then not (Sd - Best (J).Score
+                                        > Driver.Conventions.Z
+                                          * Sqrt (Median_Error (Sd, Counts (J)) ** 2
+                                                  + (if Best (J).Score < Real'Last
+                                                     then Median_Error (Best (J).Score, Counts (J)) ** 2 else 0.0)))
+                        then
+                           Slid (J) := True;
+                           Slide_W (J) := D;
+                           Slide_Turns (J) := Best (J).Scale * Best (J).W;
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " joint" & J'Image
+                                            & " slides: a slide leaves its keyframes " & Driver.Log.Image (Sd, 3)
+                                            & " px, a turn " & Driver.Log.Image (Best (J).Score, 3) & " px");
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               for J in 1 .. N loop
+                  if Best (J).Scale = 0.0 and then not Slid (J) then
                      for K in 1 .. N loop
                         Free (Lines (K));
                         Free (Every (K));
@@ -3872,8 +4571,9 @@ package body Driver.Robot.Kinematics.Fit is
                   begin
                      Perp (Best (J).W, E1, E2);
                      Joints (Joints'First + J - 1) :=
-                       (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2, C => Best (J).Scale,
-                        Slide => False);
+                       (if Slid (J) then (W => Slide_W (J), P => Zero3, C => 1.0, Slide => True)
+                        else (W => Best (J).W, P => Cos (Best (J).Phi) * E1 + Sin (Best (J).Phi) * E2,
+                              C => Best (J).Scale, Slide => False));
                   end;
                   Free (Lines (J));
                   Free (Every (J));
@@ -3929,9 +4629,13 @@ package body Driver.Robot.Kinematics.Fit is
                      W := Unit (Base (Base'First + J - 1).W + X (O) * E1 + X (O + 1) * E2);
                      Perp (W, F1, F2);
                      Out_J (Out_J'First + J - 1).W := W;
-                     Out_J (Out_J'First + J - 1).P := Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2;
+                     Out_J (Out_J'First + J - 1).P :=
+                       (if Base (Base'First + J - 1).Slide then Zero3 else Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2);
+                     --  A slide's length per reading unit is not what an epipolar residual sees (it scales the
+                     --  translation): held, its term no term at all, which its rounding alone moved to 1E294 (10-20).
                      Out_J (Out_J'First + J - 1).C :=
-                       (if Base (Base'First + J - 1).C < 0.0 then -Exp (X (O + 3)) else Exp (X (O + 3)));
+                       (if Base (Base'First + J - 1).Slide then Base (Base'First + J - 1).C
+                        elsif Base (Base'First + J - 1).C < 0.0 then -Exp (X (O + 3)) else Exp (X (O + 3)));
                   end;
                end loop;
                return Out_J;
@@ -3946,11 +4650,10 @@ package body Driver.Robot.Kinematics.Fit is
                   declare
                      J  : constant Positive := Own_Joint (Kept (I).Frame);
                      A  : Joint renames Jx (Jx'First + J - 1);
-                     Rj : constant Mat3 := Rot (A.W, A.C * Own_Change (Kept (I).Frame, J));
                      Rr : Mat3;
                      Tt : Vec3;
                   begin
-                     Relative (Identity, (Rotation => Rj, Translation => A.P - Rj * A.P), Rr, Tt);
+                     Relative (Identity, Step_Of (A, Own_Change (Kept (I).Frame, J)), Rr, Tt);
                      R (R'First + I - 1) :=
                        Sampson (Rr, Tt, Ray (Lx, Kept (I).U0, Kept (I).V0), Ray (Lx, Kept (I).U, Kept (I).V), F);
                   end;
@@ -3973,7 +4676,9 @@ package body Driver.Robot.Kinematics.Fit is
                begin
                   --  The side as an angle in the tangent frame of the axis.
                   Perp (Base (Base'First + J - 1).W, E1, E2);
-                  X (4 * (J - 1) + 3) := Arctan (Base (Base'First + J - 1).P * E2, Base (Base'First + J - 1).P * E1);
+                  X (4 * (J - 1) + 3) :=
+                    (if Base (Base'First + J - 1).Slide then 0.0
+                     else Arctan (Base (Base'First + J - 1).P * E2, Base (Base'First + J - 1).P * E1));
                   X (4 * (J - 1) + 4) := Ln (abs Base (Base'First + J - 1).C);
                end;
             end loop;
@@ -4033,8 +4738,9 @@ package body Driver.Robot.Kinematics.Fit is
                   if J > 0 then
                      declare
                         A  : Joint renames Joints (Joints'First + J - 1);
-                        R  : constant Mat3 := Rot (A.W, A.C * Own_Change (X.Frame, J));
-                        T  : constant Vec3 := A.P - R * A.P;
+                        St : constant Rigid := Step_Of (A, Own_Change (X.Frame, J));
+                        R  : constant Mat3 := St.Rotation;
+                        T  : constant Vec3 := St.Translation;
                         H0 : constant Vec3 := Ray (Lens0, X.U0, X.V0);
                         Bv : constant Vec3 := R * Ray (Lens0, X.U, X.V);
                         --  d H0 = T + s Bv: the part of each across Bv.
@@ -4069,7 +4775,11 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   if Behind > Ahead then
-                     Joints (Joints'First + J - 1).P := -Joints (Joints'First + J - 1).P;
+                     if Joints (Joints'First + J - 1).Slide then
+                        Joints (Joints'First + J - 1).C := -Joints (Joints'First + J - 1).C;
+                     else
+                        Joints (Joints'First + J - 1).P := -Joints (Joints'First + J - 1).P;
+                     end if;
                      for I in 1 .. Tracks loop
                         Depth (J, I) := -Depth (J, I);
                      end loop;
@@ -4180,7 +4890,11 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end;
             for J in 1 .. N loop
-               Joints (Joints'First + J - 1).P := Rho (J) * Joints (Joints'First + J - 1).P;
+               if Joints (Joints'First + J - 1).Slide then
+                  Joints (Joints'First + J - 1).C := Rho (J) * Joints (Joints'First + J - 1).C;
+               else
+                  Joints (Joints'First + J - 1).P := Rho (J) * Joints (Joints'First + J - 1).P;
+               end if;
             end loop;
             Free_All;
          end;
@@ -4221,244 +4935,761 @@ package body Driver.Robot.Kinematics.Fit is
                end if;
             end loop;
             Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep, Focal_Within, Spread => False);
+            --  A joint taken for a slide is weighed again against the turn its own keyframes were explained by nearly
+            --  as well (Slide_Turns), now that the lens is refined: the turn whose rotation is that turn's across the
+            --  slide's travel and whose eye travels as the slide's does (its axis through the point that makes it so),
+            --  refined on the same sightings, takes the slide's place when the two are not the same joint within what
+            --  its keyframes show (at its widest turn either way they put the points apart by Z of their median's error,
+            --  as two orders are the same arm in stage 4), it leaves the sightings a robust cost below the slide's (as
+            --  the turn's best must, the slide being a turn's limit) and the refinement's covariance (which holds how
+            --  the sightings' errors depend on each other) determines it as a turn (Joint_Determined: its axis within a
+            --  quarter turn at Z, its turn per reading unit significant). Determined alone, the base arm of the bench's
+            --  seed 3 took a turn of 2.2E-6 +- 4.4E-7 rad a unit, its axis to 0.51 rad, for a slide the fake robot moves
+            --  without turning, and was not fitted (10-20). By a likelihood ratio of the robust
+            --  costs instead, which counts every sighting's error as its own, the drones' slides of the step 2 bench were
+            --  turned into turns of 8E-7 +- 4E-7 rad a unit that left them undetermined (seeds 3, 4 and 6, 10-20); by
+            --  the turn's rate alone, into turns of 6E-7 +- 9E-8 rad a unit (0.0004 rad over the joint's keyframes)
+            --  whose axes the sightings told within no quarter turn (seeds 1, 3 and 5). Stage 1 weighs the two at the
+            --  focal search's lens: a
+            --  wide lens's barrel distortion left out and the focal at 248 px of 400, a desktop arm's second joint was
+            --  taken for a slide (0.821 px against a turn's 0.690, not significantly the larger), and the fit ended at
+            --  366 +- 9 px, its lens off by a chi square of 1957 on six terms (robot.kinematics.desktop, 10-20).
+            for J in 1 .. N loop
+               declare
+                  A    : constant Joint := Joints (Joints'First + J - 1);
+                  V    : constant Vec3 := A.C * A.W;   --  the slide's travel per reading unit
+                  Turn : constant Vec3 := Slide_Turns (J);
+                  Omega : constant Vec3 :=
+                    (if Dot (V, V) > 0.0 then Turn + (-(Dot (Turn, V) / Dot (V, V))) * V else Turn);
+               begin
+                  if A.Slide and then Rep.All_Count > 0 and then Dot (Omega, Omega) > 0.0 then
+                     declare
+                        Rate : constant Real := Sqrt (Dot (Omega, Omega));
+                        Jt   : Joint_Array := Joints;
+                        Lt   : Lens := Lx;
+                        Rt   : Fit_Report;
+                     begin
+                        Jt (Jt'First + J - 1) :=
+                          (W => (1.0 / Rate) * Omega, P => (1.0 / Rate ** 2) * Cross (Omega, V), C => Rate,
+                           Slide => False);
+                        Refine_Tracks (Changes, Alone.all, Jt, Order, Lt, Rt, Focal_Within,
+                                       Judge_Floor => Rep.Judge_Floor, Judge_Gain => Rep.Judge_Gain);
+                        declare
+                           Known : constant Boolean := Natural (Rt.Covariance.Length) = Terms (N) ** 2;
+                           function Variance_Of (T : Joint_Term) return Real is
+                             (Rt.Covariance (Rt.Covariance.First_Index + (Term_Of (J, T) - 1) * Terms (N) + Term_Of (J, T) - 1));
+                           Rate_Sigma : constant Real := (if Known then Sqrt (Variance_Of (Scale)) else Real'Last);
+                           --  How far apart the slide's fit and the turn's put the points at the joint's widest turn in
+                           --  its keyframes, either way, each by its own lens and depths: the larger median over the
+                           --  error of a median of that many at the slide's noise.
+                           function Apart return Real is
+                              Reach : Real := 0.0;
+                              Most  : Real := 0.0;
+                           begin
+                              for F in 1 .. Frames loop
+                                 if Own_Joint (F) = J then
+                                    Reach := Real'Max (Reach, abs Change (F, J));
+                                 end if;
+                              end loop;
+                              for Sign of Real_Array'[1.0, -1.0] loop
+                                 declare
+                                    D      : Real_Array (1 .. N) := [others => 0.0];
+                                    Back_S, Back_T : Rigid;
+                                    Seen_T : array (1 .. Natural (Rep.Depths.Length)) of Boolean := [others => False];
+                                    Dist   : Real_Access := new Real_Array (1 .. Natural'Max (1, Seen_T'Length));
+                                    Count  : Natural := 0;
+                                 begin
+                                    D (J) := Sign * Reach;
+                                    Back_S := Inverse (Eye_At (Joints, Order, D));
+                                    Back_T := Inverse (Eye_At (Jt, Order, D));
+                                    for X of Alone.all loop
+                                       if X.Track in Seen_T'Range and then not Seen_T (X.Track)
+                                         and then X.Track <= Natural (Rt.Depths.Length)
+                                       then
+                                          Seen_T (X.Track) := True;
+                                          declare
+                                             Ds : constant Real := Rep.Depths (Rep.Depths.First_Index + X.Track - 1);
+                                             Dt : constant Real := Rt.Depths (Rt.Depths.First_Index + X.Track - 1);
+                                             U1, V1, U2, V2 : Real;
+                                             A1, A2         : Boolean;
+                                          begin
+                                             if Ds > 0.0 and then Dt > 0.0 then
+                                                Project (Lx, Back_S * (Ds * Ray (Lx, X.U0, X.V0)), U1, V1, A1);
+                                                Project (Lt, Back_T * (Dt * Ray (Lt, X.U0, X.V0)), U2, V2, A2);
+                                                if A1 and then A2 and then U1 in 0.0 .. Real (Width)
+                                                  and then V1 in 0.0 .. Real (Height)
+                                                then
+                                                   Count := Count + 1;
+                                                   Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
+                                                end if;
+                                             end if;
+                                          end;
+                                       end if;
+                                    end loop;
+                                    if Count > 0 and then Rep.Sigma_Px > 0.0 then
+                                       Most := Real'Max (Most, Driver.Stats.Median (Dist (1 .. Count))
+                                                               / Driver.Stats.Median_Sigma (Rep.Sigma_Px, Count));
+                                    end if;
+                                    Free (Dist);
+                                 end;
+                              end loop;
+                              return Most;
+                           end Apart;
+                           Power   : constant Real := Apart;
+                           Turns   : constant Boolean :=
+                             Rt.All_Count > 0 and then Power > Driver.Conventions.Z
+                             and then Rt.Cost_Judged < Rep.Cost_Judged and then Known
+                             and then Joint_Determined (Variance_Of (Tilt_1), Variance_Of (Tilt_2), Variance_Of (Scale),
+                                                        Jt (Jt'First + J - 1).C);
+                        begin
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " joint" & J'Image
+                                            & " weighed as a turn against its slide: every sighting's cost "
+                                            & Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)
+                                            & " against the slide's, median " & Driver.Log.Image (Rt.All_Median_Px, 3)
+                                            & " px against " & Driver.Log.Image (Rep.All_Median_Px, 3) & ", its turn"
+                                            & Real'Image (Jt (Jt'First + J - 1).C) & " +-"
+                                            & (if Rate_Sigma < Real'Last then Real'Image (Rate_Sigma) else " unknown")
+                                            & " rad a unit, its axis to"
+                                            & (if Known then Real'Image (Sqrt (Variance_Of (Tilt_1) + Variance_Of (Tilt_2)))
+                                               else " unknown")
+                                            & " rad, the two apart by " & Driver.Log.Image (Power, 1)
+                                            & " of their error" & (if Turns then "; it turns" else "; it slides"));
+                           if Turns then
+                              Joints := Jt;
+                              Lx := Lt;
+                              Rep := Rt;
+                              Slide_Turns (J) := Zero3;
+                           end if;
+                        end;
+                     end;
+                  end if;
+               end;
+            end loop;
             Lens0 := Lx;
-            Track_Depths := Rep.Depths;
+            Alone_Depths := Rep.Depths;
             Free (Alone);
          end;
       end;
 
       ---------------------------------------------------------------------------
-      --  Stage 4: first the order of the joints along the arm. The evidence is
-      --  the sightings of the keyframes that moved several joints at once;
-      --  without one the order is not told. Their epipolar residual cannot
-      --  tell it: the order moves the eye mostly in how far it went, which
-      --  the epipolar constraint does not see (A17's presses, the readings
-      --  drawn: a wrong order left its median at 0.058 px). Where the points
-      --  land does: every point the reference eye saw, at the depth the
-      --  keyframes of one joint each gave it, reprojected into those keyframes,
-      --  scores the order. Lengths in any unit: the depths are in the joints'.
+      --  Stage 4: the order of the joints along the arm. The evidence is the sightings of the keyframes that moved
+      --  several joints at once (Several): every order explains a keyframe of one joint alike, and in one of several
+      --  the joints' steps compose in the order's sequence. An order is judged by its own fit: the tracks refined in
+      --  it (Refine_Tracks) on every sighting, from the joints of the keyframes of one joint each, and the median
+      --  residual it leaves over every sighting. Judged with joints fitted in another order the true order lost to the
+      --  order they were fitted in: every order scored with the joints of the keyframes of one joint each told wrong
+      --  orders of four arms of the step 2 bench (10-19: seeds 15, 33, 36 and 39), each the least of its 720 once
+      --  fitted in itself, and the order a fit then refined it in told itself again.
+      --  The search: from the order kept before (From) or the joints' own, the order the cheap score finds least over
+      --  every order (Cheap with the order kept's own joints, lens and depths: Global) and every order one joint's move
+      --  from the order kept that it puts as near, each fitted in itself; the order kept gives way to the one whose
+      --  fit leaves every sighting least, until none does. When the order kept explains the keyframes of several
+      --  joints worse than those of one (Adequacy), every order one move from it is weighed: the cheap score with
+      --  joints fitted to a wrong order screened the right one out (s36 of the bench, 10-20: one swap from the truth).
+      --  Moved by single moves alone, the search stood in wrong orders whose every neighbour, its joints fitted to
+      --  the order, scored worse (f16b's arm 1, 10-15; the bench's s39, 10-20, at 1 2 5 3 4 6 for 5 4 1 6 2 3), where
+      --  the cheap score over every order with those same joints put the truth first.
+      --  The order is told when it explains the keyframes of several joints as it does those of one, and every order
+      --  weighed against it is told from it by the keyframes that put the two apart (Told_Over: over every keyframe,
+      --  and over each half alone) or is the same arm within what its joints can turn: no turn of the pairs it swaps
+      --  that the aligner follows puts the points apart by Z of the median's error (two slides; a slide along a
+      --  turn's axis). The pairs the untold ones swap are turned by Boot together (Untold, Untold_Turns), each by the
+      --  turn that tells one of them most within what the aligner follows.
       Order_Is_Told := N <= 1;
-      if N > 1 then
-         declare
-            Multi, Tracks : Natural := 0;
-         begin
-            for X of Sight loop
-               Tracks := Natural'Max (Tracks, X.Track);
-               if Several (X.Frame) then
-                  Multi := Multi + 1;
+      if N > 1 and then From.Fixed then
+         --  A fit of one order kept as given: its search is the caller's.
+         Order := From.Chain;
+      elsif N > 1 then
+         if (for all X of Sight => not Several (X.Frame)) then
+            Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
+            return;
+         end if;
+         Search_Order : declare
+            type Order_Fit is record
+               Order  : Chain_Order (1 .. N);
+               Joints : Joint_Array (1 .. N);
+               L      : Lens;
+               Report : Fit_Report;
+            end record;
+
+            type Step_Table is array (Positive range <>, Positive range <>) of Rigid;
+            type Step_Access is access Step_Table;
+            procedure Free is new Ada.Unchecked_Deallocation (Step_Table, Step_Access);
+            type Point_Table is array (Positive range <>) of Vec3;
+            type Point_Access is access Point_Table;
+            procedure Free is new Ada.Unchecked_Deallocation (Point_Table, Point_Access);
+            type Fit_Table is array (Positive range <>) of Order_Fit;
+            type Fit_Table_Access is access Fit_Table;
+            procedure Free is new Ada.Unchecked_Deallocation (Fit_Table, Fit_Table_Access);
+            type Order_Table is array (Positive range <>) of Chain_Order (1 .. N);
+            type Order_Table_Access is access Order_Table;
+            procedure Free is new Ada.Unchecked_Deallocation (Order_Table, Order_Table_Access);
+
+            function Image (O : Chain_Order) return String is
+               Text : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               for J of O loop
+                  Ada.Strings.Unbounded.Append (Text, J'Image);
+               end loop;
+               return Ada.Strings.Unbounded.To_String (Text);
+            end Image;
+
+            Arm : constant String := (if Who = "" then "the arm" else Who);
+
+            --  The sightings by keyframe: those of keyframe F are By_Frame (First_Of (F) .. First_Of (F) + Count_Of (F)
+            --  - 1), indices into Sight.
+            Count_Of, First_Of : array (1 .. Frames) of Natural := [others => 0];
+            By_Frame : Count_Access := new Count_Array (1 .. S);
+            --  The keyframes of several joints with sightings, and how many sightings they have.
+            Multi_Frames : Count_Access;
+            Multi_Count  : Natural := 0;
+
+            function Depth_Of (X : Order_Fit; Track : Positive) return Real is
+              (if Track <= Natural (X.Report.Depths.Length)
+               then X.Report.Depths (X.Report.Depths.First_Index + Track - 1) else 0.0);
+
+            Fits_Made : Natural := 0;
+
+            --  Where X's joints, lens and depths in order C put every sighting (Real'Last: nowhere, or no depth).
+            procedure Predict (X : Order_Fit; C : Chain_Order; Pu, Pv : out Real_Array) is
+            begin
+               Pu := [others => Real'Last];
+               Pv := [others => Real'Last];
+               for F in 1 .. Frames loop
+                  if Count_Of (F) > 0 then
+                     declare
+                        Back : constant Rigid := Inverse (Eye_At (X.Joints, C, Changes_Of (F)));
+                     begin
+                        for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                           declare
+                              I     : constant Positive := By_Frame (Q);
+                              Sg    : Sighting renames Sight (Sight'First + I - 1);
+                              Depth : constant Real := Depth_Of (X, Sg.Track);
+                              U, V  : Real;
+                              Ahead : Boolean;
+                           begin
+                              if Depth > 0.0 then
+                                 Project (X.L, Back * (Depth * Ray (X.L, Sg.U0, Sg.V0)), U, V, Ahead);
+                                 if Ahead then
+                                    Pu (Pu'First + I - 1) := U;
+                                    Pv (Pv'First + I - 1) := V;
+                                 end if;
+                              end if;
+                           end;
+                        end loop;
+                     end;
+                  end if;
+               end loop;
+            end Predict;
+
+            --  The cheap score of an order with X's joints, lens and depths, fast: each joint's step at every
+            --  keyframe of several joints and the point every sighting there has, made once (Prepare); an order's
+            --  pose at a keyframe is the product of the steps in its sequence, as Eye_At composes them, and its score
+            --  the median residual across and down of those sightings (Cheap), Cheap_Count of them.
+            Steps      : Step_Access := new Step_Table (1 .. Frames, 1 .. N);
+            Points     : Point_Access := new Point_Table (1 .. S);
+            Has_Point  : Flags_Access := new Flags'(1 .. S => False);
+            Lens_Now   : Lens;
+            Residuals  : Real_Access;
+            Cheap_Count : Natural := 0;
+            Cheaps     : Natural := 0;   --  orders scored so, for the log
+
+            procedure Prepare (X : Order_Fit) is
+            begin
+               Lens_Now := X.L;
+               for K in 1 .. Multi_Count loop
+                  declare
+                     F : constant Positive := Multi_Frames (K);
+                  begin
+                     for J in 1 .. N loop
+                        Steps (F, J) := Step_Of (X.Joints (J), Change (F, J));
+                     end loop;
+                     for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                        declare
+                           I     : constant Positive := By_Frame (Q);
+                           Sg    : Sighting renames Sight (Sight'First + I - 1);
+                           Depth : constant Real := Depth_Of (X, Sg.Track);
+                        begin
+                           Has_Point (I) := Depth > 0.0;
+                           if Has_Point (I) then
+                              Points (I) := Depth * Ray (X.L, Sg.U0, Sg.V0);
+                           end if;
+                        end;
+                     end loop;
+                  end;
+               end loop;
+            end Prepare;
+
+            function Cheap (C : Chain_Order) return Real is
+               K : Natural := 0;
+            begin
+               Cheaps := Cheaps + 1;
+               for M in 1 .. Multi_Count loop
+                  declare
+                     F    : constant Positive := Multi_Frames (M);
+                     T    : Rigid := Identity;
+                     Back : Rigid;
+                  begin
+                     for J of C loop
+                        T := T * Steps (F, J);
+                     end loop;
+                     Back := Inverse (T);
+                     for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                        declare
+                           I : constant Positive := By_Frame (Q);
+                           U, V  : Real;
+                           Ahead : Boolean;
+                        begin
+                           if Has_Point (I) then
+                              Project (Lens_Now, Back * Points (I), U, V, Ahead);
+                              Residuals (K + 1) := (if Ahead then abs (U - Sight (Sight'First + I - 1).U) else Real'Last);
+                              Residuals (K + 2) := (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);
+                              K := K + 2;
+                           end if;
+                        end;
+                     end loop;
+                  end;
+               end loop;
+               Cheap_Count := K;
+               return (if K = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. K)));
+            end Cheap;
+
+            --  Order C fitted in itself on the lens and every track's depth of the joints of the keyframes of one joint
+            --  each (X), which no order changes: its joints alone, from X's, by robust least squares of every sighting's
+            --  residual across and down (Robust_Fit, Huber at the noise X's residuals in C show), the terms of each
+            --  joint its axis's tilt (two), a turning joint's point across its axis (two) and its scale (one). Every
+            --  order weighed shares the lens and the depths, so that what tells two orders apart is their joints'
+            --  composing alone; and a refinement of the tracks in each (Refine_Tracks, 1 to 3 s an order of six joints)
+            --  took the search past the two minutes a bench run has (the bench's s36 and the base's ten-joint arm,
+            --  10-20), set the keyframes of several joints aside as not fitting where the joints of one joint's keyframes
+            --  began far from them, and fitted them no closer (s36: every order, the true one too, at 1.2 px on them).
+            procedure Quick_Fit (C : Chain_Order; X : Order_Fit; Into : out Order_Fit) is
+               Per   : constant := 5;   --  terms a joint: its axis's tilt (2), its point across the axis (2), its scale
+               Count : constant Positive := Per * N;
+               Tilt_1, Tilt_2, Side_1, Side_2 : array (1 .. N) of Vec3;
+               Track_Points : Point_Access := new Point_Table (1 .. S);   --  per sighting, its point at X's depth
+               Has_Track    : Flags_Access := new Flags'(1 .. S => False);
+
+               function Joints_Of (V : Real_Array) return Joint_Array is
+                  Out_J : Joint_Array (1 .. N) := X.Joints;
+               begin
+                  for J in 1 .. N loop
+                     declare
+                        O : constant Natural := V'First + Per * (J - 1);
+                        A : Joint renames X.Joints (J);
+                     begin
+                        Out_J (J).W := Unit (A.W + V (O) * Tilt_1 (J) + V (O + 1) * Tilt_2 (J));
+                        if not A.Slide then
+                           Out_J (J).P := A.P + V (O + 2) * Side_1 (J) + V (O + 3) * Side_2 (J);
+                        end if;
+                        Out_J (J).C := A.C * Exp (V (O + 4));
+                     end;
+                  end loop;
+                  return Out_J;
+               end Joints_Of;
+
+               --  Every sighting's residual across and down with the joints of V in order C; a point the order puts
+               --  behind the eye, as far off as the picture is wide.
+               procedure Evaluate (V : Real_Array; R : out Real_Array) is
+                  Jx : constant Joint_Array := Joints_Of (V);
+               begin
+                  R := [others => 0.0];
+                  for F in 1 .. Frames loop
+                     if Count_Of (F) > 0 then
+                        declare
+                           Back : constant Rigid := Inverse (Eye_At (Jx, C, Changes_Of (F)));
+                        begin
+                           for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                              declare
+                                 I     : constant Positive := By_Frame (Q);
+                                 U, Vv : Real;
+                                 Ahead : Boolean;
+                              begin
+                                 if Has_Track (I) then
+                                    Project (X.L, Back * Track_Points (I), U, Vv, Ahead);
+                                    R (R'First + 2 * I - 2) :=
+                                      (if Ahead then U - Sight (Sight'First + I - 1).U else Real (Width));
+                                    R (R'First + 2 * I - 1) :=
+                                      (if Ahead then Vv - Sight (Sight'First + I - 1).V else Real (Width));
+                                 end if;
+                              end;
+                           end loop;
+                        end;
+                     end if;
+                  end loop;
+               end Evaluate;
+
+               procedure Solve is new Robust_Fit (Count, 2 * S, Driver.Conventions.Initial_Damping, Evaluate,
+                                                  At_Once => True, To_The_End => True);
+               V0 : Real_Array (1 .. Count) := [others => 0.0];
+               R0 : Real_Access := new Real_Array (1 .. 2 * S);
+            begin
+               for J in 1 .. N loop
+                  Perp (X.Joints (J).W, Tilt_1 (J), Tilt_2 (J));
+                  Side_1 (J) := Tilt_1 (J);
+                  Side_2 (J) := Tilt_2 (J);
+               end loop;
+               for I in 1 .. S loop
+                  declare
+                     Sg    : Sighting renames Sight (Sight'First + I - 1);
+                     Depth : constant Real := Depth_Of (X, Sg.Track);
+                  begin
+                     Has_Track (I) := Depth > 0.0;
+                     if Has_Track (I) then
+                        Track_Points (I) := Depth * Ray (X.L, Sg.U0, Sg.V0);
+                     end if;
+                  end;
+               end loop;
+               Evaluate (V0, R0.all);
+               --  The noise at the start, over the sightings with a point (the others' residuals are nought).
+               declare
+                  Valid : Real_Access := new Real_Array (1 .. 2 * S);
+                  K     : Natural := 0;
+               begin
+                  for I in 1 .. S loop
+                     if Has_Track (I) then
+                        Valid (K + 1) := R0 (2 * I - 1);
+                        Valid (K + 2) := R0 (2 * I);
+                        K := K + 2;
+                     end if;
+                  end loop;
+                  if K > 0 then
+                     Solve (V0, Noise_Of (Valid (1 .. K)));
+                  end if;
+                  Free (Valid);
+               end;
+               Into.Order := C;
+               Into.Joints := Joints_Of (V0);
+               Into.L := X.L;
+               Into.Report := (others => <>);
+               Into.Report.Depths := X.Report.Depths;
+               Into.Report.All_Count := S;
+               Free (R0);
+               Free (Track_Points);
+               Free (Has_Track);
+            end Quick_Fit;
+
+            --  Order C with the joint at place I taken out and put back at place K.
+            function Moved (C : Chain_Order; I, K : Positive) return Chain_Order is
+               Out_Of : Chain_Order (1 .. N - 1);
+               Next   : Natural := 0;
+               Result : Chain_Order (1 .. N);
+            begin
+               for P in 1 .. N loop
+                  if P /= I then
+                     Next := Next + 1;
+                     Out_Of (Next) := C (P);
+                  end if;
+               end loop;
+               Next := 0;
+               for P in 1 .. N loop
+                  if P = K then
+                     Result (P) := C (I);
+                  else
+                     Next := Next + 1;
+                     Result (P) := Out_Of (Next);
+                  end if;
+               end loop;
+               return Result;
+            end Moved;
+
+            --  The order the cheap score finds least: every order scored, in the lexicographic sequence, when there
+            --  are no more of them than N steps of a descent by two moves would score ((N - 1) ** 4 orders each);
+            --  else descents by single moves, the first from From and the others from orders drawn by the fit's own
+            --  generator, until a start ends where the least found ends, and from that least a descent by two moves:
+            --  two swaps each of which alone scores worse (the bench's s22, 10-20, 1 5 2 6 3 4 for 5 1 2 6 4 3).
+            procedure Global (From_Order : Chain_Order; Best : out Chain_Order; Best_M : out Real; Starts : out Natural)
+            is
+               Every      : Real := 1.0;
+               Steps_Cost : constant Real := Real (N) * Real (N - 1) ** 4;
+               Drawn      : Sampler;
+
+               --  From C, to the least order one move from it (Two: or two moves), until none is less.
+               procedure Descend (C : in out Chain_Order; M : in out Real; Two : Boolean) is
+               begin
+                  loop
+                     declare
+                        Next   : Chain_Order (1 .. N) := C;
+                        Next_M : Real := M;
+                     begin
+                        for I in 1 .. N loop
+                           for K in 1 .. N loop
+                              if K /= I and then K /= I - 1 then
+                                 declare
+                                    C1 : constant Chain_Order := Moved (C, I, K);
+                                    M1 : constant Real := Cheap (C1);
+                                 begin
+                                    if M1 < Next_M then
+                                       Next_M := M1;
+                                       Next := C1;
+                                    end if;
+                                    if Two then
+                                       for I2 in 1 .. N loop
+                                          for K2 in 1 .. N loop
+                                             if K2 /= I2 and then K2 /= I2 - 1 then
+                                                declare
+                                                   C2 : constant Chain_Order := Moved (C1, I2, K2);
+                                                   M2 : constant Real := Cheap (C2);
+                                                begin
+                                                   if M2 < Next_M then
+                                                      Next_M := M2;
+                                                      Next := C2;
+                                                   end if;
+                                                end;
+                                             end if;
+                                          end loop;
+                                       end loop;
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                        exit when Next_M >= M;
+                        C := Next;
+                        M := Next_M;
+                     end;
+                  end loop;
+               end Descend;
+            begin
+               Best := From_Order;
+               Best_M := Cheap (From_Order);
+               Starts := 0;
+               for K in 2 .. N loop
+                  exit when Every > Steps_Cost;
+                  Every := Every * Real (K);
+               end loop;
+               if Every <= Steps_Cost then
+                  declare
+                     C : Chain_Order (1 .. N) := [for I in 1 .. N => I];
+                  begin
+                     loop
+                        declare
+                           M : constant Real := Cheap (C);
+                        begin
+                           if M < Best_M then
+                              Best_M := M;
+                              Best := C;
+                           end if;
+                        end;
+                        declare
+                           I : Natural := N - 1;
+                        begin
+                           while I >= 1 and then C (I) > C (I + 1) loop
+                              I := I - 1;
+                           end loop;
+                           exit when I = 0;
+                           declare
+                              J  : Positive := N;
+                              T  : Positive;
+                              Lo : Positive := I + 1;
+                              Hi : Positive := N;
+                           begin
+                              while C (J) < C (I) loop
+                                 J := J - 1;
+                              end loop;
+                              T := C (I);
+                              C (I) := C (J);
+                              C (J) := T;
+                              while Lo < Hi loop
+                                 T := C (Lo);
+                                 C (Lo) := C (Hi);
+                                 C (Hi) := T;
+                                 Lo := Lo + 1;
+                                 Hi := Hi - 1;
+                              end loop;
+                           end;
+                        end;
+                     end loop;
+                  end;
+                  return;
                end if;
-            end loop;
-            if Multi = 0 then
-               Fail ("no keyframe moved two joints at once: the order of the joints along the arm is not told");
-               return;
-            end if;
-            declare
-               Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  0: not placed
-               R      : Real_Access := new Real_Array (1 .. 2 * Multi);
-               Here_R : Real_Access := new Real_Array (1 .. 2 * Multi);   --  the residuals of the order found
-               Poses  : Rigid_Access := new Pose_Array;
-               Placed : Natural := 0;   --  sightings of placed points in those keyframes
+               loop
+                  Starts := Starts + 1;
+                  declare
+                     C : Chain_Order (1 .. N) := From_Order;
+                     M : Real;
+                  begin
+                     if Starts > 1 then
+                        declare
+                           Picked : Count_Array (1 .. N);
+                        begin
+                           Pick (Drawn, N, Picked);
+                           for P in 1 .. N loop
+                              C (P) := Picked (P);
+                           end loop;
+                        end;
+                     end if;
+                     M := Cheap (C);
+                     Descend (C, M, Two => False);
+                     if M < Best_M then
+                        Best_M := M;
+                        Best := C;
+                     elsif Starts > 1 and then C = Best then
+                        exit;
+                     end if;
+                  end;
+               end loop;
+               Descend (Best, Best_M, Two => True);
+            end Global;
 
-               --  The placed sightings, each with its point where its track's depth puts it along its reference line
-               --  of sight: no order changes them, and the line of sight (Ray, through the lens's distortion) was found
-               --  again for every sighting of every order, 1440 orders a fit of six joints (a13 on 10-16: stage 4 took
-               --  7.8 to 9.9 s a fit against 1.4 to 2.1 before every order was scored).
-               type Placed_Sighting is record
-                  Frame : Positive := 1;
-                  Point : Vec3 := Zero3;
-                  U, V  : Real := 0.0;
-               end record;
-               type Placed_Array is array (Positive range <>) of Placed_Sighting;
-               type Placed_Access is access Placed_Array;
-               procedure Free is new Ada.Unchecked_Deallocation (Placed_Array, Placed_Access);
-               Placed_At : Placed_Access;
+            --  Whether X's order explains the keyframes of several joints as the joints explain their own: those
+            --  keyframes' median residuals ranked against the keyframes of one joint's (Mann and Whitney's U, the
+            --  pairs in which the several's is the larger), not above half the pairs by more than Z of U's spread
+            --  when the two come from one distribution. Judged by the medians' own spread, an order that missed some
+            --  keyframes by pixels and others not at all spread them so wide that 1.255 px against 0.230 passed (s36
+            --  of the bench, 10-20).
+            procedure Adequacy (X : Order_Fit; Single_M, Multi_M : out Real; Adequate : out Boolean) is
+               Pu, Pv : Real_Access := new Real_Array (1 .. S);
+               Ms, Mm : Real_Array (1 .. Frames);
+               Ks, Km : Natural := 0;
+            begin
+               Predict (X, X.Order, Pu.all, Pv.all);
+               for F in 1 .. Frames loop
+                  if Count_Of (F) > 0 then
+                     declare
+                        D : Real_Array (1 .. 2 * Count_Of (F));
+                        K : Natural := 0;
+                     begin
+                        for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                           declare
+                              I : constant Positive := By_Frame (Q);
+                           begin
+                              D (K + 1) := (if Pu (I) < Real'Last then abs (Pu (I) - Sight (Sight'First + I - 1).U)
+                                            else Real'Last);
+                              D (K + 2) := (if Pv (I) < Real'Last then abs (Pv (I) - Sight (Sight'First + I - 1).V)
+                                            else Real'Last);
+                              K := K + 2;
+                           end;
+                        end loop;
+                        if Several (F) then
+                           Km := Km + 1;
+                           Mm (Km) := Driver.Stats.Median (D (1 .. K));
+                        elsif Own_Joint (F) > 0 then
+                           Ks := Ks + 1;
+                           Ms (Ks) := Driver.Stats.Median (D (1 .. K));
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               Free (Pu);
+               Free (Pv);
+               Single_M := (if Ks > 0 then Driver.Stats.Median (Ms (1 .. Ks)) else 0.0);
+               Multi_M := (if Km > 0 then Driver.Stats.Median (Mm (1 .. Km)) else 0.0);
+               if Ks = 0 or else Km = 0 then
+                  Adequate := True;
+                  return;
+               end if;
+               declare
+                  U : Real := 0.0;
+               begin
+                  for A of Mm (1 .. Km) loop
+                     for B of Ms (1 .. Ks) loop
+                        U := U + (if A > B then 1.0 elsif A = B then 0.5 else 0.0);
+                     end loop;
+                  end loop;
+                  Adequate := not (U - Real (Ks * Km) / 2.0
+                                   > Driver.Conventions.Z * Sqrt (Real (Ks * Km * (Ks + Km + 1)) / 12.0));
+               end;
+            end Adequacy;
 
-               --  The median across and down of the reprojections of those sightings with the joints in order C,
-               --  in pixels, and its standard error, the residuals into Into, the eye's poses into At_Poses. A point
-               --  the order puts behind the eye lands nowhere.
-               procedure Score_Into
-                 (C : Chain_Order; At_Poses : in out Rigid_Array; Into : in out Real_Array; Median, Error : out Real)
-               is
+            --  Whether A's places of the sightings (Au, Av) tell it from B's (Bu, Bv) as the better, over the keyframes
+            --  of Half (0 every one, 1 the odd, 2 the even): only a keyframe where the two put the sightings apart, by
+            --  the median, more than Z of A's residuals' scatter tells one order from the other (elsewhere both
+            --  predict what was seen alike, and its sign is the noise's); over those, B's median residual larger than
+            --  A's by more than Z of how much A's keyframe medians vary from one keyframe to the next, times the root
+            --  of their count. A keyframe neither explains (its median no larger than A's keyframes' typical one by Z
+            --  of their spread) is aside: an aligner's answers on another place of the picture (u11, 10-19, eight
+            --  keyframes of 268 more wrong than right). One whose points A puts behind the eye tells against A; one
+            --  where only B does, for it.
+            --  What the test found, for the log to say why an order is not told.
+            type Judgement is record
+               Smaller : Boolean := False;
+               Telling : Natural := 0;     --  keyframes that put the two apart and one of them explains
+               Aside   : Natural := 0;     --  that put them apart and neither explains
+               Gap     : Real := 0.0;      --  B's medians less A's, summed over the telling keyframes, px
+               Needed  : Real := 0.0;      --  what the test asks of that sum, px
+               Behind, Beyond : Boolean := False;
+            end record;
+
+            function Judge (Au, Av, Bu, Bv : Real_Array; Half : Natural) return Judgement is
+               Z       : constant Real := Driver.Conventions.Z;
+               Aside   : Natural := 0;
+               Medians : Real_Array (1 .. Frames);
+               Km      : Natural := 0;
+               Spread  : Real := Real'Last;
+               Typical : Real := 0.0;
+               Noise   : Real := 0.0;
+               Sum     : Real := 0.0;
+               M       : Natural := 0;
+               Behind, Beyond : Boolean := False;
+               function In_Half (F : Positive) return Boolean is (Half = 0 or else F mod 2 = Half mod 2);
+               function Sizes (Pu, Pv : Real_Array; F : Positive) return Real_Array is
+                  D : Real_Array (1 .. 2 * Count_Of (F));
                   K : Natural := 0;
                begin
-                  for Frame in 1 .. Frames loop
-                     At_Poses (Frame) := Eye_At (Joints, C, Changes_Of (Frame));
-                  end loop;
-                  for P of Placed_At.all loop
+                  for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
                      declare
-                        T     : Rigid renames At_Poses (P.Frame);
-                        U, V  : Real;
-                        Ahead : Boolean;
+                        I : constant Positive := By_Frame (Q);
                      begin
-                        Project (Lens0, Transpose (T.Rotation) * (P.Point - T.Translation), U, V, Ahead);
-                        Into (K + 1) := (if Ahead then U - P.U else Real'Last);
-                        Into (K + 2) := (if Ahead then V - P.V else Real'Last);
+                        D (K + 1) := (if Pu (I) >= Real'Last then Real'Last else abs (Pu (I) - Sight (Sight'First + I - 1).U));
+                        D (K + 2) := (if Pv (I) >= Real'Last then Real'Last else abs (Pv (I) - Sight (Sight'First + I - 1).V));
                         K := K + 2;
                      end;
                   end loop;
-                  Median := Median_Abs (Into (1 .. K));
-                  --  The median point lands behind the eye: no residual, and none to lower by a standard error.
-                  if Median >= Real'Last then
-                     Median := Real'Last;
-                     Error := 0.0;
-                  else
-                     Error := Median_Error (Median, K);
-                  end if;
-               end Score_Into;
-
-               --  Whether the residuals A are significantly the smaller than B (the same sightings, in the same
-               --  order), keyframe by keyframe: a keyframe's sightings share its readings' errors and where the servos
-               --  landed it within their dead band, and are no independent samples of how well an order fits. Each
-               --  keyframe gives the median of its residuals' sizes under each; Wilcoxon's signed ranks of their
-               --  differences over the keyframes, ties sharing the mean of their ranks, by the ranks' exact
-               --  distribution (every keyframe's sign either way alike), significant when its upper tail is below the
-               --  Gaussian's at Z. Two orders' medians are each as uncertain as their residuals are few, but they are
-               --  read off the same sightings, and what tells one order from another is how each moves: compared by
-               --  the standard error of one median, the true order was no move from a wrong one
-               --  (robot.kinematics.desktop with stage 1's plane, 10-16: 0.647 against 0.660 +- 0.030 px), and taken
-               --  wherever a median was lower, the search wandered to wrong orders whose medians the noise put lower
-               --  still (all three of its sweeps). Ranked residual by residual, the thousands of sightings of a few
-               --  keyframes told a wrong order against its swap: s83 (servo seed 6 of the fake robot, 10-18), 1 3 2 4
-               --  5 6 for the true 1 3 4 2 5 6, "every other order searched leaves residuals significantly the larger".
-               --  What the test found, for the log to say why an order is not told.
-               type Judgement is record
-                  Smaller : Boolean := False;
-                  Seen    : Natural := 0;          --  keyframes with sightings
-                  Telling : Natural := 0;          --  of them, those that put the two orders' points apart
-                  Noise   : Real := 0.0;           --  A's residuals' scatter, robust
-                  Spread  : Real := Real'Last;     --  how much A's keyframe medians vary
-                  Sum     : Real := 0.0;           --  B's medians less A's over the telling keyframes
-                  Needed  : Real := Real'Last;     --  what the sum must pass: Z of the spread for each telling one
-                  Behind  : Boolean := False;      --  A puts a telling keyframe's points behind the eye
-                  Beyond  : Boolean := False;      --  only B does
-                  Aside   : Natural := 0;          --  telling keyframes neither order explains
-               end record;
-
-               function Judge (A, B : Real_Array) return Judgement is
-                  Sightings : constant Natural := A'Length / 2;
-                  Verdict   : Judgement;
-                  First_Of  : array (1 .. Frames + 1) of Natural := [others => 0];   --  each keyframe's first value
-                  Filled    : array (1 .. Frames) of Natural := [others => 0];
-                  Sizes_A   : Real_Access := new Real_Array (1 .. 2 * Sightings);
-                  Sizes_B   : Real_Access := new Real_Array (1 .. 2 * Sightings);
-                  Apart_Of  : Real_Access := new Real_Array (1 .. 2 * Sightings);   --  where A and B put a sighting
-                  Noise     : Real := 0.0;   --  of A's residuals, robust
-                  M : Natural := 0;
-                  function Frame_Of (P : Positive) return Positive is (Placed_At (Placed_At'First + P - 1).Frame);
+                  return D;
+               end Sizes;
+               function Explains (V : Real) return Boolean is
+                 (V < Real'Last and then (Spread >= Real'Last or else V <= Typical + Z * Spread));
+            begin
+               declare
+                  Finite : Real_Access := new Real_Array (1 .. 2 * S);
+                  K      : Natural := 0;
                begin
-                  --  The values grouped by keyframe, in the order they come.
-                  First_Of (1) := 1;
-                  for P in 1 .. Sightings loop
-                     First_Of (Frame_Of (P) + 1) := First_Of (Frame_Of (P) + 1) + 2;
-                  end loop;
-                  for F in 1 .. Frames loop
-                     First_Of (F + 1) := First_Of (F + 1) + First_Of (F);
-                  end loop;
-                  for P in 1 .. Sightings loop
-                     declare
-                        F  : constant Positive := Frame_Of (P);
-                        At_Value : constant Positive := First_Of (F) + Filled (F);
-                        Au : constant Real := A (A'First + 2 * (P - 1));
-                        Av : constant Real := A (A'First + 2 * (P - 1) + 1);
-                        Bu : constant Real := B (B'First + 2 * (P - 1));
-                        Bv : constant Real := B (B'First + 2 * (P - 1) + 1);
-                        --  The residuals are each order's prediction less the one sighting: their difference is how far
-                        --  apart the two orders put it, whatever was seen. Where both put it behind the eye they agree
-                        --  it is nowhere, and it tells neither from the other; where one does, they are as far apart
-                        --  as can be.
-                        A_Nowhere : constant Boolean := abs Au >= Real'Last or else abs Av >= Real'Last;
-                        B_Nowhere : constant Boolean := abs Bu >= Real'Last or else abs Bv >= Real'Last;
-                        Apart : constant Real :=
-                          (if A_Nowhere and then B_Nowhere then 0.0
-                           elsif A_Nowhere or else B_Nowhere then Real'Last
-                           else Sqrt ((Au - Bu) ** 2 + (Av - Bv) ** 2));
-                     begin
-                        for Part in 0 .. 1 loop
-                           Sizes_A (At_Value + Part) := abs A (A'First + 2 * (P - 1) + Part);
-                           Sizes_B (At_Value + Part) := abs B (B'First + 2 * (P - 1) + Part);
-                           Apart_Of (At_Value + Part) := Apart;
-                        end loop;
-                        Filled (F) := Filled (F) + 2;
-                     end;
-                  end loop;
-                  --  Only a keyframe where the two orders put its sightings apart, by the median, more than A's own
-                  --  residuals scatter, at Z, tells one order from the other: elsewhere both predict what was seen
-                  --  alike, and its sign is the noise's. Chosen by the predictions alone, not by what was seen, the
-                  --  keyframes kept leave the test its level; a keyframe that tells nothing only dilutes it: s83
-                  --  (servo seed 6, replayed 10-18) kept its 17 last untold orders through 40 keyframes of which the
-                  --  turns that tell them apart, 3 to 40 px apart against 0.25 px of noise, were a few.
-                  declare
-                     Finite : Real_Access := new Real_Array (1 .. 2 * Sightings);
-                     K      : Natural := 0;
-                  begin
-                     for I in A'Range loop
-                        if abs A (I) < Real'Last then
-                           K := K + 1;
-                           Finite (K) := A (I);
-                        end if;
-                     end loop;
-                     Noise := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else 0.0);
-                     Free (Finite);
-                  end;
-                  --  Sized, not signed: a keyframe where B's median residual is many times A's is as much evidence as
-                  --  it is large. Counted only by its sign, ten keyframes all one way were the least that told an order
-                  --  at Z (2 ** -10 below the Gaussian's tail), and the order exam's arms (robot.order.exam, 10-18) were
-                  --  never told: eleven of twelve fitted their true order as the best after every pair the fit named was
-                  --  turned, their wrong orders' medians several times the true one's in the keyframes that tell them.
-                  --  The scale a keyframe's difference is judged at is how much A's own median varies from one keyframe
-                  --  to the next (robust, over every keyframe): a keyframe's shared error (its view, where it landed)
-                  --  moves its whole median, as much for the two orders, and is the largest that varies between
-                  --  keyframes; the sum of the told keyframes' differences is then judged against it at Z. A keyframe
-                  --  whose points A puts behind the eye tells against A; one whose points only B puts there, for it; one
-                  --  whose points both put there tells neither: counted against A, it kept A from being told from every
-                  --  order that put them there as well.
-                  declare
-                     Medians : Real_Array (1 .. Frames);
-                     Km      : Natural := 0;
-                     Spread  : Real := Real'Last;
-                     Sum     : Real := 0.0;
-                     Behind, Beyond : Boolean := False;
-                     Typical : Real := 0.0;   --  A's keyframe medians' own median
-                     Aside   : Natural := 0;
-                     --  Whether an order explains a keyframe: its median residual there no larger than A's keyframes'
-                     --  medians are, at Z of their spread. A keyframe neither order explains is sighted where neither
-                     --  puts its points (an aligner's answers on another place of the picture, a whole keyframe of them
-                     --  together), and how much farther one of them puts them is no evidence of either: summed as
-                     --  evidence, one such keyframe outweighed every other. u11 (servo seed 3 of the fake robot, both
-                     --  arms, 10-19), arm 1: of its 268 keyframes, 8 had more of their answers wrong than right by the
-                     --  truth (keyframe 228, a turn of c2 with c3, 66 of 66), the fit left them 17 to 54 px rms against
-                     --  1 to 2 elsewhere, and its order went from one swap off the truth to 4 2 1 6 5 3 and 1 4 5 2 6 3;
-                     --  u10, the same body and code, had none such of 145 and told the true order.
-                     function Explains (V : Real) return Boolean is
-                       (V < Real'Last and then (Spread >= Real'Last or else V <= Typical + Driver.Conventions.Z * Spread));
-                  begin
-                     for F in 1 .. Frames loop
-                        if Filled (F) > 0 then
-                           declare
-                              X : constant Real := Driver.Stats.Median (Sizes_A (First_Of (F) .. First_Of (F) + Filled (F) - 1));
-                           begin
-                              if X < Real'Last then
-                                 Km := Km + 1;
-                                 Medians (Km) := X;
-                              end if;
-                           end;
-                        end if;
-                     end loop;
-                     if Km > 1 then
-                        Spread := Driver.Stats.Robust_Sigma (Medians (1 .. Km));
-                        Typical := Driver.Stats.Median (Medians (1 .. Km));
+                  for I in 1 .. S loop
+                     if Au (I) < Real'Last then
+                        Finite (K + 1) := Au (I) - Sight (Sight'First + I - 1).U;
+                        Finite (K + 2) := Av (I) - Sight (Sight'First + I - 1).V;
+                        K := K + 2;
                      end if;
-                     for F in 1 .. Frames loop
-                        if Filled (F) > 0 then
-                           Verdict.Seen := Verdict.Seen + 1;
+                  end loop;
+                  Noise := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else 0.0);
+                  Free (Finite);
+               end;
+               for F in 1 .. Frames loop
+                  if Count_Of (F) > 0 and then In_Half (F) then
+                     declare
+                        X : constant Real := Driver.Stats.Median (Sizes (Au, Av, F));
+                     begin
+                        if X < Real'Last then
+                           Km := Km + 1;
+                           Medians (Km) := X;
                         end if;
-                        if Filled (F) > 0
-                          and then Driver.Stats.Median (Apart_Of (First_Of (F) .. First_Of (F) + Filled (F) - 1))
-                                   > Driver.Conventions.Z * Noise
-                        then
+                     end;
+                  end if;
+               end loop;
+               if Km > 1 then
+                  Spread := Driver.Stats.Robust_Sigma (Medians (1 .. Km));
+                  Typical := Driver.Stats.Median (Medians (1 .. Km));
+               end if;
+               for F in 1 .. Frames loop
+                  if Count_Of (F) > 0 and then In_Half (F) then
+                     declare
+                        Apart : Real_Array (1 .. Count_Of (F));
+                     begin
+                        for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
                            declare
-                              X : constant Real := Driver.Stats.Median (Sizes_A (First_Of (F) .. First_Of (F) + Filled (F) - 1));
-                              Y : constant Real := Driver.Stats.Median (Sizes_B (First_Of (F) .. First_Of (F) + Filled (F) - 1));
+                              I : constant Positive := By_Frame (Q);
+                           begin
+                              Apart (Q - First_Of (F) + 1) :=
+                                (if Au (I) >= Real'Last and then Bu (I) >= Real'Last then 0.0
+                                 elsif Au (I) >= Real'Last or else Bu (I) >= Real'Last then Real'Last
+                                 else Sqrt ((Au (I) - Bu (I)) ** 2 + (Av (I) - Bv (I)) ** 2));
+                           end;
+                        end loop;
+                        if Driver.Stats.Median (Apart) > Z * Noise then
+                           declare
+                              X : constant Real := Driver.Stats.Median (Sizes (Au, Av, F));
+                              Y : constant Real := Driver.Stats.Median (Sizes (Bu, Bv, F));
                            begin
                               if X >= Real'Last and then Y >= Real'Last then
                                  null;
@@ -4474,891 +5705,490 @@ package body Driver.Robot.Kinematics.Fit is
                               end if;
                            end;
                         end if;
-                     end loop;
-                     Free (Sizes_A);
-                     Free (Sizes_B);
-                     Free (Apart_Of);
-                     Verdict.Telling := M;
-                     Verdict.Noise := Noise;
-                     Verdict.Spread := Spread;
-                     Verdict.Sum := Sum;
-                     Verdict.Behind := Behind;
-                     Verdict.Beyond := Beyond;
-                     Verdict.Aside := Aside;
-                     if Spread < Real'Last then
-                        Verdict.Needed := Driver.Conventions.Z * Spread * Sqrt (Real (M));
-                     end if;
-                     Verdict.Smaller :=
-                       (if Behind then False
-                        elsif Beyond then True
-                        else M > 0 and then Spread > 0.0 and then Spread < Real'Last and then Sum > Verdict.Needed);
-                     return Verdict;
-                  end;
-               end Judge;
-
-               function Smaller (A, B : Real_Array) return Boolean is (Judge (A, B).Smaller);
-
-               --  Why B was not told from A, in words.
-               function Why_Image (J : Judgement) return String is
-                 ((if J.Behind then "the order found puts the points of a keyframe that tells the two apart behind the eye"
-                  elsif J.Telling = 0 then
-                    "no keyframe of" & J.Seen'Image & " puts the two orders' points apart by more than Z of the residuals' "
-                    & "scatter, " & Driver.Log.Image (J.Noise, 3) & " px"
-                  else J.Telling'Image & " of" & J.Seen'Image & " keyframes put the two orders' points apart by more than Z "
-                    & "of the residuals' scatter, " & Driver.Log.Image (J.Noise, 3) & " px; there its medians are larger by "
-                    & Driver.Log.Image (J.Sum, 3) & " px in all, against the " & Driver.Log.Image (J.Needed, 3)
-                    & " px Z of the keyframes' spread (" & Driver.Log.Image (J.Spread, 3) & " px) asks of that many")
-                 & (if J.Aside > 0 then ";" & J.Aside'Image & " more set aside, explained by neither order" else ""));
-
-
-               procedure Free_All is
-               begin
-                  Free (Depth);
-                  Free (R);
-                  Free (Here_R);
-                  Free (Poses);
-                  Free (Placed_At);
-               end Free_All;
-
-               Here : Real;
-            begin
-               for I in 1 .. Natural'Min (Tracks, Natural (Track_Depths.Length)) loop
-                  Depth (I) := Real'Max (0.0, Track_Depths (Track_Depths.First_Index + I - 1));
-               end loop;
-               for X of Sight loop
-                  if Several (X.Frame) and then Depth (X.Track) > 0.0 then
-                     Placed := Placed + 1;
+                     end;
                   end if;
                end loop;
-               if Placed = 0 then
-                  Free_All;
-                  Fail ("no point the keyframes of one joint placed is seen in a keyframe that moved several: the "
-                        & "order of the joints along the arm is not told");
-                  return;
-               end if;
-               Placed_At := new Placed_Array (1 .. Placed);
+               return
+                 (Smaller => (if Behind then False
+                              elsif Beyond then True
+                              else M > 0 and then Spread > 0.0 and then Spread < Real'Last
+                                   and then Sum > Z * Spread * Sqrt (Real (M))),
+                  Telling => M, Aside => Aside, Gap => Sum,
+                  Needed  => (if Spread < Real'Last then Z * Spread * Sqrt (Real (M)) else Real'Last),
+                  Behind  => Behind, Beyond => Beyond);
+            end Judge;
+
+            function Told_Over (Au, Av, Bu, Bv : Real_Array) return Boolean is
+              (Judge (Au, Av, Bu, Bv, 0).Smaller and then Judge (Au, Av, Bu, Bv, 1).Smaller
+               and then Judge (Au, Av, Bu, Bv, 2).Smaller);
+
+            --  Why B is not told from A: the first of every keyframe, the odd and the even that does not tell it.
+            function Why_Not_Told (Au, Av, Bu, Bv : Real_Array) return String is
+            begin
+               for Half in 0 .. 2 loop
+                  declare
+                     J : constant Judgement := Judge (Au, Av, Bu, Bv, Half);
+                  begin
+                     if not J.Smaller then
+                        return (case Half is when 0 => "every keyframe", when 1 => "the odd keyframes",
+                                                       when others => "the even keyframes")
+                          & (if J.Behind then ": the order kept puts a keyframe's points behind the eye"
+                             else ":" & J.Telling'Image & " put the two apart, larger by " & Driver.Log.Image (J.Gap, 2)
+                                  & " px against " & Driver.Log.Image (J.Needed, 2) & "," & J.Aside'Image
+                                  & " aside (neither explains them)");
+                     end if;
+                  end;
+               end loop;
+               return "told";
+            end Why_Not_Told;
+
+            Here       : Order_Fit;
+            Unordered  : Order_Fit;   --  the joints and lens of the keyframes of one joint each, which no order changes
+            Start      : Chain_Order (1 .. N) := [for I in 1 .. N => I];
+            Neighbours : constant Positive := (N - 1) ** 2 + 1;   --  the orders one move away, and the global least
+            Close      : Order_Table_Access := new Order_Table (1 .. Neighbours);
+            Close_M    : Real_Access := new Real_Array (1 .. Neighbours);   --  each one's cheap score
+            Close_Fit  : Fit_Table_Access := new Fit_Table (1 .. Neighbours);
+            Closes     : Natural := 0;
+            Passes     : Natural := 0;
+            Adequate   : Boolean := True;
+            Single_M, Multi_M : Real := 0.0;
+            Fitted_Now : Natural := 0;   --  of the pass's orders weighed, those fitted
+         begin
+            --  The sightings by keyframe (a counting sort), and the keyframes of several joints.
+            for X of Sight loop
+               Count_Of (X.Frame) := Count_Of (X.Frame) + 1;
+            end loop;
+            declare
+               Next : Natural := 1;
+               Fill : array (1 .. Frames) of Natural := [others => 0];
+            begin
+               for F in 1 .. Frames loop
+                  First_Of (F) := Next;
+                  Next := Next + Count_Of (F);
+               end loop;
+               for I in 1 .. S loop
+                  declare
+                     F : constant Positive := Sight (Sight'First + I - 1).Frame;
+                  begin
+                     By_Frame (First_Of (F) + Fill (F)) := I;
+                     Fill (F) := Fill (F) + 1;
+                  end;
+               end loop;
+               for F in 1 .. Frames loop
+                  if Several (F) and then Count_Of (F) > 0 then
+                     Multi_Count := Multi_Count + 1;
+                  end if;
+               end loop;
+               Multi_Frames := new Count_Array (1 .. Multi_Count);
+               Multi_Count := 0;
+               for F in 1 .. Frames loop
+                  if Several (F) and then Count_Of (F) > 0 then
+                     Multi_Count := Multi_Count + 1;
+                     Multi_Frames (Multi_Count) := F;
+                  end if;
+               end loop;
                declare
-                  K : Natural := 0;
+                  Multi_Sightings : Natural := 0;
                begin
+                  for K in 1 .. Multi_Count loop
+                     Multi_Sightings := Multi_Sightings + Count_Of (Multi_Frames (K));
+                  end loop;
+                  Residuals := new Real_Array (1 .. Natural'Max (1, 2 * Multi_Sightings));
+               end;
+            end;
+            --  The order to begin from: the one kept before, or the joints' own; fitted in itself.
+            if From.Valid and then From.N = N then
+               Start := From.Chain;
+            end if;
+            --  Every order is fitted from the joints and lens of the keyframes of one joint each (Unordered), which
+            --  no order changes: from the joints of the order kept, fitted to it, the true order of the bench's s36
+            --  (10-20) came to 1.3 px on the keyframes of several joints, its own fit from those of one joint's to 0.24.
+            Unordered.Order := Start;
+            Unordered.Joints := Joints;
+            Unordered.L := Lens0;
+            Unordered.Report.Depths := Alone_Depths;
+            Quick_Fit (Start, Unordered, Here);
+            Fits_Made := Fits_Made + 1;
+            loop
+               Passes := Passes + 1;
+               declare
+                  Mo, Gm : Real;
+                  Co     : Natural;
+                  G      : Chain_Order (1 .. N);
+                  Starts : Natural;
+                  Best   : Natural := 0;
+                  Best_M : Real;   --  the least median residual of the keyframes of several joints, each order in its own fit
+               begin
+                  Prepare (Here);
+                  Mo := Cheap (Here.Order);
+                  Co := Cheap_Count;
+                  Best_M := Mo;
+                  Adequacy (Here, Single_M, Multi_M, Adequate);
+                  Global (Here.Order, G, Gm, Starts);
+                  Closes := 0;
+                  if G /= Here.Order then
+                     Closes := 1;
+                     Close (1) := G;
+                     Close_M (1) := Gm;
+                  end if;
+                  for I in 1 .. N loop
+                     for K in 1 .. N loop
+                        if K /= I and then K /= I - 1 then
+                           declare
+                              C  : constant Chain_Order := Moved (Here.Order, I, K);
+                              Mc : constant Real := Cheap (C);
+                              Cc : constant Natural := Cheap_Count;
+                           begin
+                              if C /= G
+                                and then (not Adequate
+                                          or else (Mc < Real'Last and then Co > 0 and then Cc > 0
+                                                   and then Mc - Mo <= Driver.Conventions.Z
+                                                                      * Sqrt (Median_Error (Mo, Co) ** 2
+                                                                              + Median_Error (Mc, Cc) ** 2)))
+                              then
+                                 Closes := Closes + 1;
+                                 Close (Closes) := C;
+                                 Close_M (Closes) := Mc;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                  end loop;
+                  --  Fitted in the order of their cheap scores, the least first; the first whose fit leaves every
+                  --  sighting less than the order kept takes its place at once. Each of them fitted first took a
+                  --  pass from an order the keyframes of several joints showed wrong (every move of one, 25 to 64 fits
+                  --  of 2 to 3 s), where the least of the cheap score was the order to go on to.
+                  for K in 2 .. Closes loop
+                     declare
+                        C : constant Chain_Order (1 .. N) := Close (K);
+                        M : constant Real := Close_M (K);
+                        P : Natural := K - 1;
+                     begin
+                        while P >= 1 and then Close_M (P) > M loop
+                           Close (P + 1) := Close (P);
+                           Close_M (P + 1) := Close_M (P);
+                           P := P - 1;
+                        end loop;
+                        Close (P + 1) := C;
+                        Close_M (P + 1) := M;
+                     end;
+                  end loop;
+                  Fitted_Now := 0;
+                  --  An order's own fit is judged where the orders differ: the median residual of the sightings of the
+                  --  keyframes of several joints (Cheap with its own joints, lens and depths). Every order explains
+                  --  those of one joint alike, and they are most of the sightings: by the median over every sighting
+                  --  the search walked from 0.473 px to 0.469 through orders that missed the keyframes of several
+                  --  joints by 1.4 to 4.5 px (the bench's s36, 10-20), one move from the truth at 0.24.
+                  --  As many fitted at once as the workers and the caller are (each fit its own), then judged in that
+                  --  order: the first that leaves less is the one a fit at a time would have taken. One at a time, a
+                  --  nine-joint arm's rounds took 10 to 20 s each of the bench's two minutes (s02 of the humanoid,
+                  --  10-20: 10 to 28 fits a round).
+                  declare
+                     First : Positive := 1;
+                  begin
+                     while First <= Closes and then Best = 0 loop
+                        declare
+                           Last : constant Positive := Natural'Min (Closes, First + Driver.Workers.Size - 1);
+                           procedure One (K : Positive) is
+                           begin
+                              Quick_Fit (Close (K), Unordered, Close_Fit (K));
+                           end One;
+                           procedure Every_One is new Driver.Parallel_For (One);
+                        begin
+                           Every_One (First, Last);
+                           Fits_Made := Fits_Made + (Last - First + 1);
+                           for K in First .. Last loop
+                              Fitted_Now := K;
+                              if Close_Fit (K).Report.All_Count > 0 then
+                                 Prepare (Close_Fit (K));
+                                 declare
+                                    Own_M : constant Real := Cheap (Close (K));
+                                    Own_C : constant Natural := Cheap_Count;
+                                 begin
+                                    --  Taken only when it leaves the sightings less by Z of the two medians' errors: an
+                                    --  order less by a hair is as good as the one kept, and the search walked on such hairs
+                                    --  from the true order of an arm whose keyframes shared an error to one 0.001 px less
+                                    --  (robot.kinematics.shared, 10-20: 0.236 against 0.237 px, neither told from the other).
+                                    if Own_C > 0 and then Co > 0
+                                      and then Own_M + Driver.Conventions.Z
+                                                       * Sqrt (Median_Error (Own_M, Own_C) ** 2 + Median_Error (Mo, Co) ** 2)
+                                               < Best_M
+                                    then
+                                       Best_M := Own_M;
+                                       Best := K;
+                                       exit;
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                           First := Last + 1;
+                        end;
+                     end loop;
+                  end;
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Arm & ": the order" & Image (Here.Order)
+                                   & " (focal " & Driver.Log.Image (Here.L.Fx, 1) & " px)"
+                                   & " leaves the sightings of keyframes of several joints " & Driver.Log.Image (Mo, 3)
+                                   & " px, those keyframes " & Driver.Log.Image (Multi_M, 3)
+                                   & " px (the median of their medians) against those of one "
+                                   & Driver.Log.Image (Single_M, 3) & (if Adequate then "" else ", NOT as well")
+                                   & "; the cheap score's least order" & Image (G) & " ("
+                                   & Driver.Log.Image (Gm, 3) & " px against " & Driver.Log.Image (Mo, 3) & ","
+                                   & Cheaps'Image & " orders scored"
+                                   & (if Starts > 0 then "," & Starts'Image & " starts" else "") & ");"
+                                   & Fitted_Now'Image & " of" & Closes'Image & " orders weighed fitted in themselves"
+                                   & (if Best > 0 then ", the least " & Image (Close (Best)) & " at "
+                                      & Driver.Log.Image (Best_M, 3) & " px"
+                                      else ", none less"));
+                  exit when Best = 0;
+                  Here := Close_Fit (Best);
+               end;
+            end loop;
+            --  The verdict over the orders weighed in the last pass.
+            declare
+               Hu, Hv : Real_Access := new Real_Array (1 .. S);
+               Cu, Cv : Real_Access := new Real_Array (1 .. S);
+               Untold_Of   : array (1 .. Neighbours) of Boolean := [others => False];
+               Untold_Here : Natural := 0;
+               Same_Arm    : Natural := 0;
+               Scatter     : Real := Real'Last;
+               Followable  : Real := 0.0;
+               Reach       : Real_Array (1 .. N) := [others => 0.0];
+               Said        : Ada.Strings.Unbounded.Unbounded_String;
+               --  The points, where Here's depths put them along their reference lines of sight.
+               Tracks      : Natural := 0;
+
+               --  A move of two joints together: either way each, by a share of its widest turn.
+               type Move is record
+                  I, J   : Positive := 1;
+                  Si, Sj : Real := 1.0;
+                  Share  : Real := 1.0;
+               end record;
+               function Change_Of (Mv : Move) return Real_Array is
+                  D : Real_Array (1 .. N) := [others => 0.0];
+               begin
+                  D (Mv.I) := Mv.Si * Mv.Share * Reach (Mv.I);
+                  D (Mv.J) := Mv.Sj * Mv.Share * Reach (Mv.J);
+                  return D;
+               end Change_Of;
+
+               function In_Picture (U, V : Real) return Boolean is
+                 (U >= 0.0 and then U < Real (Width) and then V >= 0.0 and then V < Real (Height));
+
+               --  After move Mv, how far apart Here's joints in its own order and in order C put the points both
+               --  put in the picture (the median, in pixels) and how many; and the median, over the points Here's
+               --  order puts in the picture, of how far C puts each from there (what the keyframe's window must reach).
+               procedure Separation (C : Chain_Order; Mv : Move; Median, Reached : out Real; Count : out Natural) is
+                  Back_1 : constant Rigid := Inverse (Eye_At (Here.Joints, Here.Order, Change_Of (Mv)));
+                  Back_2 : constant Rigid := Inverse (Eye_At (Here.Joints, C, Change_Of (Mv)));
+                  Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
+                  Far  : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
+                  Seen : array (1 .. Tracks) of Boolean := [others => False];
+                  Kf   : Natural := 0;
+               begin
+                  Count := 0;
                   for X of Sight loop
-                     if Several (X.Frame) and then Depth (X.Track) > 0.0 then
-                        K := K + 1;
-                        Placed_At (K) := (Frame => X.Frame, Point => Depth (X.Track) * Ray (Lens0, X.U0, X.V0),
-                                          U => X.U, V => X.V);
+                     if not Seen (X.Track) and then Depth_Of (Here, X.Track) > 0.0 then
+                        Seen (X.Track) := True;
+                        declare
+                           P              : constant Vec3 := Depth_Of (Here, X.Track) * Ray (Here.L, X.U0, X.V0);
+                           U1, V1, U2, V2 : Real;
+                           A1, A2         : Boolean;
+                        begin
+                           Project (Here.L, Back_1 * P, U1, V1, A1);
+                           Project (Here.L, Back_2 * P, U2, V2, A2);
+                           if A1 and then In_Picture (U1, V1) then
+                              Kf := Kf + 1;
+                              Far (Kf) := (if A2 then Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2) else Real'Last);
+                              if A2 and then In_Picture (U2, V2) then
+                                 Count := Count + 1;
+                                 Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
+                              end if;
+                           end if;
+                        end;
                      end if;
                   end loop;
-               end;
-               --  Every order of the joints, scored (Score): the search moved one joint at a time from a start ordered
-               --  by the axes' distances from the eye and stopped where no move lowered the median by more than its
-               --  standard error, and f16b's arm 1 came out in the wrong order in every pass at twice the right order's
-               --  median (10-15), the desktop's arm at 11.5 degrees in two wrong orders once stage 1 told its lens
-               --  (10-16). N! orders of one reprojection each: 720 for six joints. The order is the one of the least
-               --  median, the first of equals in the orders' lexicographic sequence.
-               --  Every first two joints at once (Driver.Parallel_For), each pair its own orders in their lexicographic
-               --  sequence with buffers of its own; the least median over them taken in the pairs' order, so that it is
-               --  the first of equals in the whole sequence, as one search of it in turn finds. A way a first joint
-               --  left six of them to ten processors and the Pi's four two rounds (a19 on 10-16: 3.8 to 17.2 s a fit);
-               --  a way a pair, 30.
+                  Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
+                  Reached := (if Kf > 0 then Driver.Stats.Median (Far (1 .. Kf)) else Real'Last);
+                  Free (Dist);
+                  Free (Far);
+               end Separation;
+
+               --  Per pair of joints (Earlier, Later as Here has them): the untold orders it tells most, and the turns
+               --  of its two joints that tell one of them most.
+               Tells    : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];
+               Turn_I, Turn_J : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
+               Power_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
+            begin
+               for X of Sight loop
+                  Tracks := Natural'Max (Tracks, X.Track);
+               end loop;
+               Predict (Here, Here.Order, Hu.all, Hv.all);
                declare
-                  type Chain_Access is access Chain_Order;
-                  procedure Free is new Ada.Unchecked_Deallocation (Chain_Order, Chain_Access);
-                  type Way_Result is record
-                     Found       : Boolean := False;
-                     Median      : Real := Real'Last;
-                     Order       : Chain_Access;
-                     Residuals   : Real_Access;
-                     Fails       : Boolean := False;   --  some order of its own is not significantly the larger
-                     Fail_Order  : Chain_Access;
-                     Fail_Median : Real := 0.0;
-                     Fail_Why    : Judgement;
-                  end record;
-                  --  The ways: every first joint, and when there are two or more joints, every second one after it.
-                  Kept    : constant Positive := Natural'Min (2, N);
-                  Ways    : constant Positive := (if N >= 2 then N * (N - 1) else N);
-                  Results : array (1 .. Ways) of Way_Result;
-                  Found   : Boolean := False;
-
-                  --  The first order of way W: its first joints (the W-th pair of them in lexicographic order), the
-                  --  rest in their own order.
-                  procedure First_Of (W : Positive; C : out Chain_Order) is
-                     J : constant Positive := (if Kept = 2 then (W - 1) / (N - 1) + 1 else W);
-                     S : constant Natural := (if Kept = 2 then (W - 1) mod (N - 1) + 1 else 0);   --  of the others
-                     K : Positive := Kept + 1;
-                     Seen : Natural := 0;
-                  begin
-                     C (1) := J;
-                     for Other in 1 .. N loop
-                        if Other /= J then
-                           Seen := Seen + 1;
-                           if Seen = S then
-                              C (2) := Other;
-                           end if;
-                        end if;
-                     end loop;
-                     for Other in 1 .. N loop
-                        if Other /= J and then (Kept = 1 or else Other /= C (2)) then
-                           C (K) := Other;
-                           K := K + 1;
-                        end if;
-                     end loop;
-                  end First_Of;
-
-                  --  C made the next order in lexicographic sequence with its first Kept joints kept; False after the
-                  --  last.
-                  function Next (C : in out Chain_Order) return Boolean is
-                     I : Natural := N - 1;
-                  begin
-                     while I >= Kept + 1 and then C (I) > C (I + 1) loop
-                        I := I - 1;
-                     end loop;
-                     if I < Kept + 1 then
-                        return False;
-                     end if;
-                     declare
-                        J  : Positive := N;
-                        T  : Positive;
-                        Lo : Positive := I + 1;
-                        Hi : Positive := N;
-                     begin
-                        while C (J) < C (I) loop
-                           J := J - 1;
-                        end loop;
-                        T := C (I);
-                        C (I) := C (J);
-                        C (J) := T;
-                        while Lo < Hi loop
-                           T := C (Lo);
-                           C (Lo) := C (Hi);
-                           C (Hi) := T;
-                           Lo := Lo + 1;
-                           Hi := Hi - 1;
-                        end loop;
-                     end;
-                     return True;
-                  end Next;
-
-                  function Image (O : Chain_Order) return String is
-                     Text : Ada.Strings.Unbounded.Unbounded_String;
-                  begin
-                     for K of O loop
-                        Ada.Strings.Unbounded.Append (Text, K'Image);
-                     end loop;
-                     return Ada.Strings.Unbounded.To_String (Text);
-                  end Image;
-
-                  procedure Search_From (W : Positive) is
-                     C      : Chain_Order (1 .. N);
-                     Own    : Rigid_Access := new Pose_Array;
-                     Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
-                     M, E   : Real;
-                     Result : Way_Result renames Results (W);
-                  begin
-                     Result.Order := new Chain_Order (1 .. N);
-                     Result.Residuals := new Real_Array (1 .. 2 * Multi);
-                     First_Of (W, C);
-                     loop
-                        Score_Into (C, Own.all, Into.all, M, E);
-                        if not Result.Found or else M < Result.Median then
-                           Result.Found := True;
-                           Result.Median := M;
-                           Result.Order.all := C;
-                           Result.Residuals.all := Into.all;
-                        end if;
-                        exit when not Next (C);
-                     end loop;
-                     Free (Own);
-                     Free (Into);
-                  end Search_From;
-                  procedure Search_All is new Driver.Parallel_For (Search_From);
-
-                  --  Told where every other order leaves residuals significantly the larger (Smaller): an order the
-                  --  sightings cannot tell from it leaves the joints' order to chance (the desktop's sweep of 3.4
-                  --  degrees, 10-16: no other order's residuals significantly the larger, and a wrong one reported
-                  --  fitted once stage 1 found the lens; s02's arm, 4157 sightings: the fit ordered its joints 1 5 4 2
-                  --  3 6 where they are 1 5 4 3 6 2, by the fake robot's scramble of their channels). An order not told
-                  --  is still the arm's: its residuals are the least, and it predicts the views the keyframes took;
-                  --  Order_Told says that it is not told, and the cells that move several joints, taken larger once
-                  --  the arm is fitted (Boot), are what tell it. Every first joint at once, each its own orders until
-                  --  the first that is not significantly the larger; the first such in the whole sequence is said.
-                  procedure Tell_From (W : Positive) is
-                     C      : Chain_Order (1 .. N);
-                     Own    : Rigid_Access := new Pose_Array;
-                     Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
-                     M, E   : Real;
-                     Result : Way_Result renames Results (W);
-                  begin
-                     First_Of (W, C);
-                     loop
-                        if C /= Order then
-                           Score_Into (C, Own.all, Into.all, M, E);
-                           Result.Fail_Why := Judge (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed));
-                           if not Result.Fail_Why.Smaller then
-                              Result.Fails := True;
-                              Result.Fail_Order := new Chain_Order'(C);
-                              Result.Fail_Median := M;
-                              exit;
-                           end if;
-                        end if;
-                        exit when not Next (C);
-                     end loop;
-                     Free (Own);
-                     Free (Into);
-                  end Tell_From;
-                  procedure Tell_All is new Driver.Parallel_For (Tell_From);
-
-                  --  An arm fitted before whose order was told keeps it while every order a swap of two joints next to
-                  --  each other away from it still leaves residuals significantly the larger (Smaller, the test that
-                  --  told it): those are the orders the sightings tell apart last (s10's untold orders were two such
-                  --  swaps, of joints whose axes meet). Every order searched and then scored again to tell the best took
-                  --  7.8 to 9.9 s of a fit (a13), fit after fit, while the sweep went on adding keyframes to an order
-                  --  already told: a22 (10-16) told 5 4 1 2 6 3 in its third pass and fitted twenty times more, its
-                  --  thirteen fits that gave their stages' times spending 112 s in this stage. An order one of those
-                  --  swaps comes near is searched again as ever.
-                  Kept_Told : Boolean := False;
+                  Finite : Real_Access := new Real_Array (1 .. 2 * S);
+                  K      : Natural := 0;
                begin
-                  if From.Valid and then From.N = N and then From.Order_Told then
-                     declare
-                        Own     : Rigid_Access := new Pose_Array;
-                        Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
-                        M, E    : Real;
-                        Swapped : Chain_Order (1 .. N);
-                     begin
-                        Score_Into (From.Chain, Own.all, Here_R.all, Here, E);
-                        Kept_Told := Here < Real'Last;
-                        for K in 1 .. N - 1 loop
-                           exit when not Kept_Told;
-                           Swapped := From.Chain;
-                           Swapped (K) := From.Chain (K + 1);
-                           Swapped (K + 1) := From.Chain (K);
-                           Score_Into (Swapped, Own.all, Into.all, M, E);
-                           Kept_Told := Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed));
-                        end loop;
-                        Free (Own);
-                        Free (Into);
-                     end;
-                  end if;
-                  if Kept_Told then
-                     Found := True;
-                     Order := From.Chain;
-                     Order_Is_Told := True;
-                     Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
-                                      & Image (Order) & ", told before, is told still against every swap of two joints"
-                                      & " next to each other; no other order is searched");
-                  else
-                     Here := Real'Last;
-                     Search_All (1, Ways);
-                     for J in 1 .. Ways loop
-                        if Results (J).Found and then (not Found or else Results (J).Median < Here) then
-                           Found := True;
-                           Order := Results (J).Order.all;
-                           Here := Results (J).Median;
-                           Here_R.all := Results (J).Residuals.all;
-                        end if;
-                     end loop;
-                     --  An arm fitted before keeps the order it had (From.Chain) unless the least here leaves residuals
-                     --  significantly the smaller (Smaller, the test that tells an order): a later estimate's orders can
-                     --  all score alike, and the least of equals, the first of the sequence, then took the place of the
-                     --  order the fits before had found (a19 on 10-16, at beat 7568: every order's median about 0.52 px
-                     --  where the right one had left 0.17, the order 1 2 3 4 5 6 taken, and the arm's fit fell to focal
-                     --  lengths of 130 and 145 px; s08's best order went back and forth between two, fit after fit).
-                     --  Which order is the best is judged at the scale of the two medians themselves (Median_Error), the
-                     --  least lower than the kept one by more than Z of their errors together; whether it is told stays
-                     --  the keyframes' test (Smaller). Kept until the keyframes told it, a wrong first best stayed best
-                     --  however much the others' residuals fell below its own: z7 replayed with the untold orders'
-                     --  windows (servo seed 7 of the fake robot, 10-18) kept 3 4 1 6 2 5 at 0.832 px against 0.411 px
-                     --  of 1 2 3 4 5 6, and at 1.121 against 0.608. The keyframes' test has its say on which is the best
-                     --  as well: the least takes the kept one's place too where the keyframes that tell the two apart find
-                     --  its residuals significantly the smaller (Smaller). By the medians alone a kept wrong order stood
-                     --  against the truth that left less: u9 (servo seed 3 of the fake robot, both arms, 10-19) kept 3 1 5
-                     --  2 6 4 for its arm 2 at 0.343 px against 3 5 1 2 6 4, the truth, at 0.337, whose sightings the
-                     --  three keyframes that told the two apart left 1.606 px the smaller in all against a bar of 0.722,
-                     --  and its sweep ended with the order not told.
-                     if Found and then From.Valid and then From.N = N and then From.Chain /= Order then
-                        declare
-                           Own    : Rigid_Access := new Pose_Array;
-                           Before : Real_Access := new Real_Array (1 .. 2 * Multi);
-                           M, E   : Real;
-                           Here_E : constant Real := Median_Error (Here, 2 * Placed);
-                        begin
-                           Score_Into (From.Chain, Own.all, Before.all, M, E);
-                           if M < Real'Last
-                             and then not (M - Here > Driver.Conventions.Z * Sqrt (E ** 2 + Here_E ** 2))
-                           then
-                              if Smaller (Here_R (1 .. 2 * Placed), Before (1 .. 2 * Placed)) then
-                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along "
-                                                  & (if Who = "" then "the arm" else Who) & "," & Image (Order)
-                                                  & ", takes the place of" & Image (From.Chain) & " (median "
-                                                  & Driver.Log.Image (Here, 3) & " px against " & Driver.Log.Image (M, 3)
-                                                  & "): the keyframes that tell the two apart leave its sightings"
-                                                  & " significantly the smaller");
-                              else
-                                 Order := From.Chain;
-                                 Here := M;
-                                 Here_R.all := Before.all;
-                              end if;
-                           end if;
-                           Free (Own);
-                           Free (Before);
-                        end;
+                  for I in 1 .. S loop
+                     if Hu (I) < Real'Last then
+                        Finite (K + 1) := Hu (I) - Sight (Sight'First + I - 1).U;
+                        Finite (K + 2) := Hv (I) - Sight (Sight'First + I - 1).V;
+                        K := K + 2;
                      end if;
-                     Order_Is_Told := Here < Real'Last;
-                     if Order_Is_Told then
-                        Tell_All (1, Ways);
-                        for J in 1 .. Ways loop
-                           if Results (J).Fails then
-                              Order_Is_Told := False;
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
-                                               & Image (Order) & ", is not told: the order"
-                                               & Image (Results (J).Fail_Order.all) & " leaves residuals of median "
-                                               & Driver.Log.Image (Results (J).Fail_Median, 3) & " px against "
-                                               & Driver.Log.Image (Here, 3)
-                                               & " px, not significantly the larger: "
-                                               & Why_Image (Results (J).Fail_Why));
-                              exit;
-                           end if;
-                        end loop;
-                        if Order_Is_Told then
-                           Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & (if Who = "" then "the arm" else Who) & ","
-                                            & Image (Order) & ", is told: every other order searched leaves residuals"
-                                            & " significantly the larger than its " & Driver.Log.Image (Here, 3) & " px");
-                        end if;
-                        --  An order not told: the joints next to each other along it whose swap leaves residuals not
-                        --  significantly the larger (Smaller) are the ones it lacks the evidence of, and Boot turns them
-                        --  together, a pair at a time. Two joints apart by a swap are told only by what they do turned
-                        --  together: the orders differ in the product of the two turns, not in either alone. The order
-                        --  nearest in residuals was taken for the pairs: s08's was the true order, two swaps away (5 with 1,
-                        --  2 with 6), s10's another (5 4 3 1 2 6 for 5 1 4 3 2 6, where the true order was 1 5 4 3 6 2),
-                        --  and s10 turned c1 with c4 and c1 with c3, its order still not told.
-                        if not Order_Is_Told then
-                           declare
-                              Own     : Rigid_Access := new Pose_Array;
-                              Into    : Real_Access := new Real_Array (1 .. 2 * Multi);
-                              M, E    : Real;
-                              Swapped : Chain_Order (1 .. N);
-                              Said    : Ada.Strings.Unbounded.Unbounded_String;
-                           begin
-                              for K in 1 .. N - 1 loop
-                                 Swapped := Order;
-                                 Swapped (K) := Order (K + 1);
-                                 Swapped (K + 1) := Order (K);
-                                 Score_Into (Swapped, Own.all, Into.all, M, E);
-                                 if not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed)) then
-                                    Untold.Append (Joint_Pair'(Earlier => Order (K), Later => Order (K + 1)));
-                                    Ada.Strings.Unbounded.Append
-                                      (Said, " " & Driver.Log.Image (Order (K)) & " with " & Driver.Log.Image (Order (K + 1))
-                                             & " (" & Driver.Log.Image (M, 3) & " px)");
-                                 end if;
-                              end loop;
-                              Free (Own);
-                              Free (Into);
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: the joints next to each other along"
-                                               & Image (Order) & " whose swap is not told:"
-                                               & (if Untold.Is_Empty then " none"
-                                                  else Ada.Strings.Unbounded.To_String (Said)));
-                           end;
-                        end if;
-                     end if;
+                  end loop;
+                  if K > 1 then
+                     Scatter := Driver.Stats.Robust_Sigma (Finite (1 .. K));
                   end if;
-                  --  ACTIVE (validation, 10-18): every order the sightings do not tell from this one, and the turn of
-                  --  two joints together that tells each from it most: the points the keyframes of one joint placed,
-                  --  seen through the eye where each order puts it after that turn, in pixels, the median over the
-                  --  points both put in the picture.
-                  if Found and then Here < Real'Last then
+                  Free (Finite);
+               end;
+               --  How far an order's places of the points may lie from Here's for a keyframe of a turn to be followed:
+               --  the window that reaches there, the fit's own scatter beside it, no wider than one a patch carries
+               --  where the pictures are finest (Driver.Alignment.Finest_Radius). A turn whose places lie farther
+               --  apart is searched wide and tells nothing: u6 (10-19) turned c2 with c6 where they told its untold
+               --  orders apart most, 140 px apart, and its four keyframes found none of their points.
+               if Scatter < Real'Last then
+                  Followable := Sqrt (Real'Max (0.0, Driver.Alignment.Finest_Radius (Width, Height) ** 2
+                                                     - Driver.Alignment.Window_Radius (Scatter) ** 2));
+               end if;
+               for F in 1 .. Frames loop
+                  for J in 1 .. N loop
+                     Reach (J) := Real'Max (Reach (J), abs Change (F, J));
+                  end loop;
+               end loop;
+               for K in 1 .. Closes loop
+                  Predict (Close_Fit (K), Close (K), Cu.all, Cv.all);
+                  if not Told_Over (Hu.all, Hv.all, Cu.all, Cv.all) then
+                     --  Untold: the most telling move of the pairs it swaps, by the separation's size over the error
+                     --  of its median, among the moves the aligner follows; none that tells it by Z, the same arm.
                      declare
-                        Own    : Rigid_Access := new Pose_Array;
-                        Into   : Real_Access := new Real_Array (1 .. 2 * Multi);
-                        M, E   : Real;
-                        C      : Chain_Order (1 .. N);
-                        Point_Of : array (1 .. Tracks) of Vec3 := [others => Zero3];
-                        Has      : array (1 .. Tracks) of Boolean := [others => False];
-                        Points   : Natural := 0;
-                        Reach    : Real_Array (1 .. N) := [others => 0.0];
-                        Untold_Count : Natural := 0;
-                        Tells    : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];   --  orders a pair tells
-                        --  Per pair, the turns of its two joints its most telling turn took, and how well it told.
-                        Turn_I_Of, Turn_J_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
-                        Power_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
-                        --  How far the untold orders may put the points from where Order puts them (each point's farthest,
-                        --  the median over the points: Spread_Of) for a keyframe of the turn to be followed: the window
-                        --  that reaches the farthest place (Kinematics' untold orders, Driver.Alignment.Window_Multiple),
-                        --  the fit's own scatter beside them, no wider than one a patch carries where the pictures are
-                        --  finest (Finest_Radius). A turn whose places of the points lie farther apart is searched wide
-                        --  and tells nothing: u6 (servo seed 3 of the fake robot, 10-19) turned its pairs where they
-                        --  told its untold orders apart most, c2 with c6 by 1784 and 1806 units, 140 px apart, and
-                        --  replayed, its four keyframes moved the points 48 to 70 px, a fifth to a quarter of them out of
-                        --  the picture, and found none of them; six of the 39 keyframes of its pairs found points, one
-                        --  of them hardly moved, and 719 orders stayed untold.
-                        Followable : Real := 0.0;
-                        Dist     : Real_Access;
-                        --  Every pair, each way each, by its joints' widest turns and by halves of them while both halves
-                        --  are turns the fit counts (Visible): a turn that takes most of the points out of the picture tells
-                        --  little however far apart it puts the rest (w7, servo seed 7 of the fake robot, 10-18: its last
-                        --  two untold orders were told apart most by c1 with c4 at their widest, 18 px apart over 6 points,
-                        --  a pair turned once and not again).
-                        type Move is record
-                           I, J   : Positive := 1;
-                           Si, Sj : Real := 1.0;
-                           Scale  : Real := 1.0;   --  the share of the joints' widest turns
-                        end record;
-                        package Move_Lists is new Ada.Containers.Vectors (Positive, Move);
-                        Move_Of : Move_Lists.Vector;
-                        function Change_Of (Mv : Move) return Real_Array is
-                           D : Real_Array (1 .. N) := [others => 0.0];
-                        begin
-                           D (Mv.I) := Mv.Si * Mv.Scale * Reach (Mv.I);
-                           D (Mv.J) := Mv.Sj * Mv.Scale * Reach (Mv.J);
-                           return D;
-                        end Change_Of;
-                        function Move_Image (Mv : Move) return String is
-                          ("c" & Driver.Log.Image (Mv.I) & " by " & Driver.Log.Image (Mv.Si * Mv.Scale * Reach (Mv.I), 4)
-                           & " with c" & Driver.Log.Image (Mv.J) & " by "
-                           & Driver.Log.Image (Mv.Sj * Mv.Scale * Reach (Mv.J), 4));
-                        --  The median pixel distance between the points as Order and Other put them after Mv, and how
-                        --  many both put in the picture.
-                        --  Per move and point: where Order puts the point after the move (computed once a move), whether
-                        --  before the eye and in the picture there, and the farthest an untold order puts it from that
-                        --  place, squared, as the fitted arm's prediction states it (Kinematics.Offer_Of: an order that
-                        --  puts the point behind the eye shows it nowhere and is not counted).
-                        type Place_Grid is array (Positive range <>, Positive range <>) of Real;
-                        type Place_Grid_Access is access Place_Grid;
-                        procedure Free is new Ada.Unchecked_Deallocation (Place_Grid, Place_Grid_Access);
-                        type Seen_Grid is array (Positive range <>, Positive range <>) of Boolean;
-                        type Seen_Grid_Access is access Seen_Grid;
-                        procedure Free is new Ada.Unchecked_Deallocation (Seen_Grid, Seen_Grid_Access);
-                        Base_U, Base_V, Far_Squared : Place_Grid_Access;
-                        Base_Ahead, Base_In : Seen_Grid_Access;
-                        --  The median pixel distance between the points as Order and Other put them after the move K, and
-                        --  how many both put in the picture; and how far Other puts each point from Order's place, kept
-                        --  where it is the farthest yet (Far_Squared).
-                        procedure Apart (Other : Chain_Order; K : Positive; Median : out Real; Count : out Natural) is
-                           T2 : constant Rigid := Eye_At (Joints, Other, Change_Of (Move_Of (K)));
-                           U2, V2 : Real;
-                           A2 : Boolean;
-                        begin
-                           Count := 0;
-                           for P in 1 .. Tracks loop
-                              if Has (P) and then Base_Ahead (K, P) then
-                                 Project (Lens0, Transpose (T2.Rotation) * (Point_Of (P) - T2.Translation), U2, V2, A2);
-                                 if A2 then
-                                    declare
-                                       Squared : constant Real := (Base_U (K, P) - U2) ** 2 + (Base_V (K, P) - V2) ** 2;
-                                    begin
-                                       Far_Squared (K, P) := Real'Max (Far_Squared (K, P), Squared);
-                                       if Base_In (K, P) and then U2 >= 0.0 and then U2 < Real (Width) and then V2 >= 0.0
-                                         and then V2 < Real (Height)
-                                       then
-                                          Count := Count + 1;
-                                          Dist (Count) := Sqrt (Squared);
-                                       end if;
-                                    end;
-                                 end if;
-                              end if;
-                           end loop;
-                           Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
-                        end Apart;
+                        Pos       : array (1 .. N) of Natural := [others => 0];
+                        Best_Mv   : Move;
+                        Best_Pow  : Real := 0.0;
                      begin
-                        for X of Sight loop
-                           if X.Track <= Tracks and then not Has (X.Track) and then Depth (X.Track) > 0.0 then
-                              Has (X.Track) := True;
-                              Point_Of (X.Track) := Depth (X.Track) * Ray (Lens0, X.U0, X.V0);
-                              Points := Points + 1;
-                           end if;
+                        for P in 1 .. N loop
+                           Pos (Close (K) (P)) := P;
                         end loop;
-                        Dist := new Real_Array (1 .. Natural'Max (1, Tracks));
-                        declare
-                           Finite : Real_Access := new Real_Array (1 .. 2 * Placed);
-                           K      : Natural := 0;
-                           Scatter, Margin : Real;   --  the fit's residuals', and the window it alone asks
-                        begin
-                           for I in 1 .. 2 * Placed loop
-                              if abs Here_R (I) < Real'Last then
-                                 K := K + 1;
-                                 Finite (K) := Here_R (I);
-                              end if;
-                           end loop;
-                           Scatter := (if K > 1 then Driver.Stats.Robust_Sigma (Finite (1 .. K)) else Real'Last);
-                           Free (Finite);
-                           if Scatter < Real'Last then
-                              Margin := Driver.Alignment.Window_Radius (Scatter);
-                              Followable :=
-                                Sqrt (Real'Max (0.0, Driver.Alignment.Finest_Radius (Width, Height) ** 2 - Margin ** 2));
-                           end if;
-                        end;
-                        for F in 1 .. Frames loop
-                           for J in 1 .. N loop
-                              Reach (J) := Real'Max (Reach (J), abs Change (F, J));
-                           end loop;
-                        end loop;
-                        for I in 1 .. N - 1 loop
-                           for J in I + 1 .. N loop
+                        for Ia in 1 .. N loop
+                           for Ib in Ia + 1 .. N loop
                               declare
+                                 X : constant Positive := Here.Order (Ia);
+                                 Y : constant Positive := Here.Order (Ib);
                                  Share : Real := 1.0;
                               begin
-                                 loop
-                                    for Si of Real_Array'[1.0, -1.0] loop
-                                       for Sj of Real_Array'[1.0, -1.0] loop
-                                          Move_Of.Append (Move'(I => I, J => J, Si => Si, Sj => Sj, Scale => Share));
-                                       end loop;
-                                    end loop;
-                                    Share := Share / 2.0;
-                                    exit when Share * Reach (I) < Visible (Visible'First + I - 1)
-                                      or else Share * Reach (J) < Visible (Visible'First + J - 1);
-                                 end loop;
-                              end;
-                           end loop;
-                        end loop;
-                        Base_U := new Place_Grid (1 .. Natural (Move_Of.Length), 1 .. Natural'Max (1, Tracks));
-                        Base_V := new Place_Grid (1 .. Natural (Move_Of.Length), 1 .. Natural'Max (1, Tracks));
-                        Far_Squared := new Place_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => 0.0]);
-                        Base_Ahead := new Seen_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => False]);
-                        Base_In := new Seen_Grid'(1 .. Natural (Move_Of.Length) => [1 .. Natural'Max (1, Tracks) => False]);
-                        for K in 1 .. Natural (Move_Of.Length) loop
-                           declare
-                              T1 : constant Rigid := Eye_At (Joints, Order, Change_Of (Move_Of (K)));
-                              U1, V1 : Real;
-                              A1 : Boolean;
-                           begin
-                              for P in 1 .. Tracks loop
-                                 if Has (P) then
-                                    Project (Lens0, Transpose (T1.Rotation) * (Point_Of (P) - T1.Translation), U1, V1, A1);
-                                    Base_U (K, P) := U1;
-                                    Base_V (K, P) := V1;
-                                    Base_Ahead (K, P) := A1;
-                                    Base_In (K, P) := A1 and then U1 >= 0.0 and then U1 < Real (Width) and then V1 >= 0.0
-                                      and then V1 < Real (Height);
-                                 end if;
-                              end loop;
-                           end;
-                        end loop;
-                        declare
-                           Moves : constant Natural := Natural (Move_Of.Length);
-                           package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
-                           package Count_Lists is new Ada.Containers.Vectors (Positive, Natural);
-                           --  Per untold order (in the order they were met) and move, at (order - 1) * Moves + move: how
-                           --  far apart it and Order put the points, over how many; and each order's residuals.
-                           Apart_Of  : Real_Lists.Vector;
-                           Count_Of  : Count_Lists.Vector;
-                           Misfit_Of : Real_Lists.Vector;
-                           --  Per move, over the untold orders: how well it tells the one it tells least.
-                           Least_Of : Real_Array (1 .. Moves) := [others => Real'Last];
-                           --  Per move: the median, over the points Order puts in the picture, of the farthest an untold
-                           --  order puts each from there. The keyframe of the move is searched in a window that reaches
-                           --  that farthest place (Kinematics.Offer_Of): a move whose farthest places lie beyond what a
-                           --  narrow window follows is searched wide, however little the two orders it tells apart differ.
-                           --  u21 (servo seed 3 of the fake robot, 10-19, its recording replayed on the points the fitted
-                           --  arm predicted kept where it put them): 12 orders untold, its pairs turned where each told one
-                           --  of them most within the window, each judged against the best order alone; at 13 of its 22
-                           --  keyframes of pairs no point stood, the arm's 36 to 102 points at each within 1 to 8 px of
-                           --  the truth (a median) but stated 7 to 15 px for the farthest untold order's places, every one
-                           --  of them asked from a window wider than a patch.
-                           Spread_Of : Real_Array (1 .. Moves) := [others => Real'Last];
-                           --  Per pair, the move that told one untold order most, and that order (its place among them).
-                           Best_Of   : array (1 .. N, 1 .. N) of Move;
-                           Best_U_Of : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];
-
-                           --  The untold order U, as the moves' passes list them.
-                           function Other_Of (U : Positive) return Chain_Order is
-                              Other : Chain_Order (1 .. N);
-                           begin
-                              for J in 1 .. N loop
-                                 Other (J) := Untold_Orders (Untold_Orders.Last_Index - (Untold_Count - U + 1) * N + J);
-                              end loop;
-                              return Other;
-                           end Other_Of;
-
-                           --  Where the joints in order C put the placed points after Mv, and whether before the eye.
-                           procedure Places (C : Chain_Order; Mv : Move; U, V : out Real_Array; Ahead : out Flags) is
-                              T : constant Rigid := Eye_At (Joints, C, Change_Of (Mv));
-                           begin
-                              for P in 1 .. Tracks loop
-                                 U (P) := 0.0;
-                                 V (P) := 0.0;
-                                 Ahead (P) := False;
-                                 if Has (P) then
-                                    Project (Lens0, Transpose (T.Rotation) * (Point_Of (P) - T.Translation), U (P), V (P),
-                                             Ahead (P));
-                                 end if;
-                              end loop;
-                           end Places;
-
-                           function In_Picture (U, V : Real) return Boolean is
-                             (U >= 0.0 and then U < Real (Width) and then V >= 0.0 and then V < Real (Height));
-
-                           --  Spread_Of of a move of no pass, against Followable: the median, over the points Order puts
-                           --  in the picture, of the farthest an untold order puts each from there.
-                           function Followed (Mv : Move) return Boolean is
-                              U1, V1, U2, V2 : Real_Array (1 .. Tracks);
-                              A1, A2         : Flags (1 .. Tracks);
-                              Far            : Real_Array (1 .. Tracks) := [others => 0.0];
-                              Count          : Natural := 0;
-                           begin
-                              Places (Order, Mv, U1, V1, A1);
-                              for U in 1 .. Untold_Count loop
-                                 Places (Other_Of (U), Mv, U2, V2, A2);
-                                 for P in 1 .. Tracks loop
-                                    if A1 (P) and then A2 (P) then
-                                       Far (P) := Real'Max (Far (P), (U1 (P) - U2 (P)) ** 2 + (V1 (P) - V2 (P)) ** 2);
-                                    end if;
-                                 end loop;
-                              end loop;
-                              for P in 1 .. Tracks loop
-                                 if A1 (P) and then In_Picture (U1 (P), V1 (P)) then
-                                    Count := Count + 1;
-                                    Dist (Count) := Sqrt (Far (P));
-                                 end if;
-                              end loop;
-                              return Count > 0 and then Driver.Stats.Median (Dist (1 .. Count)) <= Followable;
-                           end Followed;
-
-                           --  Apart's median and count for a move of no pass.
-                           procedure Separation (Other : Chain_Order; Mv : Move; Median : out Real; Count : out Natural) is
-                              U1, V1, U2, V2 : Real_Array (1 .. Tracks);
-                              A1, A2         : Flags (1 .. Tracks);
-                           begin
-                              Places (Order, Mv, U1, V1, A1);
-                              Places (Other, Mv, U2, V2, A2);
-                              Count := 0;
-                              for P in 1 .. Tracks loop
-                                 if A1 (P) and then A2 (P) and then In_Picture (U1 (P), V1 (P)) and then In_Picture (U2 (P), V2 (P))
-                                 then
-                                    Count := Count + 1;
-                                    Dist (Count) := Sqrt ((U1 (P) - U2 (P)) ** 2 + (V1 (P) - V2 (P)) ** 2);
-                                 end if;
-                              end loop;
-                              Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
-                           end Separation;
-                        begin
-                           for W in 1 .. Ways loop
-                              First_Of (W, C);
-                              loop
-                                 if C /= Order then
-                                    Score_Into (C, Own.all, Into.all, M, E);
-                                    if M < Real'Last and then not Smaller (Here_R (1 .. 2 * Placed), Into (1 .. 2 * Placed))
-                                    then
-                                       Untold_Count := Untold_Count + 1;
-                                       for P of C loop
-                                          Untold_Orders.Append (P);
-                                       end loop;
-                                       Misfit_Of.Append (M);
-                                       for K in 1 .. Moves loop
-                                          declare
-                                             D   : Real;
-                                             Cnt : Natural;
-                                          begin
-                                             Apart (C, K, D, Cnt);
-                                             Apart_Of.Append (D);
-                                             Count_Of.Append (Cnt);
-                                          end;
-                                       end loop;
-                                    end if;
-                                 end if;
-                                 exit when not Next (C);
-                              end loop;
-                           end loop;
-                           for K in 1 .. Moves loop
-                              declare
-                                 Count : Natural := 0;
-                              begin
-                                 for P in 1 .. Tracks loop
-                                    if Base_In (K, P) then
-                                       Count := Count + 1;
-                                       Dist (Count) := Sqrt (Far_Squared (K, P));
-                                    end if;
-                                 end loop;
-                                 if Count > 0 then
-                                    Spread_Of (K) := Driver.Stats.Median (Dist (1 .. Count));
-                                 end if;
-                              end;
-                           end loop;
-                           for U in 1 .. Untold_Count loop
-                              declare
-                                 Other      : Chain_Order (1 .. N);
-                                 Best_Move  : Positive := 1;
-                                 Best_Power : Real := -1.0;
-                                 Best_Apart : Real := 0.0;
-                                 Best_Count : Natural := 0;
-                              begin
-                                 for J in 1 .. N loop
-                                    Other (J) := Untold_Orders (Untold_Orders.Last_Index - (Untold_Count - U + 1) * N + J);
-                                 end loop;
-                                 for K in 1 .. Moves loop
-                                    declare
-                                       D   : constant Real := Apart_Of ((U - 1) * Moves + K);
-                                       Cnt : constant Natural := Count_Of ((U - 1) * Moves + K);
-                                       --  How well the turn tells the two apart: the pixels between their places of the
-                                       --  points over a median's own error, which falls with the root of how many points
-                                       --  the median is of; none for a turn no narrow window follows.
-                                       Power : constant Real := (if Spread_Of (K) <= Followable then D * Sqrt (Real (Cnt)) else 0.0);
-                                    begin
-                                       if Power > Best_Power then
-                                          Best_Power := Power;
-                                          Best_Move := K;
-                                          Best_Apart := D;
-                                          Best_Count := Cnt;
-                                       end if;
-                                       Least_Of (K) := Real'Min (Least_Of (K), Power);
-                                    end;
-                                 end loop;
-                                 if Best_Power > 0.0 and then Best_Apart > Driver.Conventions.Z * Here then
-                                    declare
-                                       Mv : constant Move := Move_Of (Best_Move);
-                                    begin
-                                       Tells (Mv.I, Mv.J) := Tells (Mv.I, Mv.J) + 1;
-                                       if Best_Power > Power_Of (Mv.I, Mv.J) then
-                                          Power_Of (Mv.I, Mv.J) := Best_Power;
-                                          Best_Of (Mv.I, Mv.J) := Mv;
-                                          Best_U_Of (Mv.I, Mv.J) := U;
-                                          Turn_I_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.I));
-                                          Turn_J_Of (Mv.I, Mv.J) := abs (Mv.Scale * Reach (Mv.J));
-                                       end if;
-                                    end;
-                                 end if;
-                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ": the order" & Image (Other)
-                                                  & " is not told from" & Image (Order) & " (median "
-                                                  & Driver.Log.Image (Misfit_Of (U), 3) & " px against "
-                                                  & Driver.Log.Image (Here, 3) & "); "
-                                                  & (if Best_Power <= 0.0
-                                                     then "no turn of two joints keeps the untold orders' places of the points within the "
-                                                          & Driver.Log.Image (Followable, 3) & " px a narrow window follows"
-                                                     else "the turn that tells them apart most within the "
-                                                          & Driver.Log.Image (Followable, 3) & " px a narrow window follows, "
-                                                          & Move_Image (Move_Of (Best_Move))
-                                                          & ", puts their points a median "
-                                                          & Driver.Log.Image (Best_Apart, 3) & " px apart over"
-                                                          & Best_Count'Image & " points, every untold order a median "
-                                                          & Driver.Log.Image (Spread_Of (Best_Move), 3) & " px from them"));
-                              end;
-                           end loop;
-                           --  Each pair's turn grown to the widest a narrow window follows. Two joints' order shows in
-                           --  what each turns through the other: the places the orders give the points move apart nearly
-                           --  as the square of the turns, and the shares halve, so the share found best may tell a
-                           --  quarter of what one short of the next share up does. q14 (servo seed 7 of the fake robot,
-                           --  10-19): its last untold order, a swap of c3 and c6, was told apart most by both at half
-                           --  their widest turns, 74.5 units, 1.97 px apart within the 6.74 px followed; at the widest,
-                           --  not followed; the sweep ended with the wrong order the best. Between the share and the next
-                           --  one up, when that one is not followed, halved until the two shares' turns differ by less
-                           --  than either joint's visible step, or no share lies between them.
-                           for I in 1 .. N loop
-                              for J in 1 .. N loop
-                                 if Best_U_Of (I, J) > 0 and then Best_Of (I, J).Scale < 1.0 then
-                                    declare
-                                       Low  : Move := Best_Of (I, J);
-                                       High : Move := Low;
-                                       Was  : constant Move := Low;
-                                    begin
-                                       High.Scale := Low.Scale * 2.0;
-                                       if not Followed (High) then
-                                          loop
-                                             exit when (High.Scale - Low.Scale) * Reach (Low.I) < Visible (Visible'First + Low.I - 1)
-                                               and then (High.Scale - Low.Scale) * Reach (Low.J) < Visible (Visible'First + Low.J - 1);
+                                 if Pos (Y) < Pos (X) then
+                                    loop
+                                       for Si of Real_Array'[1.0, -1.0] loop
+                                          for Sj of Real_Array'[1.0, -1.0] loop
                                              declare
-                                                Mid : Move := Low;
+                                                Mv : constant Move := (I => X, J => Y, Si => Si, Sj => Sj,
+                                                                       Share => Share);
+                                                D, Far : Real;
+                                                Cnt    : Natural;
                                              begin
-                                                Mid.Scale := (Low.Scale + High.Scale) / 2.0;
-                                                exit when Mid.Scale <= Low.Scale or else Mid.Scale >= High.Scale;
-                                                if Followed (Mid) then
-                                                   Low := Mid;
-                                                else
-                                                   High := Mid;
+                                                Separation (Close (K), Mv, D, Far, Cnt);
+                                                if Cnt > 0 and then Far <= Followable then
+                                                   declare
+                                                      Power : constant Real :=
+                                                        D / Driver.Stats.Median_Sigma (Scatter, Cnt);
+                                                   begin
+                                                      if Power > Best_Pow then
+                                                         Best_Pow := Power;
+                                                         Best_Mv := Mv;
+                                                      end if;
+                                                   end;
                                                 end if;
                                              end;
                                           end loop;
-                                          if Low.Scale > Was.Scale then
-                                             declare
-                                                D   : Real;
-                                                Cnt : Natural;
-                                             begin
-                                                Separation (Other_Of (Best_U_Of (I, J)), Low, D, Cnt);
-                                                if D * Sqrt (Real (Cnt)) > Power_Of (I, J) then
-                                                   Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: "
-                                                                    & (if Who = "" then "the arm" else Who) & ": "
-                                                                    & Move_Image (Was) & " grown to " & Move_Image (Low)
-                                                                    & ", the widest a narrow window follows: the points "
-                                                                    & Driver.Log.Image (D, 3) & " px apart over" & Cnt'Image);
-                                                   Power_Of (I, J) := D * Sqrt (Real (Cnt));
-                                                   Turn_I_Of (I, J) := abs (Low.Scale * Reach (Low.I));
-                                                   Turn_J_Of (I, J) := abs (Low.Scale * Reach (Low.J));
-                                                end if;
-                                             end;
-                                          end if;
-                                       end if;
-                                    end;
-                                 end if;
-                              end loop;
-                           end loop;
-                           Free (Base_U);
-                           Free (Base_V);
-                           Free (Far_Squared);
-                           Free (Base_Ahead);
-                           Free (Base_In);
-                           if Untold_Count > 0 then
-                              declare
-                                 Best_Move : Positive := 1;
-                              begin
-                                 for K in 2 .. Natural (Move_Of.Length) loop
-                                    if Least_Of (K) > Least_Of (Best_Move) then
-                                       Best_Move := K;
-                                    end if;
-                                 end loop;
-                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ":" & Untold_Count'Image
-                                                  & " orders not told from" & Image (Order) & " ("
-                                                  & Driver.Log.Image (Here, 3) & " px, over" & Points'Image
-                                                  & " placed points); the one turn that tells it from every one of them"
-                                                  & " most, " & Move_Image (Move_Of (Best_Move)));
-                              end;
-                           else
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: ACTIVE: " & (if Who = "" then "the arm" else Who) & ": every order is told from" & Image (Order));
-                           end if;
-                        end;
-                        --  An order not told: the pairs Boot turns together (Untold) are the ones whose turns tell its
-                        --  untold orders apart from it, each the pair that tells one of them most, the pair that tells
-                        --  the most of them first, each by the turns of its two joints that told best (Untold_Turns).
-                        --  The joints next to each other along it were the ones before: s83's told order was one swap of
-                        --  2 and 4 away from the true one, and the turn that tells those two apart is of c2 with c4 (2.8
-                        --  px against 0.25), never turned while its untold orders were others'.
-                        if not Order_Is_Told then
-                           Untold.Clear;
-                           Untold_Turns.Clear;
-                           loop
-                              declare
-                                 Bi, Bj : Natural := 0;
-                              begin
-                                 for I in 1 .. N loop
-                                    for J in 1 .. N loop
-                                       if Tells (I, J) > 0 and then (Bi = 0 or else Tells (I, J) > Tells (Bi, Bj)) then
-                                          Bi := I;
-                                          Bj := J;
-                                       end if;
+                                       end loop;
+                                       Share := Share / 2.0;
+                                       exit when Visible (Visible'First + X - 1) <= 0.0
+                                         or else Visible (Visible'First + Y - 1) <= 0.0
+                                         or else Share * Reach (X) < Visible (Visible'First + X - 1)
+                                         or else Share * Reach (Y) < Visible (Visible'First + Y - 1);
                                     end loop;
-                                 end loop;
-                                 exit when Bi = 0;
-                                 Untold.Append (Joint_Pair'(Earlier => Bi, Later => Bj));
-                                 Untold_Turns.Append (Turn_I_Of (Bi, Bj));
-                                 Untold_Turns.Append (Turn_J_Of (Bi, Bj));
-                                 Tells (Bi, Bj) := 0;
+                                 end if;
                               end;
                            end loop;
+                        end loop;
+                        if Best_Pow > Driver.Conventions.Z then
+                           Untold_Of (K) := True;
+                           Untold_Here := Untold_Here + 1;
+                           Tells (Best_Mv.I, Best_Mv.J) := Tells (Best_Mv.I, Best_Mv.J) + 1;
+                           if Best_Pow > Power_Of (Best_Mv.I, Best_Mv.J) then
+                              Power_Of (Best_Mv.I, Best_Mv.J) := Best_Pow;
+                              Turn_I (Best_Mv.I, Best_Mv.J) := Best_Mv.Si * Best_Mv.Share * Reach (Best_Mv.I);
+                              Turn_J (Best_Mv.I, Best_Mv.J) := Best_Mv.Sj * Best_Mv.Share * Reach (Best_Mv.J);
+                           end if;
+                           Ada.Strings.Unbounded.Append
+                             (Said, " [" & Image (Close (K)) & ", not told on "
+                                    & Why_Not_Told (Hu.all, Hv.all, Cu.all, Cv.all)
+                                    & "; c" & Ada.Strings.Fixed.Trim (Best_Mv.I'Image,
+                                                                                           Ada.Strings.Left)
+                                    & " with c" & Ada.Strings.Fixed.Trim (Best_Mv.J'Image, Ada.Strings.Left)
+                                    & " tells it by " & Driver.Log.Image (Best_Pow, 1) & " of its error]");
+                        else
+                           Same_Arm := Same_Arm + 1;
+                           Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
+                                                         & " followed tells it by Z)");
                         end if;
-                        Free (Own);
-                        Free (Into);
-                        Free (Dist);
                      end;
                   end if;
-                  for J in 1 .. Ways loop
-                     Free (Results (J).Order);
-                     Free (Results (J).Residuals);
-                     Free (Results (J).Fail_Order);
-                  end loop;
-               end;
-               if Here >= Real'Last then
-                  Free_All;
-                  Fail ("no order of the joints puts the points the keyframes of one joint placed before the eye in "
-                        & "the keyframes that moved several: the order of the joints along the arm is not told");
-                  return;
-               end if;
-               Free_All;
+               end loop;
+               Order_Is_Told := Adequate and then Untold_Here = 0;
+               Untold.Clear;
+               Untold_Turns.Clear;
+               Untold_Orders.Clear;
+               for K in 1 .. Closes loop
+                  if Untold_Of (K) then
+                     for P of Close (K) loop
+                        Untold_Orders.Append (P);
+                     end loop;
+                  end if;
+               end loop;
+               --  The pairs Boot turns: the pair that tells the most untold orders first, each by its best turns.
+               loop
+                  declare
+                     Bi, Bj : Natural := 0;
+                  begin
+                     for I in 1 .. N loop
+                        for J in 1 .. N loop
+                           if Tells (I, J) > 0 and then (Bi = 0 or else Tells (I, J) > Tells (Bi, Bj)) then
+                              Bi := I;
+                              Bj := J;
+                           end if;
+                        end loop;
+                     end loop;
+                     exit when Bi = 0;
+                     Untold.Append (Joint_Pair'(Earlier => Bi, Later => Bj));
+                     Untold_Turns.Append (Turn_I (Bi, Bj));
+                     Untold_Turns.Append (Turn_J (Bi, Bj));
+                     Tells (Bi, Bj) := 0;
+                  end;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: the order of the joints along " & Arm & ","
+                                & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
+                                & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
+                                & Same_Arm'Image & " the same arm"
+                                & (if Adequate then "" else "; it explains the keyframes of several joints worse")
+                                & "; passes" & Passes'Image & "," & Fits_Made'Image & " fits"
+                                & Ada.Strings.Unbounded.To_String (Said));
+               Free (Hu);
+               Free (Hv);
+               Free (Cu);
+               Free (Cv);
             end;
-         end;
+            Order := Here.Order;
+            Joints := Here.Joints;
+            Lens0 := Here.L;
+            Free (By_Frame);
+            Free (Multi_Frames);
+            Free (Steps);
+            Free (Points);
+            Free (Has_Point);
+            Free (Residuals);
+            Free (Close);
+            Free (Close_M);
+            Free (Close_Fit);
+         end Search_Order;
       end if;
       Normalize (Joints);
 
@@ -5370,203 +6200,8 @@ package body Driver.Robot.Kinematics.Fit is
       --  of the picture, began from it and never left (s30, servo seed 7, replayed and its input fitted alone, 10-17:
       --  3153 sightings none of which lay 2 px off the true motion; with the lens standing here the tracks' fit ended
       --  at 133.9 x 135.0 px against the truth's 135.3 x 135.9). The lens is the tracks' fit's to fit.
-      declare
-         Per_Joint : constant := 6;
-         Count     : constant Positive := Per_Joint * N;
-         Inlier    : Flags_Access := new Flags'(1 .. S => False);
-         Base      : Joint_Array := Joints;
-         --  The choices of sightings made so far: a round that comes back to one of them is a cycle.
-         package Selection_Lists is new Ada.Containers.Vectors (Positive, Flags_Access);
-         procedure Free_Flags is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
-         Seen      : Selection_Lists.Vector;
-
-
-         function Joints_Of (X : Real_Array) return Joint_Array is
-            Out_J : Joint_Array := Base;
-         begin
-            for J in 1 .. N loop
-               declare
-                  O : constant Natural := X'First + Per_Joint * (J - 1);
-                  E1, E2 : Vec3;
-               begin
-                  Perp (Base (Base'First + J - 1).W, E1, E2);
-                  Out_J (Out_J'First + J - 1).W := Unit (Base (Base'First + J - 1).W + X (O) * E1 + X (O + 1) * E2);
-                  Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];
-                  Out_J (Out_J'First + J - 1).C := X (O + 5);
-               end;
-            end loop;
-            return Out_J;
-         end Joints_Of;
-
-         procedure To_X (Jx : Joint_Array; X : out Real_Array) is
-         begin
-            for J in 1 .. N loop
-               declare
-                  O : constant Natural := X'First + Per_Joint * (J - 1);
-               begin
-                  X (O) := 0.0;
-                  X (O + 1) := 0.0;
-                  X (O + 2) := Jx (Jx'First + J - 1).P (1);
-                  X (O + 3) := Jx (Jx'First + J - 1).P (2);
-                  X (O + 4) := Jx (Jx'First + J - 1).P (3);
-                  X (O + 5) := Jx (Jx'First + J - 1).C;
-               end;
-            end loop;
-         end To_X;
-
-         procedure Residuals_Of (Lx : Lens; Jx : Joint_Array; R : out Real_Array) is
-            Poses : Rigid_Access := new Pose_Array;
-         begin
-            Poses_Of (Jx, Poses.all);
-            for I in 1 .. S loop
-               declare
-                  Rr : Mat3;
-                  Tt : Vec3;
-               begin
-                  Relative (Poses (1), Poses (Sight (I).Frame), Rr, Tt);
-                  R (R'First + I - 1) := Sampson (Rr, Tt, Ray (Lx, Sight (I).U0, Sight (I).V0),
-                                                  Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.Fy) / 2.0);
-               end;
-            end loop;
-            Free (Poses);
-         end Residuals_Of;
-
-         X : Real_Array (1 .. Count);
-      begin
-         To_X (Joints, X);
-         loop
-            declare
-               All_R : Real_Access := new Real_Array (1 .. S);
-               Sigma : Real;
-               Now_Changed : Natural := 0;
-               Used  : Natural := 0;
-            begin
-               Residuals_Of (Lens0, Joints_Of (X), All_R.all);
-               Sigma := Noise_Of (All_R.all);
-               --  A sighting fits when its residual is not significant against
-               --  the noise of all of them.
-               for I in 1 .. S loop
-                  declare
-                     Fits : constant Boolean := Sigma > 0.0 and then not Driver.Uncertain.Significant (All_R (I), Sigma);
-                  begin
-                     if Fits /= Inlier (I) then
-                        Now_Changed := Now_Changed + 1;
-                        Inlier (I) := Fits;
-                     end if;
-                     if Fits then
-                        Used := Used + 1;
-                     end if;
-                  end;
-               end loop;
-               Free (All_R);
-               Report.Sigma_Px := Sigma;
-               Report.Used := Used;
-               --  Re-chosen until the choice no longer changes, or comes back to one made before (a cycle between
-               --  choices, each giving the same fit again: no round after it tells more; item 3), or too few are
-               --  left to fit.
-               exit when Now_Changed = 0 or else Used <= Count
-                 or else (for some Earlier of Seen => Earlier.all = Inlier.all);
-               Seen.Append (new Flags'(Inlier.all));
-               declare
-                  Kept : Sighting_Access := new Sighting_Array (1 .. Used);
-                  K    : Natural := 0;
-                  --  The lines of sight of every kept sighting's pixel and of its reference pixel through the lens the
-                  --  stage holds, made once: made again in every column of the Jacobian (Ray, Newton's method through the
-                  --  distortion) they were most of the stage's time (s29's driver sampled for 10 s in its fit, 10-17: 6165
-                  --  of the 6686 samples of this Evaluate in Ray).
-                  type Vec3_Array_Access is access Vec3_Array;
-                  procedure Free is new Ada.Unchecked_Deallocation (Vec3_Array, Vec3_Array_Access);
-                  Own_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
-                  Ref_Lines : Vec3_Array_Access := new Vec3_Array (1 .. Used);
-                  Focal     : constant Real := (Lens0.Fx + Lens0.Fy) / 2.0;
-
-                  procedure Evaluate (Xv : Real_Array; R : out Real_Array) is
-                     Poses : Rigid_Access := new Pose_Array;
-                     --  Per keyframe, its motion from the reference eye.
-                     type Motion is record
-                        Rr : Mat3;
-                        Tt : Vec3;
-                     end record;
-                     type Motion_Array is array (1 .. Frames) of Motion;
-                     type Motion_Access is access Motion_Array;
-                     procedure Free is new Ada.Unchecked_Deallocation (Motion_Array, Motion_Access);
-                     Motions : Motion_Access := new Motion_Array;
-                  begin
-                     Poses_Of (Joints_Of (Xv), Poses.all);
-                     for Frame in 1 .. Frames loop
-                        Relative (Poses (1), Poses (Frame), Motions (Frame).Rr, Motions (Frame).Tt);
-                     end loop;
-                     for I in 1 .. Used loop
-                        R (R'First + I - 1) := Sampson (Motions (Kept (I).Frame).Rr, Motions (Kept (I).Frame).Tt,
-                                                        Ref_Lines (I), Own_Lines (I), Focal);
-                     end loop;
-                     Free (Motions);
-                     Free (Poses);
-                  end Evaluate;
-
-                  procedure Solve is new Robust_Fit
-                    (Count, Used, Driver.Conventions.Initial_Damping, Evaluate, At_Once => True, To_The_End => True);
-               begin
-                  for I in 1 .. S loop
-                     if Inlier (I) then
-                        K := K + 1;
-                        Kept (K) := Sight (I);
-                     end if;
-                  end loop;
-                  for I in 1 .. Used loop
-                     Own_Lines (I) := Ray (Lens0, Kept (I).U, Kept (I).V);
-                     Ref_Lines (I) := Ray (Lens0, Kept (I).U0, Kept (I).V0);
-                  end loop;
-                  Solve (X, Sigma);
-                  Free (Kept);
-                  Free (Own_Lines);
-                  Free (Ref_Lines);
-                  --  The axes' tangent planes anew at the solution, the points
-                  --  on them nearest the reference eye.
-                  Base := Joints_Of (X);
-                  for J of Base loop
-                     J.P := J.P - Dot (J.P, J.W) * J.W;
-                  end loop;
-                  To_X (Base, X);
-               end;
-            end;
-         end loop;
-         for Earlier of Seen loop
-            declare
-               F : Flags_Access := Earlier;
-            begin
-               Free_Flags (F);
-            end;
-         end loop;
-         L := Lens0;
-         Joints := Joints_Of (X);
-         Normalize (Joints);
-         declare
-            All_R : Real_Access := new Real_Array (1 .. S);
-            Fit_R : Real_Access := new Real_Array (1 .. S);
-            K     : Natural := 0;
-         begin
-            Residuals_Of (L, Joints, All_R.all);
-            for I in 1 .. S loop
-               if Inlier (I) then
-                  K := K + 1;
-                  Fit_R (K) := abs All_R (I);
-               end if;
-            end loop;
-            Report.Median_Px := 0.0;
-            if K > 0 then
-               declare
-                  Part : Real_Access := new Real_Array'(Fit_R (1 .. K));
-               begin
-                  Report.Median_Px := Driver.Stats.Median (Part.all);
-                  Free (Part);
-               end;
-            end if;
-            Free (All_R);
-            Free (Fit_R);
-         end;
-         Free (Inlier);
-      end;
+      Together (Order, Joints, Lens0, Report.Sigma_Px, Report.Used, Report.Median_Px);
+      L := Lens0;
 
       --  The focal length's profile is walked by a fit that searched it, and by one begun from an earlier estimate's
       --  once the sightings have doubled since the profile was last walked: until then its basin stands, and walked
@@ -6487,7 +7122,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Mt_M (P, Q) := Best_M (1, P) * Best_M (1, Q) + Best_M (2, P) * Best_M (2, Q);
                end loop;
             end loop;
-            Eigensystem (Mt_M, Values, Vectors);
+            Driver.Numerics.Dense.Small_Eigensystem (Mt_M, Values, Vectors);
             for P in 2 .. 3 loop
                if Values (P) > Values (Most) then
                   Most := P;
@@ -6510,5 +7145,18 @@ package body Driver.Robot.Kinematics.Fit is
    --  The median of the lengths of two-coordinate residuals of Gaussian noise
    --  is sigma times the root of 2 ln 2.
    function Rayleigh_Median return Real is (Sqrt (2.0 * Ln (2.0)));
+
+   function Slide_Turns_Of (Report : Fit_Report; N : Natural) return Vec3_Array is
+      Turns : Vec3_Array (1 .. N) := [others => Zero3];
+   begin
+      if Natural (Report.Slide_Turns.Length) = 3 * N then
+         for J in 1 .. N loop
+            for A in 1 .. 3 loop
+               Turns (J) (A) := Report.Slide_Turns (Report.Slide_Turns.First_Index + 3 * (J - 1) + A - 1);
+            end loop;
+         end loop;
+      end if;
+      return Turns;
+   end Slide_Turns_Of;
 
 end Driver.Robot.Kinematics.Fit;

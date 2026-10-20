@@ -720,6 +720,8 @@ private
       Untold_Turns  : Real_Vectors.Vector;       --  per pair of Untold, its two joints' turns that tell it (Fit_Report)
       Untold_Orders : Count_Vectors.Vector;      --  when not: every order not told from Chain, one after another, as
                                                  --  long as Chain each, by the readings' places (Fit_Report)
+      Slide_Turns   : Real_Vectors.Vector;       --  per joint, three numbers: the turn a slide is weighed against
+                                                 --  again (Fit_Report)
       Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
@@ -880,6 +882,14 @@ private
       --  per query point: the keyframes whose common motion it stood against, and moved with
       --  (Keyframes.Stood_And_Moved)
       Stand_Rate : Real := 0.0;
+      Patch_Noise, Patch_Error : Real_Vectors.Vector;
+      --  per query point: the mean difference of its patch's levels between the reference and a keyframe at the
+      --  reference's pose (the noise alone), and that mean's standard error; zero before such a keyframe
+      Patch_Stood, Patch_Moving : Count_Vectors.Vector;
+      --  per query point: the keyframes in which most points' patches changed beyond their noise (the view moved), and
+      --  of those, the ones in which its own did not (Kinematics.Patch_Evidence)
+      Patch_Rate : Real := 0.0;
+      --  how often a point's patch stood in such a keyframe, over every point (Laplace's: one more over two more)
       --  how often a point of the world stood against its keyframe's common motion (Measure_Shifts); 0 before any
       --  point was told of the world
                                         --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a

@@ -104,9 +104,12 @@ package body Driver.Robot.Kinematics.Hand_Eye is
    --  Which joints move a point
 
    function Infer_Link (A : Watched; T : Positive) return Natural is
-      --  Per keyframe, the one joint it moved (0: none or several).
+      --  Per keyframe, the one joint it moved (0: none or several) from the keyframe the track was chosen at.
       Alone    : Count_Access := new Fit.Count_Array (1 .. A.Frames);
       Result   : Natural := 0;
+      R        : constant Positive := A.Track (T).Frame;
+      --  Joint C's reading change from the track's keyframe to keyframe F.
+      function Change (F, C : Positive) return Real is (A.Change (F, C) - A.Change (R, C));
    begin
       for F in 1 .. A.Frames loop
          declare
@@ -114,7 +117,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Which : Natural := 0;
          begin
             for C in 1 .. A.Joints loop
-               if A.Visible (C) > 0.0 and then abs A.Change (F, C) >= A.Visible (C) then
+               if A.Visible (C) > 0.0 and then abs Change (F, C) >= A.Visible (C) then
                   Moved := Moved + 1;
                   Which := C;
                end if;
@@ -142,7 +145,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                if S.Track = T and then S.Frame <= A.Frames and then Alone (S.Frame) = J then
                   declare
                      Variance : constant Real := Variance_Of (S.Own);
-                     X        : constant Real := A.Change (S.Frame, J);
+                     X        : constant Real := Change (S.Frame, J);
                   begin
                      Count := Count + 1;
                      Sxx := Sxx + X * X / Variance;
@@ -161,7 +164,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                      if S.Track = T and then S.Frame <= A.Frames and then Alone (S.Frame) = J then
                         declare
                            Variance : constant Real := Variance_Of (S.Own);
-                           X        : constant Real := A.Change (S.Frame, J);
+                           X        : constant Real := Change (S.Frame, J);
                         begin
                            Spread := Spread + ((S.U - A.Track (T).U0 - Bu * X) ** 2
                                                + (S.V - A.Track (T).V0 - Bv * X) ** 2) / Variance;
@@ -200,13 +203,13 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       First_Track   : Fit.Count_Array (1 .. Arms);       --  the number of the arm's first track, less one
       Track_Arm     : Fit.Count_Array (1 .. Tracks);
       U0, V0        : Real_Array (1 .. Tracks);
+      Track_Frame   : Fit.Count_Array (1 .. Tracks);   --  the keyframe each was chosen at
       Sight_Arm     : Fit.Count_Array (1 .. Sightings);
       Sight_Track   : Fit.Count_Array (1 .. Sightings);
       Sight_Frame   : Fit.Count_Array (1 .. Sightings);
       Sight_U       : Real_Array (1 .. Sightings);
       Sight_V       : Real_Array (1 .. Sightings);
       Sight_Own     : Real_Array (1 .. Sightings);
-      Sight_Freedom : Fit.Count_Array (1 .. Sightings);
    end record;
 
    type Problem_Access is access Problem;
@@ -234,6 +237,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                   P.Track_Arm (T + I) := N;
                   P.U0 (T + I) := A.Track (I).U0;
                   P.V0 (T + I) := A.Track (I).V0;
+                  P.Track_Frame (T + I) := A.Track (I).Frame;
                end loop;
                for I in 1 .. A.Sightings loop
                   P.Sight_Arm (S + I) := N;
@@ -242,7 +246,6 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                   P.Sight_U (S + I) := A.Seen (I).U;
                   P.Sight_V (S + I) := A.Seen (I).V;
                   P.Sight_Own (S + I) := A.Seen (I).Own;
-                  P.Sight_Freedom (S + I) := A.Seen (I).Own_Freedom;
                end loop;
                T := T + A.Tracks;
                S := S + A.Sightings;
@@ -251,6 +254,14 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          return P;
       end;
    end Build;
+
+   --  The motion of a point riding on Link from the keyframe its track was chosen at to sighting I's: the link's motion
+   --  at the sighting's keyframe after the inverse of its motion at the track's (none at the arm's reference). Tracks
+   --  were chosen at the reference alone, and an eye that saw the arm small kept 6 to 11 points of it there, where the
+   --  arm carried across its view showed it 21 to 60 more (the bench's fixed eye over table arms, 10-20).
+   function Move_Of (P : Problem; A : Positive; Link : Natural; I : Positive) return Rigid is
+     (if P.Track_Frame (P.Sight_Track (I)) = 1 then P.Moves (A) (Link, P.Sight_Frame (I))
+      else P.Moves (A) (Link, P.Sight_Frame (I)) * Inverse (P.Moves (A) (Link, P.Track_Frame (P.Sight_Track (I)))));
 
    procedure Release (P : in out Problem_Access) is
       procedure Free is new Ada.Unchecked_Deallocation (Problem, Problem_Access);
@@ -430,12 +441,15 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                   Pose  : Pose_Value renames S.Pose (A);
                   Z     : constant Real := Exp (Lz (T));
                   Link_Of : constant Natural := Link (T);
-                  Move  : Rigid renames P.Moves (A) (Link_Of, P.Sight_Frame (I));
-                  X0c   : constant Vec3 := Z * Lines (T);
-                  X0a   : constant Vec3 := Pose.R * X0c + Pose.C;
-                  Xka   : constant Vec3 := Move.Rotation * X0a + Move.Translation;
-                  Xkc   : constant Vec3 := Transpose (Pose.R) * (Xka - Pose.C);
-                  Q     : constant Mat3 := Transpose (Pose.R) * Move.Rotation * Pose.R;
+                  Move  : constant Rigid := Move_Of (P, A, Link_Of, I);
+                  --  The products written out (Driver.Numerics): the general operators' every result took the
+                  --  secondary stack, the fixed eye's search most of its time (robot.head.noisy, 10-20).
+                  X0c   : constant Vec3 := Driver.Numerics.Scaled (Z, Lines (T));
+                  X0a   : constant Vec3 := Driver.Numerics.Plus (Driver.Numerics.Times (Pose.R, X0c), Pose.C);
+                  Xka   : constant Vec3 := Move * X0a;
+                  Xkc   : constant Vec3 := Driver.Numerics.Transposed_Times (Pose.R, Driver.Numerics.Minus (Xka, Pose.C));
+                  Q     : constant Mat3 :=
+                    Driver.Numerics.Times (Driver.Numerics.Times (Driver.Numerics.Transposed (Pose.R), Move.Rotation), Pose.R);
                   Up, Vp : Real;
                   By_Point : Real_Matrix (1 .. 2, 1 .. 3);
                   By_Lens  : Real_Matrix (1 .. 2, 1 .. Fit.Lens_Terms);
@@ -448,7 +462,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                      R (2 * I) := Vp - P.Sight_V (I);
                      --  How the point (in the eye's frame, at this keyframe) moves with the log depth.
                      declare
-                        Along : constant Vec3 := Q * X0c;
+                        Along : constant Vec3 := Driver.Numerics.Times (Q, X0c);
                      begin
                         for C in 1 .. 2 loop
                            Jd (2 * I - 2 + C) := By_Point (C, 1) * Along (1) + By_Point (C, 2) * Along (2)
@@ -463,7 +477,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                            Direct_U, Direct_V : Real := 0.0;   --  and the pixel apart from it
                         begin
                            if Term <= Fit.Lens_Terms then
-                              Moves_By := Z * (Q * Slopes (T) (Term));
+                              Moves_By := Driver.Numerics.Scaled (Z, Driver.Numerics.Times (Q, Slopes (T) (Term)));
                               Direct_U := By_Lens (1, Term);
                               Direct_V := By_Lens (2, Term);
                            elsif Term > Pose_At (A) and then Term <= Pose_At (A) + Pose_Terms then
@@ -474,7 +488,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                                     --  The turn: Skew (Xkc) - Q Skew (X0c), a column of it.
                                     declare
                                        Left  : constant Mat3 := Driver.Numerics.Skew (Xkc);
-                                       Right : constant Mat3 := Q * Driver.Numerics.Skew (X0c);
+                                       Right : constant Mat3 := Driver.Numerics.Times (Q, Driver.Numerics.Skew (X0c));
                                     begin
                                        for Row in 1 .. 3 loop
                                           Moves_By (Row) := Left (Row, Own) - Right (Row, Own);
@@ -484,9 +498,10 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                                     --  The centre: Transpose (R) (A - I), a column of it.
                                     declare
                                        Axis : constant Positive := Own - 3;
-                                       Turn : constant Mat3 := Move.Rotation - Identity3;
-                                       Column : constant Vec3 := [Turn (1, Axis), Turn (2, Axis), Turn (3, Axis)];
-                                       Back   : constant Vec3 := Transpose (Pose.R) * Column;
+                                       Column : constant Vec3 :=
+                                         [Move.Rotation (1, Axis) - Identity3 (1, Axis), Move.Rotation (2, Axis) - Identity3 (2, Axis),
+                                          Move.Rotation (3, Axis) - Identity3 (3, Axis)];
+                                       Back   : constant Vec3 := Driver.Numerics.Transposed_Times (Pose.R, Column);
                                     begin
                                        Moves_By := Back;
                                     end;
@@ -533,10 +548,10 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             if On_Arm (Link, T) then
                declare
                   Pose  : Pose_Value renames S.Pose (A);
-                  Move  : Rigid renames P.Moves (A) (Link (T), P.Sight_Frame (I));
-                  X0c   : constant Vec3 := Exp (Lz (T)) * Fit.Ray (S.L, P.U0 (T), P.V0 (T));
-                  Xka   : constant Vec3 := Move * (Pose.R * X0c + Pose.C);
-                  Xkc   : constant Vec3 := Transpose (Pose.R) * (Xka - Pose.C);
+                  Move  : constant Rigid := Move_Of (P, A, Link (T), I);
+                  X0c   : constant Vec3 := Driver.Numerics.Scaled (Exp (Lz (T)), Fit.Ray (S.L, P.U0 (T), P.V0 (T)));
+                  Xka   : constant Vec3 := Move * Driver.Numerics.Plus (Driver.Numerics.Times (Pose.R, X0c), Pose.C);
+                  Xkc   : constant Vec3 := Driver.Numerics.Transposed_Times (Pose.R, Driver.Numerics.Minus (Xka, Pose.C));
                   Up, Vp : Real;
                   Ahead : Boolean;
                begin
@@ -553,13 +568,13 @@ package body Driver.Robot.Kinematics.Hand_Eye is
    end Residuals_Only;
 
    --  What the fit holds besides the state: the link of every track, the log of its depth, which sightings have a place
-   --  in front of the eye and which of those fit, and the floor of the scales the residuals are judged at.
+   --  in front of the eye and which of those fit, and how far the residuals lie (their error model).
    type Work (Tracks, Sightings : Natural) is record
       Link  : Fit.Count_Array (1 .. Tracks);
       Lz    : Real_Array (1 .. Tracks);
       Seen  : Fit.Flag_Array (1 .. Sightings);
       Fits  : Fit.Flag_Array (1 .. Sightings);
-      Floor : Real := 0.0;
+      Model : Fit.Error_Model;
    end record;
 
    type Work_Access is access Work;
@@ -570,14 +585,12 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Free (W);
    end Release;
 
-   --  Sighting I's scale: what the model leaves of any sighting, and what the aligner stated of this one.
+   --  Sighting I's scale: what the model leaves of any sighting, and what the aligner stated of this one as far as the
+   --  residuals bear it out.
    function Scale_Of (P : Problem; W : Work; I : Positive) return Real is
-     (Fit.Scale_Of (W.Floor, P.Sight_Own (I)));
+     (Fit.Scale_Of (W.Model, P.Sight_Own (I)));
 
-   function Freedom_Of (P : Problem; W : Work; I : Positive) return Natural is
-     (Fit.Scale_Freedom (W.Floor, P.Sight_Own (I), P.Sight_Freedom (I)));
-
-   --  The floor at which the residuals of the sightings in front of the eye are typical of their scales.
+   --  The error model at which the residuals of the sightings in front of the eye are typical of their scales.
    procedure Measure_Floor (P : Problem; W : in out Work; R : Real_Array) is
       Count : Natural := 0;
    begin
@@ -587,7 +600,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          end if;
       end loop;
       if Count = 0 then
-         W.Floor := 0.0;
+         W.Model := (Floor => 0.0, Gain => 1.0);
          return;
       end if;
       declare
@@ -604,7 +617,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                K := K + 2;
             end if;
          end loop;
-         W.Floor := Fit.Floor_Of (Both.all, Own.all);
+         W.Model := Fit.Model_Of (Both.all, Own.all);
          Free (Both);
          Free (Own);
       end;
@@ -618,8 +631,8 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Measure_Floor (P, W, R);
       for I in 1 .. P.Sightings loop
          Next (I) := W.Seen (I)
-           and then not Driver.Uncertain.Significant (R (2 * I - 1), Scale_Of (P, W, I), Freedom_Of (P, W, I))
-           and then not Driver.Uncertain.Significant (R (2 * I), Scale_Of (P, W, I), Freedom_Of (P, W, I));
+           and then not Driver.Uncertain.Significant (R (2 * I - 1), Scale_Of (P, W, I))
+           and then not Driver.Uncertain.Significant (R (2 * I), Scale_Of (P, W, I));
       end loop;
       Same := Next = W.Fits;
       W.Fits := Next;
@@ -650,8 +663,8 @@ package body Driver.Robot.Kinematics.Hand_Eye is
    --  outlier. States that explain the sightings differently are comparable by it, which a sum of Huber's costs is
    --  not (an outlier costs the more the farther the state puts the point from it, and that differs from state to
    --  state by more than the inliers' costs do), and the difference of two, at one floor, is the log of their
-   --  likelihood ratio. Floor is the floor of the scales to judge the residuals by, or negative to read it from them
-   --  (it comes back).
+   --  likelihood ratio. Model is the error model to judge the residuals by, or one of a negative floor to read it from
+   --  them (it comes back).
    procedure Likelihood
      (P      : Problem;
       S      : State;
@@ -659,7 +672,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Lz     : Real_Array;
       Placed : Fit.Flag_Array;
       Width, Height : Positive;
-      Floor  : in out Real;
+      Model  : in out Fit.Error_Model;
       Total  : out Real)
    is
       Elsewhere : constant Real := -Ln (Real (Width) * Real (Height));
@@ -680,15 +693,15 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Counted := Counted + 2;
          end if;
       end loop;
-      if Floor < 0.0 then
-         Floor := Fit.Floor_Of (Both (1 .. Counted), Own (1 .. Counted));
+      if Model.Floor < 0.0 then
+         Model := Fit.Model_Of (Both (1 .. Counted), Own (1 .. Counted));
       end if;
       begin
          for I in 1 .. P.Sightings loop
             if On_Arm (Link, P.Sight_Track (I)) then
                if Seen (I) and then Placed (P.Sight_Track (I)) then
                   declare
-                     Scale : constant Real := Fit.Scale_Of (Floor, P.Sight_Own (I));
+                     Scale : constant Real := Fit.Scale_Of (Model, P.Sight_Own (I));
                      Inlier : constant Real :=
                        -(R (2 * I - 1) ** 2 + R (2 * I) ** 2) / (2.0 * Scale ** 2) - Ln (2.0 * Ada.Numerics.Pi * Scale ** 2);
                   begin
@@ -1042,7 +1055,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          begin
             if P.Sight_Arm (I) = Arm and then On_Arm (Link, T) then
                declare
-                  Move : Rigid renames P.Moves (Arm) (Link (T), P.Sight_Frame (I));
+                  Move : constant Rigid := Move_Of (P, Arm, Link (T), I);
                   B    : constant Vec3 := Fit.Ray (L, P.Sight_U (I), P.Sight_V (I));
                   H    : constant Vec3 := Fit.Ray (L, P.U0 (T), P.V0 (T));
                   Cr   : constant Mat3 := Cross_Of (B);
@@ -1098,7 +1111,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          S      : State (P.Arms);
          Placed : Fit.Flag_Array (1 .. P.Tracks);
          Lz     : Real_Array (1 .. P.Tracks);
-         Floor  : Real := -1.0;
+         Model  : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);
       begin
          S.L := L;
          S.Pose (Arm) := (R => Pose.R, C => Centre);
@@ -1106,7 +1119,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Placed (T) := Depth (T) > 0.0;
             Lz (T) := (if Placed (T) then Ln (Depth (T)) else 0.0);
          end loop;
-         Likelihood (P, S, Link, Lz, Placed, Width, Height, Floor, Score);
+         Likelihood (P, S, Link, Lz, Placed, Width, Height, Model, Score);
          Ok := True;
       end;
    end Solve_At;
@@ -1218,14 +1231,17 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       for K in 1 .. N loop
          declare
             I    : constant Positive := Order (First + K - 1);
-            Move : Rigid renames P.Moves (A) (Hyp, P.Sight_Frame (I));
-            Q    : constant Mat3 := Transpose (Pose.R) * Move.Rotation * Pose.R;
+            Move : constant Rigid := Move_Of (P, A, Hyp, I);
+            Q    : constant Mat3 :=
+              Driver.Numerics.Times (Driver.Numerics.Times (Driver.Numerics.Transposed (Pose.R), Move.Rotation), Pose.R);
             Cr   : constant Mat3 := Cross_Of (Fit.Ray (S.L, P.Sight_U (I), P.Sight_V (I)));
          begin
-            Along (K) := Q * H;
-            By (K) := Transpose (Pose.R) * ((Move.Rotation - Identity3) * Pose.C + Move.Translation);
-            Ang_U (K) := Cr * Along (K);
-            Ang_C (K) := Cr * By (K);
+            Along (K) := Driver.Numerics.Times (Q, H);
+            By (K) := Driver.Numerics.Transposed_Times
+              (Pose.R, Driver.Numerics.Plus (Driver.Numerics.Minus (Driver.Numerics.Times (Move.Rotation, Pose.C), Pose.C),
+                                             Move.Translation));
+            Ang_U (K) := Driver.Numerics.Times (Cr, Along (K));
+            Ang_C (K) := Driver.Numerics.Times (Cr, By (K));
          end;
       end loop;
       if Hyp = 0 then
@@ -1391,18 +1407,20 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                         for K in 1 .. N loop
                            declare
                               I     : constant Positive := Order (First (T) + K - 1);
-                              Move  : Rigid renames P.Moves (A) (Pick, P.Sight_Frame (I));
+                              Move  : constant Rigid := Move_Of (P, A, Pick, I);
                               Pose  : Pose_Value renames S.Pose (A);
                               Xkc   : constant Vec3 :=
-                                Transpose (Pose.R) * (Move * (Pose.R * (Z * H) + Pose.C) - Pose.C);
+                                Driver.Numerics.Transposed_Times
+                                  (Pose.R, Driver.Numerics.Minus
+                                             (Move * Driver.Numerics.Plus (Driver.Numerics.Times (Pose.R, Driver.Numerics.Scaled (Z, H)),
+                                                                           Pose.C), Pose.C));
                               U, V  : Real;
                               Front : Boolean;
                               Scale : constant Real := Scale_Of (P, W, I);
-                              Free  : constant Natural := Freedom_Of (P, W, I);
                            begin
                               Fit.Project (S.L, Xkc, U, V, Front);
-                              if Front and then not Driver.Uncertain.Significant (U - P.Sight_U (I), Scale, Free)
-                                and then not Driver.Uncertain.Significant (V - P.Sight_V (I), Scale, Free)
+                              if Front and then not Driver.Uncertain.Significant (U - P.Sight_U (I), Scale)
+                                and then not Driver.Uncertain.Significant (V - P.Sight_V (I), Scale)
                               then
                                  Fitting := Fitting + 1;
                               end if;
@@ -1451,13 +1469,13 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       loop
          Settle (P, S, W, Which, Width, Height);
          declare
-            Floor : Real := -1.0;
+            Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);
             Now   : Real;
          begin
             for T in 1 .. P.Tracks loop
                Placed (T) := W.Link (T) >= 1;
             end loop;
-            Likelihood (P, S, Set, W.Lz, Placed, Width, Height, Floor, Now);
+            Likelihood (P, S, Set, W.Lz, Placed, Width, Height, Model, Now);
             exit when Now <= Last;
             Last := Now;
          end;
@@ -1729,15 +1747,15 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          else (Fx => Focals (M), Fy => Focals (M), Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, K1 => 0.0,
                K2 => 0.0));
 
-      --  A racer's likelihood at the state it is at, and the floor it was judged by: over every track the start was
+      --  A racer's likelihood at the state it is at, and the error model it was judged by: over every track the start was
       --  given, one it lost for want of a depth in front of the eye an outlier throughout.
-      procedure Likelihood_Of (State_Now : State; Work_Now : Work; Floor : in out Real; Total : out Real) is
+      procedure Likelihood_Of (State_Now : State; Work_Now : Work; Model : in out Fit.Error_Model; Total : out Real) is
          Placed : Fit.Flag_Array (1 .. P.Tracks);
       begin
          for T in 1 .. P.Tracks loop
             Placed (T) := Work_Now.Link (T) >= 1;
          end loop;
-         Likelihood (P, State_Now, Start_Link, Work_Now.Lz, Placed, Width, Height, Floor, Total);
+         Likelihood (P, State_Now, Start_Link, Work_Now.Lz, Placed, Width, Height, Model, Total);
       end Likelihood_Of;
 
       --  The racer takes one step: the sightings it fits chosen anew, and a step of its refinement unless it has
@@ -1822,7 +1840,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Racers (C).W.Lz := [others => 0.0];
             Racers (C).W.Seen := [others => False];
             Racers (C).W.Fits := [others => False];
-            Racers (C).W.Floor := Sqrt (Driver.Alignment.Quantization);
+            Racers (C).W.Model := (Floor => Sqrt (Driver.Alignment.Quantization), Gain => 1.0);
             Solve_At (P, Arm, Pose, Racers (C).S.L, Start_Link, Width, Height, Centre, Depth.all, Score_At, Ok);
             Start_From (P, Arm, Racers (C).S.all, Racers (C).W.all, Pose, Centre, Depth.all, Start_Link);
             Free (Depth);
@@ -1845,9 +1863,9 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                         Advance (Racers (C));
                      end loop;
                      declare
-                        Floor : Real := -1.0;
+                        Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);
                      begin
-                        Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Floor, Racers (C).Score);
+                        Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Model, Racers (C).Score);
                      end;
                   end if;
                end Run_One;
@@ -1895,7 +1913,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
          Ends   : Natural := 0;
          Ended  : array (1 .. Finalists) of Natural := [others => 0];   --  the racer each finalist is
          Likely : Real_Array (1 .. Finalists) := [others => Real'First];
-         Common : Real := -1.0;
+         Common : Fit.Error_Model := (Floor => -1.0, Gain => 0.0);   --  the widest of the racers' models
          Best   : Natural := 0;
          Hits   : Natural := 0;   --  the finalists that ended at the best optimum
          Rival  : Boolean := False;   --  one that ended elsewhere that the sightings do not tell from it
@@ -1916,19 +1934,19 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                Ends := Ends + 1;
                Ended (Ends) := C;
                declare
-                  Floor : Real := -1.0;
+                  Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);
                   Total : Real;
                begin
-                  Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Floor, Total);
-                  Common := Real'Max (Common, Floor);
+                  Likelihood_Of (Racers (C).S.all, Racers (C).W.all, Model, Total);
+                  Common := (Floor => Real'Max (Common.Floor, Model.Floor), Gain => Real'Max (Common.Gain, Model.Gain));
                end;
             end if;
          end loop;
          for E in 1 .. Ends loop
             declare
-               Floor : Real := Common;
+               Model : Fit.Error_Model := Common;
             begin
-               Likelihood_Of (Racers (Ended (E)).S.all, Racers (Ended (E)).W.all, Floor, Likely (E));
+               Likelihood_Of (Racers (Ended (E)).S.all, Racers (Ended (E)).W.all, Model, Likely (E));
             end;
             if Best = 0 or else Likely (E) > Likely (Best) then
                Best := E;
@@ -1989,7 +2007,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                      W.Lz (T) := Racers (Ended (Best)).W.Lz (T);
                   end if;
                end loop;
-               W.Floor := Racers (Ended (Best)).W.Floor;
+               W.Model := Racers (Ended (Best)).W.Model;
             end if;
          end if;
       end;
@@ -2749,7 +2767,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                end loop;
                Freedom := Integer'Min (Tracks_Seen, Pictures_Seen) - Terms_Free;
                Report.L := Final.L;
-               Report.Sigma_Px := Final_W.Floor;
+               Report.Sigma_Px := Final_W.Model.Floor;
                Report.Used := Used;
                Report.Offered := Offered;
                Report.Distorted := Keep_B;
@@ -2810,15 +2828,29 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                      for A in 1 .. N_Arms loop
                         if Active (A) then
                            declare
-                              O         : constant Natural := Pose_At (A);
-                              Turn_Var  : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);
-                              Place_Var : constant Real := Cov (O + 4, O + 4) + Cov (O + 5, O + 5) + Cov (O + 6, O + 6);
+                              O          : constant Natural := Pose_At (A);
+                              Turn_Var   : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);
+                              Centre     : constant Vec3 := Final.Pose (A).C;
+                              Away       : constant Real := Sqrt (Dot (Centre, Centre));
+                              Centre_Cov : constant Mat3 :=
+                                [for I in 1 .. 3 => [for J in 1 .. 3 => Cov (O + 3 + I, O + 3 + J)]];
+                              Away_Sigma : constant Real :=
+                                (if Away > 0.0 then Driver.Uncertain.Sigma_Along (Centre_Cov, (1.0 / Away) * Centre)
+                                 else Real'Last);
+                              T          : constant Real :=
+                                Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Natural (Freedom)));
                            begin
-                              Placed (A) := Driver.Conventions.Z * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0
-                                and then Place_Var < Real'Last;
+                              --  The turn within a quarter turn, and the eye's distance from the arm's eye significant
+                              --  against its own sigma, each at the sigmas the covariance's freedom allows (Student's
+                              --  t). A centre whose variance was merely finite was taken as placed: 0.3 to 4.6 m from
+                              --  the arm's eye where the truth stands 0.6 to 0.7 m, two of them said determined (the
+                              --  bench's fixed eye over table arms, 10-20: 6 to 24 points of the arm, 13 to 33 pictures).
+                              Placed (A) := T * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0
+                                and then Driver.Uncertain.Significant (Away, Away_Sigma, Natural (Freedom));
                               if not Placed (A) then
                                  Say ("the points leave arm" & A'Image & "'s eye turn known only to"
-                                      & Driver.Log.Image (Sqrt (Turn_Var), 3) & " rad");
+                                      & Driver.Log.Image (Sqrt (Turn_Var), 3) & " rad, its distance from the arm's eye"
+                                      & Driver.Log.Image (Away, 3) & " +-" & Driver.Log.Image (Away_Sigma, 3));
                               end if;
                            end;
                         end if;

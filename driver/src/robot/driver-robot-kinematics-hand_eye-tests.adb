@@ -243,7 +243,7 @@ package body Driver.Robot.Kinematics.Hand_Eye.Tests is
                      Count := Count + 1;
                      Rest (Count) := X0;
                      Kept (Count) := Lnk;
-                     Track (Count) := (U0 => U0, V0 => V0);
+                     Track (Count) := (U0 => U0, V0 => V0, Frame => 1);
                   end if;
                end;
             end loop;

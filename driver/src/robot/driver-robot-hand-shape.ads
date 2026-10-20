@@ -130,7 +130,6 @@ package Driver.Robot.Hand.Shape is
 
    type Hand_Size (Lobes : Natural) is record
       Sizes : Lobe_Size_Array (1 .. Lobes);
-      Depth : Estimate;
       Axis  : Direction_Estimate;          --  tool frame: from the lobes' middle toward their tips
       Why   : Ada.Strings.Unbounded.Unbounded_String;   --  what is not measured and why, for the log
    end record;
@@ -140,8 +139,9 @@ package Driver.Robot.Hand.Shape is
    --  The hand's sizes from its lobes' shapes and their tips at both
    --  openings (tool frame, from the presses). A lobe is measured when its
    --  shape is fitted and both its tips are known (the open one alone for a
-   --  lobe followed part of its travel: Fit's Closed_Is_End); the depth and the
-   --  axis, when every lobe is.
+   --  lobe followed part of its travel: Fit's Closed_Is_End); the axis, when every
+   --  lobe is. How far a thing goes into the hand is not measured here: the pictures an eye off the hand takes of it
+   --  measure it (Driver.Robot.Hand.Hull).
 
    --  The rigid motion of what a set of sightings sees between two pictures of one eye, by Fit's starts and fit
    --  with no tip to anchor: Turn its rotation vector (axis times angle, the eye's frame) with its covariance in

@@ -104,6 +104,8 @@ package Driver.Robot.Kinematics.Fit is
    end record;
 
    type Joint_Array is array (Positive range <>) of Joint;
+
+   type Vec3_Array is array (Positive range <>) of Vec3;
    --  An arm's joints in the order of their readings.
 
    type Chain_Order is array (Positive range <>) of Positive;
@@ -138,21 +140,25 @@ package Driver.Robot.Kinematics.Fit is
    --  axes the data barely determine (the focal length against the distortion),
    --  for the cost they carry is far below any fraction of it.
 
-   function Scale_Of (Floor, Own : Real) return Real;
-   --  The scale a residual of a sighting is judged at: what the model leaves of any sighting (Floor) and what the
-   --  matcher states of this one's place (Own, a sighting's own), as variances. Never zero.
+   type Error_Model is record
+      Floor : Real := 0.0;   --  what the model leaves of any sighting, in pixels
+      Gain  : Real := 1.0;   --  how much of what the matcher states of a sighting's place its residual bears out
+   end record;
+   --  How far a sighting's residual lies, as the residuals show it: a floor common to every sighting, and the gain
+   --  times what the matcher states of the sighting (a sighting's own standard deviation), as variances.
 
-   function Floor_Of (R, Own : Real_Array) return Real
+   function Scale_Of (Model : Error_Model; Own : Real) return Real;
+   --  The scale a residual of a sighting stating Own is judged at: Model's floor and its gain times Own, as variances.
+   --  Never zero. Read from the residuals of thousands of sightings, it is judged as known (at Z).
+
+   function Model_Of (R, Own : Real_Array) return Error_Model
      with Pre => R'Length = Own'Length;
-   --  The floor of the scales the residuals R are judged at beside the standard deviations Own their sightings
-   --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
-   --  residual of the size typical of its sighting is typical. With none stated it is the noise the residuals show
-   --  (the robust scale about zero); zero when what the sightings state accounts for the residuals by itself.
-
-   function Scale_Freedom (Floor, Own : Real; Own_Freedom : Natural) return Natural;
-   --  How many degrees of freedom the scale a residual is judged at (Scale_Of) rests on: the sighting's own standard
-   --  deviation rests on Own_Freedom of them and the floor on none to speak of, so the scale's variance has as many as
-   --  the Welch-Satterthwaite formula gives; none (the scale is known) when the sighting's own is.
+   --  The floor and the gain read from the residuals R beside the standard deviations Own their sightings state (one
+   --  per residual): those at which the median of a residual over its scale is the Gaussian's, over all of them and
+   --  over the half that states the more, so a residual is as typical of its scale whatever its sighting states. With
+   --  none stated the floor is the noise the residuals show (the robust scale about zero) and the gain one; a floor of
+   --  zero when what the sightings state accounts for the residuals by itself, a gain of zero when it accounts for
+   --  nothing the floor does not.
 
    function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
    function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
@@ -273,7 +279,16 @@ package Driver.Robot.Kinematics.Fit is
       All_Median_Px : Real := 0.0;     --  the median residual over every sighting given, inlier or not: comparable
                                        --  between two fits of the same sightings that keep different inliers
       All_Count  : Natural := 0;       --  the sightings that median is over
-      Sigma_Px   : Real := 0.0;        --  the noise measured from them
+      Cost_Judged : Real := 0.0;
+      --  The robust cost (Huber at Z, no residual counting more than one at Z) of every sighting's residuals across and
+      --  down, inlier or not, each in units of the
+      --  scale the error model the refinement was asked to judge by gives it (Refine_Tracks' Judge_Floor and Judge_Gain;
+      --  its own when none): comparable between two fits of the same sightings that keep different inliers
+      Judge_Floor, Judge_Gain : Real := 0.0;   --  the error model Cost_Judged was taken at
+      Pinhole    : Boolean := False;   --  the lens fitted as a pinhole with square pixels: its aspect and distortion
+                                       --  not significant as a group (Fit's stage 5)
+      Sigma_Px   : Real := 0.0;        --  the noise measured from them (the error model's floor)
+      Own_Gain   : Real := 1.0;        --  and how much of the matcher's stated sigmas they bear out (its gain)
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
       Order_Told : Boolean := False;   --  the sightings tell the joints' order along the arm, not only that it is
                                        --  the best of the orders (stage 4; a fit begun from another, that one's)
@@ -307,7 +322,14 @@ package Driver.Robot.Kinematics.Fit is
       --  The sightings of the last fit that walked the focal length's profile, this one or one it was begun from; 0
       --  where none did.
       Profiled_Over : Natural := 0;
+      --  Per joint, three numbers: for a joint that slides, the turn per reading unit (its axis times its rate) of the
+      --  turn its own keyframes were explained by nearly as well when stage 1 took it for a slide, which every fit
+      --  begun from this one weighs against the slide again (Fit_Start); zero for a joint that turns, or has none.
+      Slide_Turns : Real_Lists.Vector;
    end record;
+
+   function Slide_Turns_Of (Report : Fit_Report; N : Natural) return Vec3_Array;
+   --  Report.Slide_Turns, a turn a joint, for a fit begun from it (Fit_Start); every one zero when it has none.
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
    --  Whether a track's depth is one: positive, and significant against its own relative uncertainty (Sigma is that
@@ -332,6 +354,11 @@ package Driver.Robot.Kinematics.Fit is
       Whole          : Boolean := False;
       Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
       Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
+      Slide_Turns    : Vec3_Array (1 .. N) := [others => [0.0, 0.0, 0.0]];   --  per joint (Fit_Report)
+      Fixed          : Boolean := False;
+      --  Its order is kept as given (Chain, whether Valid or not: a first fit of a given order runs every stage but
+      --  the search), searched for no other and not said to be told: the fit of one order of the joints, every term
+      --  refined in it, to be set beside the fits of other orders.
    end record;
 
    No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);
@@ -408,8 +435,6 @@ package Driver.Robot.Kinematics.Fit is
    procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
      with Pre => Into'Length <= N;
    --  Into'Length distinct numbers of 1 .. N, the next of the generator's.
-
-   type Vec3_Array is array (Positive range <>) of Vec3;
 
    procedure Turn_On_Plane
      (Before, After : Vec3_Array;

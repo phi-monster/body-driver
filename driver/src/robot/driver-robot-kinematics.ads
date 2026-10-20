@@ -303,6 +303,55 @@ private package Driver.Robot.Kinematics is
    --  (Kinematics.Fixed), by Refit, once the arm is fitted and the eye's set of answers is there, and again when
    --  either changed. The world is that arm's reference frame, in its unit.
 
+   --  What a keyframe of arm A at Readings would tell fixed eye E of its lens and of where it stands in the arm's frame
+   --  (step 3: the arm shows its hand to the eye), the eye's view of the arm fitted (Hand_Fit.Placed): every point of
+   --  the view with a link and a depth carried by the arm's fit to the readings and back into the eye's picture, with
+   --  how it moves with each of the eye's terms (each term moved by its standard deviation either way, as Offer_Hand
+   --  states its window). Its points' sightings, at the noise the view's sightings showed beyond a place on the grid,
+   --  would multiply the information the covariance of those terms holds by I + C J'J / s^2: Gain is the log of that
+   --  determinant, Narrowing the share by which the geometric mean of the terms' standard deviations would fall.
+   type Show_Value is record
+      Known     : Boolean := False;   --  the eye's view of the arm is fitted, and so is the arm
+      Gain      : Real := 0.0;
+      Narrowing : Real := 0.0;
+      Seen      : Natural := 0;       --  the arm's points the eye would see: in front of it and inside its picture
+      Window    : Real := Real'Last;  --  the median radius of the windows the aligner would search them in, px
+      Moved     : Real := 0.0;        --  the median distance they would move from where From puts them, px
+      Spread    : Real := Real'Last;  --  the median of what the eye's terms leave the points' places uncertain by, px
+      Noise     : Real := 0.0;        --  a sighting's own noise, px
+   end record;
+
+   function Show_Value_Of (M : Model; A : Arm_Id; E : Eye_Id; From, Readings : Real_Array) return Show_Value
+     with Pre => From'Length = Readings'Length;
+
+   --  A batch of keyframes to show arm A's hand to fixed eye E before the body is estimated again (step 3): Targets
+   --  holds the candidates' readings, Size values each, one after another (each one whose points the aligner follows
+   --  from the eye's prediction now: Show_Value_Of). They are taken greedily, each the one that would narrow the eye's
+   --  terms most given what those taken before it would tell (their information added to what the covariance of the
+   --  terms holds), until the candidate the eye would be least sure of then puts the arm's points no less surely than
+   --  a sighting of them is seen, or until the best would narrow the terms by less than the fraction that is no
+   --  change. An estimate of the whole body took 268 s on a fake robot at boot (q16, 10-19): one a keyframe, a
+   --  showing of twenty keyframes would take an hour and a half.
+   type Show_Plan is record
+      Chosen    : Count_Vectors.Vector;   --  the candidates taken, in order, by their place among Targets from 1
+      Narrowing : Real := 0.0;            --  the share by which the batch narrows the geometric mean of the terms' deviations
+      Worst     : Real := Real'Last;      --  then, the median spread of the most uncertain candidate's points, px
+      Noise     : Real := 0.0;            --  a sighting's own noise, px
+   end record;
+
+   function Show_Batch (M : Model; A : Arm_Id; E : Eye_Id; Targets : Real_Vectors.Vector; Size : Positive)
+     return Show_Plan;
+
+   function Show_Spread (M : Model; A : Arm_Id; E : Eye_Id) return Real;
+   --  How uncertain fixed eye E's terms in arm A's view are now: the geometric mean of their standard deviations (the
+   --  lens's, then the pose's, each in its own unit); Real'Last while the view is not fitted.
+
+   function Viewing_Eyes (M : Model; A : Arm_Id) return Count_Vectors.Vector;
+   --  The fixed eyes that keep a view of arm A (Hand_View), fitted or not.
+
+   function Showing_Eyes (M : Model; A : Arm_Id) return Count_Vectors.Vector;
+   --  The fixed eyes whose view of arm A is fitted: those a keyframe of the arm can tell more of (Show_Value_Of).
+
    function Fixed_Known (M : Model; E : Eye_Id) return Boolean;
    --  The fixed eye's lens and place are determined (Fixed.Fit_Report.Determined).
 

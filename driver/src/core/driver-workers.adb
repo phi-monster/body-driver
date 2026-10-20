@@ -1,10 +1,17 @@
+with Ada.Environment_Variables;
 with Ada.Exceptions;
 with System.Multiprocessors;
 
 package body Driver.Workers is
 
-   Count : constant Natural := Natural (System.Multiprocessors.Number_Of_CPUs) - 1;
-   --  The workers; the caller of a Run is the one more.
+   Count : constant Natural :=
+     (if Ada.Environment_Variables.Exists ("BD_WORKERS")
+      then Natural'Value (Ada.Environment_Variables.Value ("BD_WORKERS"))
+      else Natural (System.Multiprocessors.Number_Of_CPUs) - 1);
+   --  The workers; the caller of a Run is the one more. BD_WORKERS sets how many, where many drivers share the
+   --  processors (a bench of fits, one an arm: each its own processor, none waiting on the others' workers).
+
+   function Size return Positive is (Count + 1);
 
    --  What one call of Run has out: how many of its indices have not ended,
    --  and the first failure among them. Lives on the caller's stack for the

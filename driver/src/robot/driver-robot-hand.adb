@@ -1,4 +1,3 @@
-with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
@@ -104,7 +103,8 @@ package body Driver.Robot.Hand is
       Stalled  : Natural := 0;                        --  the beat the latest push judged stalled began
       Stalls   : Natural := 0;                        --  how many pushes were judged stalled
       Rests    : Natural := 0;                        --  how many presses the watcher found at a rest, used or not
-      Depth    : Estimate;
+      Depth    : Estimate;                            --  as the pictures of an eye off the hand see it (Set_Depth)
+      Depth_Why : Unbounded_String;                   --  and what ended the way in, or why it is not measured
       Axis     : Direction_Estimate;
       Unsized  : Unbounded_String;                    --  what of its sizes is not measured, and why
    end record;
@@ -536,7 +536,8 @@ package body Driver.Robot.Hand is
                     else "")
                  & "; ");
       end loop;
-      Append (Text, "depth " & Image (R.Depth));
+      Append (Text, "depth " & Image (R.Depth)
+                    & (if Length (R.Depth_Why) > 0 then " (" & To_String (R.Depth_Why) & ")" else ""));
       if Length (R.Unsized) > 0 then
          Append (Text, "; " & To_String (R.Unsized));
       end if;
@@ -572,7 +573,6 @@ package body Driver.Robot.Hand is
          for L in 1 .. N loop
             R.Lobes (L).Size := Sized.Sizes (L);
          end loop;
-         R.Depth := Sized.Depth;
          R.Axis := Sized.Axis;
          R.Unsized := Sized.Why;
       end;
@@ -613,6 +613,8 @@ package body Driver.Robot.Hand is
          if D.Found (Id).Group = Made.Group and then (Made.Group > 0 or else D.Found (Id).Arm = Made.Arm) then
             Made.Watch := D.Found (Id).Watch;
             Made.Book := D.Found (Id).Book;
+            Made.Depth := D.Found (Id).Depth;
+            Made.Depth_Why := D.Found (Id).Depth_Why;
             Driver.Robot.Hand.Tips.Set_Sights (Made.Book, Table);
             Size_Up (Made, Id);
             D.Found.Replace_Element (Id, Made);
@@ -858,7 +860,13 @@ package body Driver.Robot.Hand is
       end Patch_At;
    begin
       for C in 1 .. Sweeps.Channels (P.Sweep) loop
-         if Sweeps.Status (P.Sweep, C) = Sweeps.Measured and then Sweeps.Closing_Known (P.Sweep, C) then
+         --  And both its ends seen still, as they were when its lobes were placed: the views move on when the closer is
+         --  swept again where its lobes are not followed (Measure.Sweep_Where_Seen), and the ends may then lack a view; the
+         --  lobes stand as they were. q16 (servo seed 7 of the fake robot, 10-19) ended its boot at beat 3652 on Low_End's
+         --  precondition here, in the estimate.
+         if Sweeps.Status (P.Sweep, C) = Sweeps.Measured and then Sweeps.Closing_Known (P.Sweep, C)
+           and then Sweeps.Has_Ends (P.Sweep, C)
+         then
             declare
                Low  : constant Driver.Robot.Hand.Views.View := Sweeps.Low_End (P.Sweep, C);
                High : constant Driver.Robot.Hand.Views.View := Sweeps.High_End (P.Sweep, C);
@@ -1286,7 +1294,9 @@ package body Driver.Robot.Hand is
                              & " pixels, " & Driver.Log.Image (100.0 * Shift.By / Lobe.Way.Reach, 2) & " % of the"
                              & Driver.Log.Image (Lobe.Way.Reach, 1) & " it closes");
                   else
-                     Append (Text, "not found at" & Driver.Log.Image (Shift.By, 2) & " pixels");
+                     Append (Text, "not found at" & Driver.Log.Image (Shift.By, 2) & " pixels, the scores' middle "
+                             & Driver.Log.Image (Shift.Middle, 1) & " and a peak's least " & Driver.Log.Image (Shift.Level, 1)
+                             & " levels, its halves' peaks" & Shift.Halves'Image & " of 2");
                   end if;
                   Append (Text, " (the edge steps by" & Driver.Log.Image (Shift.Peak, 1) & " levels there,"
                           & Driver.Log.Image (Shift.Still, 1) & " where it stood, the others by" & Driver.Log.Image (Shift.Typical, 1)
@@ -2143,6 +2153,15 @@ package body Driver.Robot.Hand is
      (Found (H, Id).Lobes (Lobe).Size.Face);
 
    function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate is (Found (H, Id).Depth);
+
+   procedure Set_Depth (H : in out Hands; Id : Hand_Id; Depth : Estimate; Why : String) is
+   begin
+      if H.Data /= null and then Id in H.Data.Found.First_Index .. H.Data.Found.Last_Index then
+         H.Data.Found (Id).Depth := Depth;
+         H.Data.Found (Id).Depth_Why := To_Unbounded_String (Why);
+         Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & " sizes: " & Sizes_Text (H.Data.Found (Id)));
+      end if;
+   end Set_Depth;
 
    function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate is (Found (H, Id).Axis);
 

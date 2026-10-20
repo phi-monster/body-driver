@@ -33,6 +33,8 @@ package Driver.Numerics with Pure is
    --  A B.
    function Transposed (M : Mat3) return Mat3 with Inline;
    function Plus (A, B : Vec3) return Vec3 with Inline;
+   function Scaled (S : Real; V : Vec3) return Vec3 with Inline;
+   --  S V.
    function Minus (A, B : Vec3) return Vec3 with Inline;
    function Dot (A, B : Vec3) return Real with Inline;
 

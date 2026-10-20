@@ -982,20 +982,29 @@ package body Driver.Robot.Boot is
                                        Offset (I) := Offset (I) / 2.0;
                                        Descending (I) := True;
                                     elsif Followed_Most (I) = 0.0 and then not Descending (I) and then Lost = 1
-                                      and then not Levels (I) (Lost).Short and then Per_Unit (P.Channel) = 0.0
+                                      and then not Levels (I) (Lost).Short
+                                      and then (Per_Unit (P.Channel) = 0.0
+                                                or else Levels (I) (Lost).Offset * Per_Unit (P.Channel) < Patch)
                                     then
                                        --  The push's first level, the least turn a keyframe counts, not followed, and no level
                                        --  of it followed before: the view moved by less than the aligner follows from no
                                        --  prediction, and a lesser turn is none a keyframe counts. The ladder climbs: twice the
                                        --  level, a pass at a time, until a level is followed or the joint meets something.
-                                       --  Only while how far the view moves per unit of the joint is unmeasured (the first level
-                                       --  is then the step the eye saw it move by, not one the aligner was asked to follow), and
-                                       --  not at a level the joint was stopped short of.
+                                       --  While how far the view moves per unit of the joint is unmeasured (the first level is
+                                       --  then the step the eye saw it move by, not one the aligner was asked to follow), or
+                                       --  measured and the level moved the view by less than a patch, which the aligner follows
+                                       --  by itself (Take's brake): a level the aligner lost there was too small to tell from
+                                       --  none, not too wide to follow. Not at a level the joint was stopped short of.
                                        --  Stopped there, the joint had no keyframe of its own and its arm was never fitted:
                                        --  u12 (servo seed 3 of the fake robot, both arms, 10-19), arm 2's channel 6, its first
                                        --  level 43.1 units (the step the eye saw it move by), the view turned 1.7 degrees and
                                        --  moved 0 to 4 px by the truth, no common motion told, and the arm "swept in 4 passes
                                        --  of 4 rounds, not fitted"; u10, the same body, had 49.2 units for it and followed it.
+                                       --  And u28 (the same body, 10-19): its first level 42.4 units, the view's motion measured
+                                       --  by then from the keyframes of the other joints (0.136 px a unit, 5.8 px of a 16 px
+                                       --  patch), the truth 2.8 and 4.5 px each way; at the finest size the common motion
+                                       --  searches, 97 of 195 points stood and the other 98 drew two fields 49 to 24, none
+                                       --  told; no point asked, and again "swept in 4 passes of 4 rounds, not fitted".
                                        Offset (I) := 2.0 * Levels (I) (Lost).Offset;
                                     else
                                        --  Followed below and lost here: the next pass takes the level halfway between,
@@ -1149,6 +1158,259 @@ package body Driver.Robot.Boot is
                                 & Rounds'Image & " rounds, "
                                 & (if not Fitted_Now then "not fitted" elsif Told_Now then "fitted"
                                    else "fitted, its joints' order not told"));
+               --  Step 3: the arm shows its hand to every fixed eye whose view of it is fitted (Kinematics.Showing_Eyes).
+               --  The sweep's keyframes are sized for the arm's own eye, whose view a joint's turn moves much: a fixed eye
+               --  saw the arm's points move a few pixels in them, and its place was told 7 to 13 degrees off the truth
+               --  (u25, servo seed 3 of the fake robot, 10-19), where the arm carried across its view tells it to under a
+               --  degree (a Monte Carlo of u25's eye: 0.35 to 0.71 degrees, 1.7 to 3.5 mm and a focal length to 0.35 to
+               --  0.7 %, over 30 poses of eight points seen to half a pixel to one). Each keyframe is the turn, of one
+               --  joint or of two together, either way, that narrows the eye's terms most (Show_Value_Of's gain) of those
+               --  whose points the aligner follows from the fitted eye's prediction (a window no wider than its finest
+               --  size searches) and that stay within a picture's diagonal of where they stand, each turn climbing from
+               --  what the sweep followed of the joint, doubled a level. The showing ends when the best of them would
+               --  narrow the eye's terms by less than the fraction that is no change, or when a keyframe taken narrowed
+               --  them by less than that: the eye learned nothing from it (it was not followed), and the next would be
+               --  the same.
+               --  Step 3 before a fixed eye is fitted to the arm: the arm carries its hand through the eye's view along
+               --  paths of steps the eye's view follows by itself, a joint at a time, either way from where the sweep
+               --  left it, as far as the sweep turned the joint, each step moving the arm in the eye's picture by half a
+               --  patch (Lockin.Shift: how far the eye's picture moves per unit of the joint), a keyframe at each; then
+               --  the body is estimated once. The sweep's levels went out from the hold and back, each a jump the eye's
+               --  view followed from nothing nearer than the hold, and its eye was fitted to the arm in none of the
+               --  boots of round 75 (10-19: 4 to 14 points seen twice or more, focal lengths 36 to 85 px where the truth
+               --  has 140), the showing that needs it fitted never began.
+               declare
+                  Unplaced : Count_Vectors.Vector;
+                  Start_At : Real_Array (1 .. Size) := [others => 0.0];
+                  Steps_Taken : Natural := 0;
+                  procedure Read_Eyes is
+                     Placed  : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Showing_Eyes (M, A);
+                     Viewing : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Viewing_Eyes (M, A);
+                     Last    : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+                  begin
+                     Unplaced.Clear;
+                     for E of Viewing loop
+                        if not Placed.Contains (E)
+                          and then Eye_Mount (M, Eye_Id (E)).Kind /= Arm_Carried
+                        then
+                           Unplaced.Append (E);
+                        end if;
+                     end loop;
+                     for C in 1 .. Size loop
+                        Start_At (C) := Channels.Reading (M, G, Last, C);
+                     end loop;
+                  end Read_Eyes;
+               begin
+                  if Fitted_Now then
+                     Driver.Beats.Within_A_Beat (Read_Eyes'Access);
+                     for E of Unplaced loop
+                        declare
+                           Per_Px : Real_Array (1 .. Size) := [others => 0.0];   --  px a unit in this eye's view
+                           Half_Px : Real := 0.0;
+                           procedure Read_Shift is
+                           begin
+                              for C in 1 .. Size loop
+                                 Per_Px (C) := (if Lockin.Seen (M, Eye_Id (E), G, C)
+                                                then abs Lockin.Shift (M, Eye_Id (E), G, C) else 0.0);
+                              end loop;
+                              Half_Px := Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (E)).Grid.Width,
+                                                                              M.Eyes (Eye_Id (E)).Grid.Height));
+                           end Read_Shift;
+                        begin
+                           Driver.Beats.Within_A_Beat (Read_Shift'Access);
+                           for K in 1 .. N loop
+                              declare
+                                 C    : constant Positive := Swept (K);
+                                 Step : constant Real :=
+                                   (if Per_Px (C) > 0.0 then Real'Max (Least (C), Half_Px / Per_Px (C)) else 0.0);
+                                 Count : constant Natural :=
+                                   (if Step > 0.0 then Natural (Real'Ceiling (Reached (C) / Step)) else 0);
+                              begin
+                                 if Count > 0 then
+                                    Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carries its hand through eye"
+                                                     & E'Image & "'s view: c" & Driver.Log.Image (C) & " in"
+                                                     & Count'Image & " steps of " & Driver.Log.Image (Step, 3)
+                                                     & " units either way, " & Driver.Log.Image (Step * Per_Px (C), 2)
+                                                     & " px each in its picture");
+                                    for Sign of Real_Array'[1.0, -1.0] loop
+                                       for I in 1 .. Count loop
+                                          declare
+                                             Target : Real_Array (1 .. Size) := Start_At;
+                                          begin
+                                             Target (C) := Start_At (C) + Sign * Real (I) * Step;
+                                             Asked_Now := [others => False];
+                                             Asked_Now (C) := True;
+                                             Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                                             Go_To (G, Target, Report, Land => True);
+                                             exit when not Report.At_Rest;
+                                             Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                                             Steps_Taken := Steps_Taken + 1;
+                                             exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                                          end;
+                                       end loop;
+                                       Asked_Now := [others => False];
+                                       Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                                       Go_To (G, Start_At, Report, Land => True);
+                                    end loop;
+                                 end if;
+                              end;
+                           end loop;
+                        end;
+                     end loop;
+                     if Steps_Taken > 0 then
+                        Measure_The_Round;
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carried its hand through"
+                                         & Unplaced.Length'Image & " fixed eyes' views in" & Steps_Taken'Image & " keyframes");
+                     end if;
+                  end if;
+               end;
+               declare
+                  Now       : Real_Array (1 .. Size) := [others => 0.0];
+                  Targets   : Real_Vectors.Vector;   --  the chosen eye's candidates' readings, Size values each
+                  Best_Eye  : Natural := 0;
+                  Best_Gain : Real := 0.0;
+                  Least_Spread : Real := Real'First;   --  of every eye's candidates, the largest median spread, less the noise
+                  Plan      : Driver.Robot.Kinematics.Show_Plan;
+                  Before    : Real := Real'Last;   --  the chosen eye's spread before its batch
+                  After     : Real := Real'Last;   --  and after it
+                  Shown     : Natural := 0;
+                  Batches   : Natural := 0;
+                  procedure Choose is
+                     Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+                     Eyes : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Showing_Eyes (M, A);
+                  begin
+                     Best_Eye := 0;
+                     Best_Gain := 0.0;
+                     Least_Spread := Real'First;
+                     Plan := (others => <>);
+                     Targets.Clear;
+                     for C in 1 .. Size loop
+                        Now (C) := Channels.Reading (M, G, Last, C);
+                     end loop;
+                     for E of Eyes loop
+                        declare
+                           Width    : constant Natural := M.Eyes (Eye_Id (E)).Grid.Width;
+                           Height   : constant Natural := M.Eyes (Eye_Id (E)).Grid.Height;
+                           Finest   : constant Real := Driver.Alignment.Finest_Radius (Width, Height);
+                           Diagonal : constant Real :=
+                             Ada.Numerics.Long_Elementary_Functions.Sqrt (Real (Width) ** 2 + Real (Height) ** 2);
+                           Mine     : Real_Vectors.Vector;
+                           Gain     : Real := 0.0;
+                        begin
+                           for I in 1 .. N loop
+                              for J in I .. N loop
+                                 for Si of Real_Array'[-1.0, 1.0] loop
+                                    for Sj of Real_Array'[-1.0, 1.0] loop
+                                       --  A joint alone (J = I) has one sign; a pair, all four.
+                                       if J > I or else Sj > 0.0 then
+                                          declare
+                                             Scale : Real := 1.0;
+                                          begin
+                                             loop
+                                                declare
+                                                   CI  : constant Positive := Swept (I);
+                                                   CJ  : constant Positive := Swept (J);
+                                                   Try : Real_Array (1 .. Size) := Now;
+                                                   V   : Driver.Robot.Kinematics.Show_Value;
+                                                begin
+                                                   Try (CI) := Now (CI) + Si * Scale * Real'Max (Reached (CI), Least (CI));
+                                                   if J /= I then
+                                                      Try (CJ) := Now (CJ) + Sj * Scale * Real'Max (Reached (CJ), Least (CJ));
+                                                   end if;
+                                                   V := Driver.Robot.Kinematics.Show_Value_Of (M, A, Eye_Id (E), Now, Try);
+                                                   exit when not V.Known or else V.Seen = 0 or else V.Window > Finest
+                                                     or else V.Moved > Diagonal;
+                                                   for X of Try loop
+                                                      Mine.Append (X);
+                                                   end loop;
+                                                   Gain := Real'Max (Gain, V.Gain);
+                                                   Least_Spread := Real'Max (Least_Spread, V.Spread - V.Noise);
+                                                   Scale := 2.0 * Scale;
+                                                end;
+                                             end loop;
+                                          end;
+                                       end if;
+                                    end loop;
+                                 end loop;
+                              end loop;
+                           end loop;
+                           if Gain > Best_Gain then
+                              Best_Gain := Gain;
+                              Best_Eye := E;
+                              Targets := Mine;
+                           end if;
+                        end;
+                     end loop;
+                     --  Done when even the pose the eye is least sure of, of those the aligner follows, puts the arm's
+                     --  points no less surely than a sighting of them is seen.
+                     if Best_Eye > 0 and then Least_Spread > 0.0 then
+                        Plan := Driver.Robot.Kinematics.Show_Batch (M, A, Eye_Id (Best_Eye), Targets, Size);
+                        Before := Driver.Robot.Kinematics.Show_Spread (M, A, Eye_Id (Best_Eye));
+                     else
+                        Best_Eye := 0;
+                     end if;
+                  end Choose;
+                  procedure Read_After is
+                  begin
+                     After := Driver.Robot.Kinematics.Show_Spread (M, A, Eye_Id (Best_Eye));
+                  end Read_After;
+                  function Turns_Text (Target : Real_Array) return String is
+                     Text : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for C in 1 .. Size loop
+                        if Target (C) /= Now (C) then
+                           Ada.Strings.Unbounded.Append
+                             (Text, " c" & Driver.Log.Image (C) & " by " & Driver.Log.Image (Target (C) - Now (C), 3));
+                        end if;
+                     end loop;
+                     return Ada.Strings.Unbounded.To_String (Text);
+                  end Turns_Text;
+               begin
+                  if Fitted_Now then
+                     loop
+                        Driver.Beats.Within_A_Beat (Choose'Access);
+                        exit when Best_Eye = 0 or else Plan.Chosen.Is_Empty;
+                        Batches := Batches + 1;
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " shows its hand to eye" & Best_Eye'Image
+                                         & ", batch" & Batches'Image & ":" & Plan.Chosen.Length'Image & " keyframes of"
+                                         & Natural'Image (Natural (Targets.Length) / Size)
+                                         & " followed candidates, to narrow the eye's terms by "
+                                         & Driver.Log.Image (100.0 * Plan.Narrowing, 2) & " % (their spread "
+                                         & Driver.Log.Image (Before, 5) & "), the least sure candidate's points then "
+                                         & Driver.Log.Image (Plan.Worst, 2) & " px against a sighting's "
+                                         & Driver.Log.Image (Plan.Noise, 2) & " px");
+                        for K of Plan.Chosen loop
+                           declare
+                              Target : Real_Array (1 .. Size);
+                           begin
+                              for C in 1 .. Size loop
+                                 Target (C) := Targets (Targets.First_Index + (K - 1) * Size + C - 1);
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " shows its hand to eye"
+                                               & Best_Eye'Image & ", keyframe" & Natural'Image (Shown + 1) & ":"
+                                               & Turns_Text (Target));
+                              Asked_Now := [for C in 1 .. Size => Target (C) /= Now (C)];
+                              Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                              Go_To (G, Target, Report, Land => True);
+                              if Report.At_Rest then
+                                 Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                              end if;
+                              Shown := Shown + 1;
+                           end;
+                        end loop;
+                        Asked_Now := [others => False];
+                        Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                        Measure_The_Round;
+                        Driver.Beats.Within_A_Beat (Read_After'Access);
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s batch" & Batches'Image
+                                         & " shown to eye" & Best_Eye'Image & " took its terms' spread from "
+                                         & Driver.Log.Image (Before, 5) & " to " & Driver.Log.Image (After, 5));
+                        exit when not (After < (1.0 - Driver.Conventions.Unchanged_Fraction) * Before);
+                     end loop;
+                     Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " showed its hand in" & Shown'Image
+                                      & " keyframes of" & Batches'Image & " batches");
+                  end if;
+               end;
             end;
             declare
                Waited_Here : Natural;   --  each arm's own: arms are swept at once

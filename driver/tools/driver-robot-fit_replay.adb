@@ -48,7 +48,7 @@ begin
          Line : constant String := Get_Line (File);
          I    : Natural := Line'First;
       begin
-         if Line'Length > 4 and then Line (Line'First .. Line'First + 3) = "who " then
+         if Line'Length >= 4 and then Line (Line'First .. Line'First + 3) = "who " then
             Who := To_Unbounded_String (Line (Line'First + 4 .. Line'Last));
          else
             while I <= Line'Last loop
@@ -153,6 +153,11 @@ begin
          end loop;
          for J in 1 .. M loop
             From.Chain (J) := Next_Natural;
+         end loop;
+         for J in 1 .. M loop
+            for A in From.Slide_Turns (J)'Range loop
+               From.Slide_Turns (J) (A) := Next_Real;
+            end loop;
          end loop;
          Began := Ada.Calendar.Clock;
          Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,

@@ -6,6 +6,9 @@ with Driver.Json;
 
 package body Fake_World is
 
+   --  Where a joint stands short of its aim, in radians of its turn (or metres of a slide): a tenth of a micro-radian.
+   Still_Rad : constant := 1.0e-7;
+
    use Ada.Numerics.Long_Elementary_Functions;
 
    Pi : constant := Ada.Numerics.Pi;
@@ -407,6 +410,175 @@ package body Fake_World is
       end if;
    end Build_Arm;
 
+   --  A limb of Count revolute joints hung from Parent at Origin: each joint turns about one of its frame's three axes,
+   --  either way, as drawn; its link is a box of a drawn length along one of the other two, and the next joint stands
+   --  at the link's end. Every joint goes into G, in the limb's order from Parent. Last is the limb's last link.
+   procedure Add_Limb
+     (W : in out World; Prefix : String; Parent : Positive; Origin : Rigid; Count : Positive; Arm : Natural;
+      Unit : Real; Least, Most : Real; Mat : Material; G : in out Group; Last : out Positive)
+   is
+      Here : Positive := Parent;
+      At_O : Rigid := Origin;
+   begin
+      for K in 1 .. Count loop
+         declare
+            Turn_About : constant Natural := Natural (Real'Floor (3.0 * Random (W))) mod 3;
+            Sign       : constant Real := (if Random (W) < 0.5 then -1.0 else 1.0);
+            Along      : constant Natural := (Turn_About + 1 + Natural (Real'Floor (2.0 * Random (W))) mod 2) mod 3;
+            Length     : constant Real := Random (W, Least, Most);
+            Reach      : constant Real := Random (W, 1.2, 2.6);
+            Rest_Rad   : constant Real := Random (W, -0.3, 0.3);
+            Tau        : constant Real := Random (W, 0.8, 1.5);
+            Speed      : constant Real := Random (W, 0.08, 0.25);
+            Axis       : Vec3 := [0.0, 0.0, 0.0];
+            Offset     : Vec3 := [0.0, 0.0, 0.0];
+            J          : Positive;
+         begin
+            Axis (Turn_About + 1) := Sign;
+            Offset (Along + 1) := Length;
+            Add_Link (W, (Name => To_Unbounded_String (Prefix & "j" & Trim (K)), Parent => Here, Arm => Arm,
+                          Kind => Revolute, Origin => At_O, Axis => Axis, Unit => Unit, Q => Rest_Rad / Unit,
+                          Target => Rest_Rad / Unit, Lo => -Reach / Unit, Hi => Reach / Unit,
+                          Tau => Tau, Rate => Speed, others => <>), J);
+            Add_Box (W, Prefix & "j" & Trim (K), [for I in 1 .. 3 => (if I = Along + 1 then Length / 2.0 else 0.02)],
+                     Moved_To (Offset (1) / 2.0, Offset (2) / 2.0, Offset (3) / 2.0), Mat, J, Arm);
+            G.Joints.Append (J);
+            G.Echoed.Append (W.Links (J).Target);
+            Here := J;
+            At_O := Moved_To (Offset (1), Offset (2), Offset (3));
+         end;
+      end loop;
+      Last := Here;
+   end Add_Limb;
+
+   --  A joint the body does not have, standing for what moves it as a whole: along or about one of the world's axes.
+   procedure Add_Carrier_Joint
+     (W : in out World; Name : String; Parent : Positive; Kind : Joint_Kind; Axis : Vec3; Unit, Reach : Real;
+      G : in out Group; Index : out Positive)
+   is
+      Tau   : constant Real := Random (W, 0.8, 1.5);
+      Speed : constant Real := Random (W, 0.08, 0.25);
+   begin
+      Add_Link (W, (Name => To_Unbounded_String (Name), Parent => Parent, Arm => 0, Kind => Kind, Origin => Identity,
+                    Axis => Axis, Unit => Unit, Q => 0.0, Target => 0.0, Lo => -Reach / Unit, Hi => Reach / Unit,
+                    Tau => Tau, Rate => Speed, others => <>), Index);
+      G.Joints.Append (Index);
+      G.Echoed.Append (0.0);
+   end Add_Carrier_Joint;
+
+   --  The reading unit of a drawn body's joints: a servo bus's ticks when the template asks it, radians otherwise.
+   function Unit_Of (T : Template) return Real is
+     (if T.Servo then 2.0 * Pi / Real (if T.Ticks > 0 then T.Ticks else 4096) else 1.0);
+
+   --  A humanoid standing at the table, its pelvis held: a torso of two joints, two arms of seven, a neck of two with
+   --  the head's eye, two legs of six; every joint in one group, as a humanoid's controller reports them. Some of its
+   --  wrists carry an eye of their own.
+   procedure Build_Humanoid (W : in out World; Width, Height : Positive; T : Template) is
+      Unit   : constant Real := Unit_Of (T);
+      Skin   : constant Material :=
+        (Kind => Noise, Albedo => [0.55, 0.55, 0.60], Contrast => Random (W, 0.1, 0.5),
+         Scale => Random (W, 100.0, 400.0), Gloss => 0.2);
+      G      : Group := (Name => To_Unbounded_String ("joints"), Commandable => True, Integers => T.Servo,
+                         others => <>);
+      Pelvis, Torso, Neck, Hand, Foot : Positive;
+      Hip_Height : constant Real := W.Table_Z;
+      Hip_Above  : constant Real := Random (W, 0.05, 0.2);
+   begin
+      Add_Link (W, (Name => To_Unbounded_String ("pelvis"), Parent => 0, Arm => 0, Kind => Fixed,
+                    Origin => Moved_To (0.0, -0.75, Hip_Height + Hip_Above), others => <>), Pelvis);
+      Add_Box (W, "pelvis", [0.15, 0.08, 0.06], Identity, Skin, Pelvis, 0);
+      Add_Limb (W, "torso/", Pelvis, Moved_To (0.0, 0.0, 0.08), 2, 0, Unit, 0.12, 0.25, Skin, G, Torso);
+      W.Arms := 2;
+      for A in 1 .. 2 loop
+         declare
+            Shoulder : constant Real := (if A = 1 then -1.0 else 1.0) * Random (W, 0.15, 0.22);
+            Wrist_Eye : constant Boolean := Random (W) < 0.5;
+         begin
+         Add_Limb (W, "arm" & Trim (A) & "/", Torso, Moved_To (Shoulder, 0.0, 0.0), 7, A, Unit, 0.05, 0.25, Skin, G, Hand);
+         W.Tools.Append (Hand);
+         W.Closers.Append (0);
+         W.Kinds.Append (Hook);
+         W.Hand_Reach.Append (0.05);
+         if Wrist_Eye then
+            Add_Camera (W, "eye_arm" & Trim (A), Hand, A, Look ([0.0, 0.03, 0.04], [0.0, 1.0, -0.6], [0.0, 0.0, 1.0]),
+                        Width, Height, 0.5);
+         end if;
+         end;
+      end loop;
+      Add_Limb (W, "neck/", Torso, Moved_To (0.0, 0.0, 0.05), 2, 0, Unit, 0.05, 0.10, Skin, G, Neck);
+      Add_Camera (W, "eye_head", Neck, 0, Look ([0.0, 0.05, 0.08], [0.0, 1.0, -0.8], [0.0, 0.0, 1.0]), Width, Height,
+                  0.55);
+      for Leg in 1 .. 2 loop
+         Add_Limb (W, "leg" & Trim (Leg) & "/", Pelvis, Moved_To ((if Leg = 1 then -0.1 else 0.1), 0.0, -0.06), 6, 0,
+                   Unit, 0.10, 0.40, Skin, G, Foot);
+      end loop;
+      W.Groups.Append (G);
+   end Build_Humanoid;
+
+   --  A wheeled base on the floor, moved along and across the floor and turned about the upright by a group of its own
+   --  (what its wheels do, taken as where it stands), carrying a mast with an eye and an arm of five to seven joints
+   --  with an eye on its wrist.
+   procedure Build_Base_And_Arm (W : in out World; Width, Height : Positive; T : Template) is
+      Unit   : constant Real := Unit_Of (T);
+      Shell  : constant Material :=
+        (Kind => Noise, Albedo => [0.30, 0.32, 0.35], Contrast => Random (W, 0.1, 0.5),
+         Scale => Random (W, 100.0, 400.0), Gloss => 0.2);
+      Base_G : Group := (Name => To_Unbounded_String ("base"), Commandable => True, others => <>);
+      Arm_G  : Group := (Name => To_Unbounded_String ("arm1_joints"), Commandable => True, Integers => T.Servo,
+                         others => <>);
+      Anchor, Across, Ahead, Turn, Mast, Hand : Positive;
+      Below  : constant Real := Random (W, 0.05, 0.20);
+      Top    : constant Real := W.Table_Z - Below;
+      Mast_H : constant Real := Random (W, 0.3, 0.6);
+      Joints : constant Natural := 5 + Natural (Real'Floor (3.0 * Random (W))) mod 3;
+   begin
+      Add_Link (W, (Name => To_Unbounded_String ("floor_spot"), Parent => 0, Arm => 0, Kind => Fixed,
+                    Origin => Moved_To (0.0, -0.75, 0.0), others => <>), Anchor);
+      Add_Carrier_Joint (W, "base_x", Anchor, Prismatic, [1.0, 0.0, 0.0], 0.001, 0.5, Base_G, Across);
+      Add_Carrier_Joint (W, "base_y", Across, Prismatic, [0.0, 1.0, 0.0], 0.001, 0.3, Base_G, Ahead);
+      Add_Carrier_Joint (W, "base_yaw", Ahead, Revolute, [0.0, 0.0, 1.0], 0.001, 1.5, Base_G, Turn);
+      Add_Box (W, "base", [0.2, 0.2, Top / 2.0], Moved_To (0.0, 0.0, Top / 2.0), Shell, Turn, 0);
+      Add_Link (W, (Name => To_Unbounded_String ("mast"), Parent => Turn, Arm => 0, Kind => Fixed,
+                    Origin => Moved_To (0.0, -0.1, Top + Mast_H), others => <>), Mast);
+      Add_Box (W, "mast", [0.02, 0.02, 0.15], Moved_To (0.0, 0.0, -0.15), Shell, Mast, 0);
+      Add_Camera (W, "eye_head", Mast, 0, Look ([0.0, 0.03, 0.0], [0.0, 1.0, -0.9], [0.0, 0.0, 1.0]), Width, Height,
+                  0.55);
+      W.Arms := 1;
+      Add_Limb (W, "arm1/", Turn, Moved_To (0.0, 0.12, Top), Joints, 1, Unit, 0.05, 0.25, Shell, Arm_G, Hand);
+      W.Tools.Append (Hand);
+      W.Closers.Append (0);
+      W.Kinds.Append (Hook);
+      W.Hand_Reach.Append (0.05);
+      Add_Camera (W, "eye_arm1", Hand, 1, Look ([0.0, 0.03, 0.04], [0.0, 1.0, -0.6], [0.0, 0.0, 1.0]), Width, Height,
+                  0.5);
+      W.Groups.Append (Base_G);
+      W.Groups.Append (Arm_G);
+   end Build_Base_And_Arm;
+
+   --  A drone over the table: its motors move it along the world's three axes and turn it about the upright, one
+   --  group of four (where they put it, taken as its readings); an eye on its body looks ahead and down.
+   procedure Build_Drone (W : in out World; Width, Height : Positive) is
+      Shell : constant Material :=
+        (Kind => Noise, Albedo => [0.25, 0.25, 0.25], Contrast => Random (W, 0.1, 0.5),
+         Scale => Random (W, 100.0, 400.0), Gloss => 0.2);
+      G     : Group := (Name => To_Unbounded_String ("motors"), Commandable => True, others => <>);
+      Anchor, Across, Ahead, Up, Turn : Positive;
+      Table  : constant Real := W.Table_Z;
+      Above  : constant Real := Random (W, 0.3, 0.6);
+   begin
+      Add_Link (W, (Name => To_Unbounded_String ("hover_spot"), Parent => 0, Arm => 0, Kind => Fixed,
+                    Origin => Moved_To (0.0, -0.5, Table + Above), others => <>), Anchor);
+      Add_Carrier_Joint (W, "motor_x", Anchor, Prismatic, [1.0, 0.0, 0.0], 0.001, 0.4, G, Across);
+      Add_Carrier_Joint (W, "motor_y", Across, Prismatic, [0.0, 1.0, 0.0], 0.001, 0.3, G, Ahead);
+      Add_Carrier_Joint (W, "motor_z", Ahead, Prismatic, [0.0, 0.0, 1.0], 0.001, 0.2, G, Up);
+      Add_Carrier_Joint (W, "motor_yaw", Up, Revolute, [0.0, 0.0, 1.0], 0.001, 1.5, G, Turn);
+      Add_Box (W, "body", [0.12, 0.12, 0.03], Identity, Shell, Turn, 0);
+      Add_Camera (W, "eye_drone", Turn, 0, Look ([0.0, 0.1, 0.0], [0.0, 1.0, -0.9], [0.0, 0.0, 1.0]), Width, Height,
+                  0.55);
+      W.Arms := 0;
+      W.Groups.Append (G);
+   end Build_Drone;
+
    --  Things on the table: a flat slab of fine stripes in front of the first
    --  arm (the keyboard the lab's table had), and a few boxes.
    procedure Add_Things (W : in out World) is
@@ -550,6 +722,17 @@ package body Fake_World is
                  Wall);
       Add_Plane (W, "wall_right", (Rotation => About ([0.0, 1.0, 0.0], -Pi / 2.0), Translation => [1.6, 0.0, 0.8]),
                  Wall);
+      case T.Class is
+         when Humanoid =>
+            Build_Humanoid (W, Width, Height, T);
+         when Base_And_Arm =>
+            Build_Base_And_Arm (W, Width, Height, T);
+         when Drone =>
+            Build_Drone (W, Width, Height);
+         when Table_Arms =>
+            null;
+      end case;
+      if T.Class = Table_Arms then
       W.Arms := 2;
       declare
          Kinds : Hand_Kinds := T.Hands;
@@ -570,6 +753,7 @@ package body Fake_World is
          Build_Arm (W, 1, -1.0, Width, Height, Kinds (1), T.Eyeless /= 1, T.Eye_Up = 1, T.Ticks, T.Servo);
          Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2, T.Ticks, T.Servo);
       end;
+      end if;
       --  An arm whose bus is dead stands at rest where it was built, seen and never heard from.
       if T.Dead_Arm > 0 then
          for G of W.Groups loop
@@ -607,7 +791,7 @@ package body Fake_World is
       --  The body rests with its hands clear of the table: the elbow is raised
       --  until the lowest point of the arm stands well above it, and the
       --  echoes of the commands start at the rest positions.
-      for A in 1 .. W.Arms loop
+      for A in 1 .. (if T.Class = Table_Arms then W.Arms else 0) loop
          declare
             Elbow : constant Positive := W.Tools (A) - 3;
          begin
@@ -939,8 +1123,14 @@ package body Fake_World is
                   --  move aims short of the target by its landing, on the side it comes from.
                   Dead_Here : constant Real := (if W.Quirk.Dead then L.Dead else 0.0);
                   Landing   : constant Real := (if W.Quirk.Dead then L.Landing else 0.0);
-                  Within : constant Boolean := abs (T - From) <= Dead_Here;
-                  Aim   : constant Real := (if Within then From elsif T > From then T - Landing else T + Landing);
+                  --  And a joint a tenth of a micro-radian from where it aims stands: its first-order approach would go
+                  --  on below it for ever, numerically, where a shaft has long stood in its own friction (50 nm at half a
+                  --  metre, 2e-5 px in a fake eye), and no picture of a body at rest would repeat bit for bit to be kept
+                  --  (q18, servo seed 7, 10-19: 13 of its first 1164 beats stood bit for bit, 432 moved by under 1e-12).
+                  Toward : constant Real := (if T > From then T - Landing else T + Landing);
+                  Within : constant Boolean := abs (T - From) <= Dead_Here
+                    or else abs (Toward - From) * L.Unit <= Still_Rad;
+                  Aim   : constant Real := (if Within then From else Toward);
                   --  The first-order step, no faster than the joint turns.
                   Step  : constant Real :=
                     (if L.Rate > 0.0 and then abs ((Aim - From) * Share) > L.Rate / L.Unit

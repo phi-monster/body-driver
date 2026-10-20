@@ -52,7 +52,9 @@ package Driver.Robot.Kinematics.Hand_Eye is
 
    --  A point of the arm that the fixed eye's reference picture shows.
    type Track is record
-      U0, V0 : Real := 0.0;   --  where the reference picture shows it
+      U0, V0 : Real := 0.0;     --  where the picture it was chosen at shows it
+      Frame  : Positive := 1;   --  the keyframe that picture is (the arm's reference is 1): a point of the arm the eye
+                                --  took as the arm carried it into view rides from there
    end record;
 
    type Track_Array is array (Positive range <>) of Track;

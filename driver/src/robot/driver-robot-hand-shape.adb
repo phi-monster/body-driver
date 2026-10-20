@@ -1119,71 +1119,6 @@ package body Driver.Robot.Hand.Shape is
 
    function Unit_Axis (K : Positive) return Vec3 is ([for I in 1 .. 3 => (if I = K then 1.0 else 0.0)]);
 
-   --  Where a lobe that turns turns about: the point of its hinge nearest the eye, solving (I - R) p = s Shift in the
-   --  plane across the turn's axis (a pure turn moves no point of its axis; a share of the shift along the axis is a
-   --  screw's, and moves the whole line alike), and that point's covariance: from the motion's, by central differences
-   --  over the turn's three terms and the shift's two across itself, each with the scale's own change with them
-   --  (Scaled's Gradient), at the fit's scatter; and from the scale's own variance.
-   procedure Hinge_Of (S : Lobe_Shape; Sc : Scaled; At_Point : out Vec3; Cov : out Mat3) is
-      function Point (R : Mat3; Shift : Vec3; Scale : Real) return Vec3 is
-         W : constant Vec3 := Driver.Numerics.Log (R);
-         T : constant Real := abs W;
-      begin
-         if T = 0.0 then
-            return S.Eye;
-         end if;
-         declare
-            U   : constant Vec3 := (1.0 / T) * W;
-            E1  : constant Vec3 := Unit (Cross (U, (if abs U (1) < abs U (2) then Unit_Axis (1) else Unit_Axis (2))));
-            E2  : constant Vec3 := Cross (U, E1);
-            A   : constant Mat3 := Identity3 - R;
-            B   : constant Vec3 := Scale * Shift;
-            M11 : constant Real := E1 * (A * E1);
-            M12 : constant Real := E1 * (A * E2);
-            M21 : constant Real := E2 * (A * E1);
-            M22 : constant Real := E2 * (A * E2);
-            Det : constant Real := M11 * M22 - M12 * M21;
-            B1  : constant Real := E1 * B;
-            B2  : constant Real := E2 * B;
-         begin
-            if Det = 0.0 then
-               return S.Eye;
-            end if;
-            return S.Eye + ((M22 * B1 - M12 * B2) / Det) * E1 + ((M11 * B2 - M21 * B1) / Det) * E2;
-         end;
-      end Point;
-      Eps : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);
-      H   : constant Real := Eps * Real'Max (Sc.Scale, Real'Model_Small);
-      By_Scale : constant Vec3 :=
-        (1.0 / (2.0 * H)) * (Point (S.Rotation, S.Shift, Sc.Scale + H) - Point (S.Rotation, S.Shift, Sc.Scale - H));
-      J   : array (1 .. 5) of Vec3;
-   begin
-      At_Point := Point (S.Rotation, S.Shift, Sc.Scale);
-      for K in 1 .. 5 loop
-         declare
-            Up, Down : Vec3;
-         begin
-            if K <= 3 then
-               Up := Point (Driver.Numerics.Exp (Eps * Unit_Axis (K)) * S.Rotation, S.Shift, Sc.Scale);
-               Down := Point (Driver.Numerics.Exp (-Eps * Unit_Axis (K)) * S.Rotation, S.Shift, Sc.Scale);
-            else
-               Up := Point (S.Rotation, S.Shift + Eps * (if K = 4 then S.Across_1 else S.Across_2), Sc.Scale);
-               Down := Point (S.Rotation, S.Shift - Eps * (if K = 4 then S.Across_1 else S.Across_2), Sc.Scale);
-            end if;
-            J (K) := (1.0 / (2.0 * Eps)) * (Up - Down) + Sc.Gradient (K) * By_Scale;
-         end;
-      end loop;
-      Cov := Sc.Own * Outer (By_Scale, By_Scale);
-      for P in 1 .. 3 loop
-         for Q in 1 .. 3 loop
-            for K in 1 .. 5 loop
-               for L in 1 .. 5 loop
-                  Cov (P, Q) := Cov (P, Q) + J (K) (P) * (S.Scatter ** 2 * S.Covariance (K, L)) * J (L) (Q);
-               end loop;
-            end loop;
-         end loop;
-      end loop;
-   end Hinge_Of;
 
    function Measure (Shapes : Lobe_Shape_Array; Tips : Tip_Array) return Hand_Size is
       Result : Hand_Size (Shapes'Length);
@@ -1198,8 +1133,6 @@ package body Driver.Robot.Hand.Shape is
          Across   : Vec3 := Zero3;      --  its narrowest way across its closing direction
          Along    : Vec3 := Zero3;      --  across both, toward its tip
          Hinged   : Boolean := False;   --  it turns about a hinge: its turn stands out of its own uncertainty
-         Hinge_At : Vec3 := Zero3;      --  that hinge's point nearest the eye (Hinge_Of)
-         Hinge_Cov : Mat3 := [others => [others => 0.0]];
       end record;
 
       Work     : array (Shapes'Range) of Lobe_Work;
@@ -1307,7 +1240,6 @@ package body Driver.Robot.Hand.Shape is
                                        Work (L).Across := Unit (Hinge - Real'(Hinge * Work (L).Closing) * Work (L).Closing);
                                        Work (L).Across_Sd := Sqrt (Across_Variance (Turn_Cov, Hinge)) / Turn;
                                        Work (L).Hinged := True;
-                                       Hinge_Of (S, Work (L).Scale, Work (L).Hinge_At, Work (L).Hinge_Cov);
                                     end if;
                                  end;
                               end if;
@@ -1333,11 +1265,6 @@ package body Driver.Robot.Hand.Shape is
          Axis     : constant Vec3 := Unit (Pointing);
          Axis_Var : Real := 0.0;
          Count    : Natural := 0;
-         Deepest  : Real := Real'First;    --  the root end nearest the tips, along the axis
-         Root_V   : Real := 0.0;           --  its variance
-         Tip_Sum  : Real := 0.0;
-         Tip_Var  : Real := 0.0;
-         Unseen   : Unbounded_String;
       begin
          --  First the lobes' sizes and how well each lobe gives the axis: to
          --  the tilt of its closing direction, and, in the plane across it,
@@ -1409,59 +1336,10 @@ package body Driver.Robot.Hand.Shape is
             end if;
          end loop;
          if not All_Ok or else Count = 0 then
-            Append (Result.Why, "the depth waits for every lobe; ");
+            Append (Result.Why, "the axis waits for every lobe; ");
             return Result;
          end if;
          Result.Axis := (Unit_Vector => Axis, Sigma => Sqrt (Axis_Var) / Real (Count));
-         --  Then the depth: from the middle of the tips back along the axis to the root end nearest them. A lobe
-         --  that turns is held at its hinge, so it reaches back that far whatever of it was seen to move: its root end
-         --  is its hinge where that lies deeper than any point it showed (a jaw's root moves too little to be found,
-         --  and its depth stayed unmeasured: y7, servo seed 7 of the fake robot, 10-18).
-         for L in Shapes'Range loop
-            if Work (L).Ok then
-               declare
-                  S     : Lobe_Shape renames Shapes (L);
-                  E     : constant Extreme := End_Of (S, Work (L).Scale.Scale, Axis, Upper => False);
-                  Value : Real := E.Value;
-                  Variance : Real :=
-                    Sigma (E) ** 2 + Position_Variance (S, Work (L).Scale, E.Index, Axis)
-                    + (Result.Axis.Sigma * abs Cross (Axis, Point_At (S, Work (L).Scale.Scale, E.Index)
-                                                             - Tips (L, Open).Mean)) ** 2;
-               begin
-                  if Work (L).Hinged and then Real'(Axis * Work (L).Hinge_At) < Value then
-                     Value := Axis * Work (L).Hinge_At;
-                     Variance := Axis * (Work (L).Hinge_Cov * Axis)
-                       + (Result.Axis.Sigma * abs Cross (Axis, Work (L).Hinge_At - Tips (L, Open).Mean)) ** 2;
-                  end if;
-                  Tip_Sum := Tip_Sum + Axis * Tips (L, Open).Mean;
-                  Tip_Var := Tip_Var + Sigma_Along (Tips (L, Open).Covariance, Axis) ** 2;
-                  if Value > Deepest then
-                     Deepest := Value;
-                     Root_V := Variance;
-                  end if;
-                  if S.Bordered then
-                     Append (Unseen, Positive'Image (L));
-                  end if;
-               end;
-            end if;
-         end loop;
-         declare
-            Depth  : constant Estimate :=
-              (Value              => Tip_Sum / Real (Count) - Deepest,
-               Sigma              => Sqrt (Tip_Var / Real (Count) ** 2 + Root_V),
-               Degrees_Of_Freedom => 0);
-         begin
-            if Standing (Depth) then
-               Result.Depth := Depth;
-               if Length (Unseen) > 0 then
-                  Append (Result.Why, "the depth is at least as measured: lobe" & To_String (Unseen)
-                          & " comes in from the picture's border, where it begins is not seen; ");
-               end if;
-            else
-               Append (Result.Why, "the depth does not stand out of its own uncertainty ("
-                       & Driver.Log.Image (Depth.Value, 4) & " +- " & Driver.Log.Image (Depth.Sigma, 4) & "); ");
-            end if;
-         end;
       end;
       return Result;
    end Measure;

@@ -161,8 +161,16 @@ package Fake_World is
 
    package Kind_Vectors is new Ada.Containers.Vectors (Positive, Hand_Kind);
 
+   --  What kind of body is drawn: two arms on a table, each with its eye on its wrist (the lab's, the kiwi's); a
+   --  humanoid standing at the table, every joint of its body in one group, an eye in its head and on some of its
+   --  wrists; a wheeled base that carries an arm and a mast with an eye; a drone, a body that its motors move
+   --  through space with an eye on it. Every kind but the first has its limbs drawn: how many joints, about which
+   --  of its axes each turns, how long each link is.
+   type Body_Class is (Table_Arms, Humanoid, Base_And_Arm, Drone);
+
    --  What a test forces on the drawn body; the rest the seed decides.
    type Template is record
+      Class       : Body_Class := Table_Arms;
       Hands       : Hand_Kinds := [others => Drawn];
       Eyeless     : Natural := 0;        --  the arm with no eye of its own; 0 for none
       Eye_Up      : Natural := 0;        --  the arm whose eye looks ahead at the wall, not down at the table; 0 for none

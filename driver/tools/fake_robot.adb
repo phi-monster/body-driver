@@ -36,6 +36,7 @@ with Ada.Command_Line;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Numerics;
 with Ada.Numerics.Float_Random;
 with Ada.Streams.Stream_IO;
@@ -111,6 +112,19 @@ procedure Fake_Robot is
    Pixels  : array (1 .. 16) of Byte_Access;   --  one buffer per camera, the picture sent
    Scratch : array (1 .. 16) of Real_Access;   --  one per camera, the picture rendered
    Cam_State : array (1 .. 16) of Fake_Camera.State;   --  one per camera: its exposure, MJPEG and hiccups
+   type Rigid_Array is array (Positive range <>) of Rigid;
+   type Rigid_Access is access Rigid_Array;
+   --  One per camera: every solid's pose in the world when the camera last rendered, then the camera's own (none
+   --  before it has rendered).
+   World_At : array (1 .. 16) of Rigid_Access := [others => null];
+   --  FAKE_RENDER_ALL set: every picture rendered anew, for timing the keeping against.
+   Render_All : Boolean := False;
+   Kept_Renders : Natural := 0;   --  the renders a still world spared since the last report
+   --  FAKE_CHECK_STILL set: a kept picture is rendered anyway and compared, the most a channel differed kept.
+   Check_Still  : Boolean := False;
+   Worst_Kept   : Real := 0.0;
+   Check_Buffer : Real_Access;
+   Renders      : Natural := 0;   --  and those made
    Cam_Exposure, Cam_Mjpeg, Cam_Gaps : Boolean := True;
    --  The person's words, the task the robot hands the brain.
    Instruction : Unbounded_String := To_Unbounded_String ("Pick up the thing by 10 cm.");
@@ -758,6 +772,30 @@ procedure Fake_Robot is
       return (S - 2.0) * 1.7320508075688772;
    end Noise_Gauss;
 
+   --  Whether camera C's last render still shows the world: every solid, and the camera, stands in the world bit for
+   --  bit where it stood then. Nothing else the renderer reads changes (its light stands in the world, its textures
+   --  are functions of the place), so the render it would make is the one it made, to the last bit; the sensor's
+   --  noise is drawn afresh all the same (Expose). Short of that no picture is kept: the renderer samples each pixel
+   --  at points (Supersample), and a move of a micrometre may carry an edge across one and change the pixel by a
+   --  ninth of its contrast; its highlights (Blinn-Phong to the 40th) turn four times as fast as a face does. At rest
+   --  w18 (servo seed 11 of the fake robot, 10-19) stood bit for bit at 20296 of its 27288 beats, q15 (seed 7) at 2239
+   --  of 11557 (its servos still settling by under a nanometre a beat at 3757 more); rendered anew every beat, five
+   --  fakes at once took 231 to 236 ms a beat to render against 40 to 44 for the driver (round 74, 10-19).
+   function Still_Shown (C : Positive) return Boolean is
+      Cam : Camera renames W.Cameras (C);
+      Was : constant Rigid_Access := World_At (C);
+   begin
+      if Render_All or else Cam.Fresh or else Was = null or else Was'Length /= Natural (W.Solids.Length) + 1 then
+         return False;
+      end if;
+      for I in 1 .. Natural (W.Solids.Length) loop
+         if Was (I) /= W.Solids (I).Pose then
+            return False;
+         end if;
+      end loop;
+      return Was (Was'Last) = Cam.Pose;
+   end Still_Shown;
+
    procedure Take_Pictures is
    begin
       for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
@@ -766,7 +804,32 @@ procedure Fake_Robot is
             Share : constant Real := (if W.Quirk.Settle and then not Cam.Fresh then W.Quirk.Settle_Share else 1.0);
          begin
             Fake_Camera.Next_Beat (Cam_State (C));
-            Fake_Render.Render (W, Cam, Scratch (C).all);
+            if Still_Shown (C) then
+               Kept_Renders := Kept_Renders + 1;
+               if Check_Still then
+                  if Check_Buffer = null or else Check_Buffer'Length /= Scratch (C)'Length then
+                     Check_Buffer := new Real_Array (Scratch (C)'Range);
+                  end if;
+                  Fake_Render.Render (W, Cam, Check_Buffer.all);
+                  for I in Check_Buffer'Range loop
+                     if abs (Check_Buffer (I) - Scratch (C) (I)) > Worst_Kept then
+                        Put_Line ("fake_robot: CHECK camera" & C'Image & " beat" & W.Beat'Image & " value" & I'Image
+                                  & " kept" & Img (Scratch (C) (I)) & " fresh" & Img (Check_Buffer (I)));
+                     end if;
+                     Worst_Kept := Real'Max (Worst_Kept, abs (Check_Buffer (I) - Scratch (C) (I)));
+                  end loop;
+               end if;
+            else
+               Fake_Render.Render (W, Cam, Scratch (C).all);
+               Renders := Renders + 1;
+               if World_At (C) = null or else World_At (C)'Length /= Natural (W.Solids.Length) + 1 then
+                  World_At (C) := new Rigid_Array (1 .. Natural (W.Solids.Length) + 1);
+               end if;
+               for I in 1 .. Natural (W.Solids.Length) loop
+                  World_At (C) (I) := W.Solids (I).Pose;
+               end loop;
+               World_At (C) (World_At (C)'Last) := Cam.Pose;
+            end if;
             for I in Scratch (C)'Range loop
                Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
             end loop;
@@ -921,6 +984,8 @@ begin
       Shape.Dead_Arm := Natural'Value (Option ("--dead-arm", "0"));
       Shape.Ticks := Natural'Value (Option ("--ticks", "0"));
       Shape.Servo := Option ("--servo", "no") = "yes";
+      Shape.Class := (if Option ("--class") = "humanoid" then Humanoid elsif Option ("--class") = "base" then Base_And_Arm
+                      elsif Option ("--class") = "drone" then Drone else Table_Arms);
       if Option ("--instruction") /= "" then
          Instruction := To_Unbounded_String (Option ("--instruction"));
       end if;
@@ -934,6 +999,8 @@ begin
    Build (W, Seed, Width, Height, Shape);
    Scramble_Seed := Seed * 7919 + 17;
    Noise_State := Interfaces.Unsigned_64 (Seed) * 6364136223846793005 + 1442695040888963407;
+   Check_Still := Ada.Environment_Variables.Exists ("FAKE_CHECK_STILL");
+   Render_All := Ada.Environment_Variables.Exists ("FAKE_RENDER_ALL");
    Random.Reset (Scramble_Rng, Integer (Scramble_Seed));
    for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
       Pixels (C) := new Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Width * Height));
@@ -1007,7 +1074,10 @@ begin
             Put_Line ("fake_robot: beat" & W.Beat'Image & ", a beat takes render "
                       & Img (Real (Render_Time) * 1000.0 / Real (W.Beat)) & " ms, body "
                       & Img (Real (Step_Time) * 1000.0 / Real (W.Beat)) & " ms, driver "
-                      & Img (Real (Wire_Time) * 1000.0 / Real (W.Beat)) & " ms");
+                      & Img (Real (Wire_Time) * 1000.0 / Real (W.Beat)) & " ms; pictures rendered" & Renders'Image
+                      & ", kept from a still world" & Kept_Renders'Image
+                      & (if Check_Still then ", rendered anyway, the most a kept one differed" & Img (Worst_Kept) & " levels"
+                         else ""));
          end if;
          exit when W.Beat >= Beat_Limit;
          exit when Length (Stop_File) > 0 and then Ada.Directories.Exists (To_String (Stop_File));

@@ -268,10 +268,25 @@ package body Driver.Robot.Hand.Pressing is
                            Landing    : constant Vec3 := Tool_There.Pose * Tip.Mean + Down.Value * Result.Into;
                            Measured   : constant Boolean :=
                              Tool_There.Position_Covariance (1, 1) < Real'Last and then Tip.Covariance (1, 1) < Real'Last;
+                           --  How far across the table the landing may lie: the tool's place, the tip's (turned into the
+                           --  arm's frame, and moved by the tool's turn about it) and the gap's along the way in, as the
+                           --  table's plane sees them. A tip known along its line of sight far worse than across it lands no
+                           --  wider across the table than its line leans: taken by the widest axis of each, whatever its
+                           --  direction, every tilted press of q15's open opening (servo seed 7 of the fake robot, 10-19;
+                           --  its tip 4.06 +- 1.99 along its sight, its region 1.06 wide across it) was refused for 16 of
+                           --  the eye's tracks within 6.43 of its landing, and no tip of it was ever confirmed.
+                           Lever      : constant Vec3 := Tool_There.Pose.Rotation * Tip.Mean;
+                           Across     : constant Mat3 := Identity3 - Outer (Unit (Surface.Normal), Unit (Surface.Normal));
+                           Spread     : constant Mat3 :=
+                             (if Measured
+                              then Tool_There.Position_Covariance
+                                   + Tool_There.Pose.Rotation * Tip.Covariance * Transpose (Tool_There.Pose.Rotation)
+                                   + Skew (Lever) * Tool_There.Rotation_Covariance * Transpose (Skew (Lever))
+                                   + Down.Sigma ** 2 * Outer (Result.Into, Result.Into)
+                              else Identity3);
                            Within     : constant Real :=
                              (if Measured
-                              then Driver.Conventions.Z * Sqrt (Widest (Tool_There.Position_Covariance) + Widest (Tip.Covariance))
-                                   + Footprint
+                              then Driver.Conventions.Z * Sqrt (Widest (Across * Spread * Across)) + Footprint
                               else 0.0);
                            Standing   : constant Natural :=
                              (if Measured then Driver.Robot.Kinematics.Standing_Near (M, Arm, Landing, Within) else 0);

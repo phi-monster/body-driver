@@ -17,6 +17,9 @@ private package Driver.Workers is
 
    type Work_Access is access procedure (Index : Positive);
 
+   function Size return Positive;
+   --  How many indices a Run does at once: the workers and the caller.
+
    procedure Run (Work : not null Work_Access; First : Positive; Last : Natural);
    --  Work (I) for every I in First .. Last, each once, at once as far as the
    --  workers are idle; returns when all have ended. Work is only ever called

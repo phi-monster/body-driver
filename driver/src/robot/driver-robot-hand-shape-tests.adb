@@ -382,7 +382,6 @@ package body Driver.Robot.Hand.Shape.Tests is
             Sized : constant Hand_Size := Measure (Fits, Tips);
          begin
             Result.Size.Sizes (1 .. R.Lobe_Count) := Sized.Sizes;
-            Result.Size.Depth := Sized.Depth;
             Result.Size.Axis := Sized.Axis;
             Result.Size.Why := Sized.Why;
          end;
@@ -475,8 +474,6 @@ package body Driver.Robot.Hand.Shape.Tests is
       end loop;
       declare
          Axis    : constant Vec3 := Unit (Sum);
-         Tip_Sum : Real := 0.0;
-         Deepest : Real := Real'First;
       begin
          for L in 1 .. R.Lobe_Count loop
             declare
@@ -493,12 +490,8 @@ package body Driver.Robot.Hand.Shape.Tests is
                                         <= Z * O.Size.Sizes (L).Face.Sigma),
                       Name & ": lobe" & L'Image & " face " & Image (O.Size.Sizes (L).Face) & " is not "
                       & Driver.Log.Image (High - F * O.Tips (L) (Open), 5));
-               Span (Points (L), Axis, Low, High);
-               Deepest := Real'Max (Deepest, Low);
-               Tip_Sum := Tip_Sum + Axis * O.Tips (L) (Open);
             end;
          end loop;
-         Check_Within (Name & ": depth", O.Size.Depth, Tip_Sum / Real (R.Lobe_Count) - Deepest, Or_Unmeasured);
          Check ((Or_Unmeasured and then O.Size.Axis.Sigma = Real'Last)
                 or else (O.Size.Axis.Sigma < Real'Last
                          and then Arcsin (Real'Min (1.0, abs Cross (O.Size.Axis.Unit_Vector, Axis)))
@@ -506,7 +499,7 @@ package body Driver.Robot.Hand.Shape.Tests is
                 Name & ": the axis is off by" & Real'Image (abs Cross (O.Size.Axis.Unit_Vector, Axis))
                 & " radians, its sigma" & Real'Image (O.Size.Axis.Sigma));
          --  What is not measured says why.
-         Check (Known (O.Size.Depth) or else Length (O.Size.Why) > 0, Name & ": an unmeasured depth does not say why");
+         Check (O.Size.Axis.Sigma < Real'Last or else Length (O.Size.Why) > 0, Name & ": an unmeasured axis does not say why");
       end;
    end Check_Against_Truth;
 
@@ -542,11 +535,6 @@ package body Driver.Robot.Hand.Shape.Tests is
             Check_Within ("parallel: box" & L'Image & " width", O.Size.Sizes (L).Width, 0.02);
             Check_Within ("parallel: box" & L'Image & " thickness", O.Size.Sizes (L).Thickness, 0.01);
          end loop;
-         --  The lobes run out of the picture's sides by their roots: the
-         --  depth is what is seen of them, and says so.
-         Check ((Index (O.Size.Why, "at least") > 0) = (O.Shapes (1).Bordered or else O.Shapes (2).Bordered),
-                "a hand says its depth is at least as measured exactly when a lobe runs out of the picture: "
-                & To_String (O.Size.Why));
       end if;
    end Parallel_Lobes;
 
@@ -600,8 +588,7 @@ package body Driver.Robot.Hand.Shape.Tests is
                    and then not Known (Sized.Sizes (L).Face),
                    "a lobe with no tips pressed has a size: width " & Image (Sized.Sizes (L).Width));
          end loop;
-         Check (not Known (Sized.Depth) and then Sized.Axis.Sigma = Real'Last,
-                "a hand with no tips pressed has a depth " & Image (Sized.Depth));
+         Check (Sized.Axis.Sigma = Real'Last, "a hand with no tips pressed has an axis");
          Check (Index (Sized.Why, "not pressed") > 0, "an unpressed hand does not say why: " & To_String (Sized.Why));
       end;
    end Unpressed;
@@ -621,7 +608,7 @@ package body Driver.Robot.Hand.Shape.Tests is
    begin
       Check (O.Found = 2, "the parallel lobes were not found: " & To_String (O.Problem));
       if O.Found = 2 then
-         Check (not Known (O.Size.Sizes (1).Width) and then not Known (O.Size.Depth),
+         Check (not Known (O.Size.Sizes (1).Width),
                 "a lobe whose tips disagree on its scale is measured: width " & Image (O.Size.Sizes (1).Width));
          Check (Index (O.Size.Why, "disagree") > 0, "the disagreement is not said: " & To_String (O.Size.Why));
          Check (Known (O.Size.Sizes (2).Width), "the other lobe is not measured: " & To_String (O.Size.Why));
@@ -660,8 +647,7 @@ package body Driver.Robot.Hand.Shape.Tests is
       begin
          Check (O.Found = 2, "the parallel lobes were not found: " & To_String (O.Problem));
          if O.Found = 2 then
-            Check (not Known (O.Size.Sizes (1).Width) and then not Known (O.Size.Sizes (1).Thickness)
-                   and then not Known (O.Size.Depth),
+            Check (not Known (O.Size.Sizes (1).Width) and then not Known (O.Size.Sizes (1).Thickness),
                    "a lobe whose tip does not move with the rest is measured: width "
                    & Image (O.Size.Sizes (1).Width) & " (" & To_String (O.Size.Why) & ")");
             Check (Index (O.Size.Why, "lobe 1:") > 0, "the bent lobe does not say why: " & To_String (O.Size.Why));

@@ -1236,8 +1236,11 @@ package body Driver.Robot.Tests is
       Truth   : Fit.Joint_Array (1 .. N);
       type Sighting_Access is access Fit.Sighting_Array;
 
+      --  Each pair turned together either way, as the boot's rows of a Sylvester-Hadamard matrix turn it: the order
+      --  search tells an order from another only where both halves of the keyframes do (Judge), and one turn of a
+      --  pair lies in one half alone.
       procedure Fit_Of (Both : Boolean; Report : out Fit.Fit_Report) is
-         Pairs   : constant Natural := N * (N - 1) / 2 - (if Both then 0 else 1);
+         Pairs   : constant Natural := 2 * (N * (N - 1) / 2 - (if Both then 0 else 1));
          Frames  : constant Positive := 1 + N * Levels'Length + Pairs;
          Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
          Asked   : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
@@ -1257,9 +1260,11 @@ package body Driver.Robot.Tests is
          for I in 1 .. N loop
             for J in I + 1 .. N loop
                if Both or else not (I = 2 and then J = 3) then
-                  Row := Row + 1;
-                  Changes (Row, I) := Widest;
-                  Changes (Row, J) := Widest;
+                  for Way of Real_Array'[1.0, -1.0] loop
+                     Row := Row + 1;
+                     Changes (Row, I) := Way * Widest;
+                     Changes (Row, J) := Way * Widest;
+                  end loop;
                end if;
             end loop;
          end loop;
@@ -4748,26 +4753,34 @@ package body Driver.Robot.Tests is
    --  covariance of it: the chi square of its Lens_Terms terms (the logarithms
    --  of the focal lengths, the principal point, the two distortion terms).
    --  Real'Last when the covariance is not that of a fit or is not positive
-   --  definite.
+   --  definite. A lens fitted as a pinhole with square pixels (Fit_Report's
+   --  Pinhole) is judged on the terms it has: the first focal length and the
+   --  principal point (Pinhole_Terms).
+   Pinhole_Terms : constant array (1 .. 3) of Positive := [1, 3, 4];
+
    function Lens_Chi_Square
      (Found, Truth : Driver.Robot.Kinematics.Fit.Lens;
-      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector) return Real
+      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector;
+      Pinhole      : Boolean := False) return Real
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
-      Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
+      All_Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Found.Fx / Truth.Fx),
          Ada.Numerics.Long_Elementary_Functions.Log (Found.Fy / Truth.Fy),
          Found.Cx - Truth.Cx, Found.Cy - Truth.Cy, Found.K1 - Truth.K1, Found.K2 - Truth.K2];
-      V, L  : Real_Matrix (1 .. Fit.Lens_Terms, 1 .. Fit.Lens_Terms) := [others => [others => 0.0]];
+      Kept  : constant Positive := (if Pinhole then Pinhole_Terms'Length else Fit.Lens_Terms);
+      function Term (K : Positive) return Positive is (if Pinhole then Pinhole_Terms (K) else K);
+      Error : constant Real_Vector (1 .. Kept) := [for K in 1 .. Kept => All_Error (Term (K))];
+      V, L  : Real_Matrix (1 .. Kept, 1 .. Kept) := [others => [others => 0.0]];
       Ok    : Boolean;
    begin
       if Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
          return Real'Last;
       end if;
-      for P in 1 .. Fit.Lens_Terms loop
-         for Q in 1 .. Fit.Lens_Terms loop
-            V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
+      for P in 1 .. Kept loop
+         for Q in 1 .. Kept loop
+            V (P, Q) := Covariance (Covariance.First_Index + (Term (P) - 1) * Terms + Term (Q) - 1);
          end loop;
       end loop;
       Driver.Numerics.Dense.Cholesky (V, L, Ok);
@@ -5053,10 +5066,11 @@ package body Driver.Robot.Tests is
                 & Report.Focal_Sigma'Image);
          --  The whole lens, its terms together: a chi square as rare as Z.
          declare
-            Chi : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance);
+            Chi  : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance, Report.Pinhole);
+            Kept : constant Positive := (if Report.Pinhole then Pinhole_Terms'Length else Fit.Lens_Terms);
          begin
-            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Fit.Lens_Terms) <= Driver.Conventions.Z,
-                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Fit.Lens_Terms'Image
+            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Kept) <= Driver.Conventions.Z,
+                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Kept'Image
                    & " terms: focal" & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre"
                    & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy) & ", distortion" & Real'Image (Found.K1)
                    & "," & Real'Image (Found.K2));
@@ -8013,7 +8027,10 @@ package body Driver.Robot.Tests is
                   First : constant Positive := Frames + 1;
                begin
                   for P of Report.Untold loop
-                     if not Turned (P.Earlier, P.Later) then
+                     --  A pair is turned once, whichever way along the arm the fit puts it: the order the fit keeps
+                     --  changes between rounds, and a pair named both ways was turned twice, past the keyframes the
+                     --  exam keeps (arm 5 of the hard exam, 10-20).
+                     if not Turned (P.Earlier, P.Later) and then not Turned (P.Later, P.Earlier) then
                         Turned (P.Earlier, P.Later) := True;
                         Fresh := Fresh + 1;
                         --  The pair's joints by the truth's numbering: the readings are drawn from them.
@@ -8614,46 +8631,78 @@ package body Driver.Robot.Tests is
    end Ends_Are_Kept_In_The_Body_File;
 
    procedure Scales_Beside_Stated_Sigmas is
-      --  Residuals each of the spread of a common floor (a tenth of a pixel: what the model leaves of any sighting)
-      --  and what its sighting states, which grows from nothing to a pixel and a half as the view moved the more. The
-      --  noise they show together is several times the floor; the floor read from them beside what is stated is
-      --  the common one, so the sightings that moved far, whose residuals are large for what they state, are not taken
-      --  for outliers by the noise of those that moved little. With nothing stated the floor is that noise.
-      Count   : constant := 2000;
-      Floor   : constant Real := 0.1;
-      R, Own, None : Real_Array (1 .. Count);
-      Rng     : Generator;
+      --  Residuals each of the spread of a common floor (what the model leaves of any sighting) and a gain times what
+      --  its sighting states, which grows from nothing to a pixel and a half as the view moved the more: the floor and
+      --  the gain read from them are theirs, whether what is stated is borne out in full, in half or not at all (the
+      --  aligner's stated sigmas, 10-19: 0.50 of them and none on two arms of the fake robot). Read so, the sightings
+      --  that state much are not outliers by the noise of those that state little, nor those that state little by what
+      --  others state. With nothing stated the floor is the noise the residuals show together, several times the floor.
+      --  The bounds are four of the spreads the reading showed over 60 such draws (a floor of 0.10 +- 0.025 and a gain
+      --  of 1.00 +- 0.041 at a gain of one, 0.10 +- 0.014 and 0.50 +- 0.021 at a half, 0.49 +- 0.015 and 0.06 +- 0.07
+      --  at none).
+      Count : constant := 2000;
+      type Truth is record
+         Floor, Gain, Floor_Within, Gain_Within : Real;
+      end record;
+      Cases : constant array (1 .. 3) of Truth :=
+        [(Floor => 0.1, Gain => 1.0, Floor_Within => 0.1, Gain_Within => 0.16),
+         (Floor => 0.1, Gain => 0.5, Floor_Within => 0.056, Gain_Within => 0.084),
+         (Floor => 0.5, Gain => 0.0, Floor_Within => 0.06, Gain_Within => 0.28)];
+      Rng   : Generator;
    begin
-      for I in 1 .. Count loop
-         Own (I) := 1.5 * Real (I) / Real (Count);
-         None (I) := 0.0;
-         R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (Floor ** 2 + Own (I) ** 2) * Gaussian (Rng);
+      for C of Cases loop
+         declare
+            R, Own : Real_Array (1 .. Count);
+         begin
+            for I in 1 .. Count loop
+               Own (I) := 1.5 * Real (I) / Real (Count);
+               R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (C.Floor ** 2 + (C.Gain * Own (I)) ** 2)
+                 * Gaussian (Rng);
+            end loop;
+            declare
+               Read : constant Driver.Robot.Kinematics.Fit.Error_Model := Driver.Robot.Kinematics.Fit.Model_Of (R, Own);
+            begin
+               Check_Close (Read.Floor, C.Floor, C.Floor_Within, "the floor read beside what the sightings state, from "
+                            & "residuals of floor" & Real'Image (C.Floor) & " and gain" & Real'Image (C.Gain) & ", is"
+                            & Real'Image (Read.Floor));
+               Check_Close (Read.Gain, C.Gain, C.Gain_Within, "the gain read beside the floor, from residuals of floor"
+                            & Real'Image (C.Floor) & " and gain" & Real'Image (C.Gain) & ", is" & Real'Image (Read.Gain));
+            end;
+         end;
       end loop;
       declare
-         Read  : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, Own);
-         Alone : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, None);
-         Shown : Real_Array (1 .. Count);
+         R, None : Real_Array (1 .. Count);
+         Shown   : Real_Array (1 .. Count);
       begin
          for I in 1 .. Count loop
+            None (I) := 0.0;
+            R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (0.1 ** 2 + (1.5 * Real (I) / Real (Count)) ** 2)
+              * Gaussian (Rng);
             Shown (I) := abs R (I);
          end loop;
-         Check_Close (Read, Floor, 0.03, "the floor read beside what the sightings state, from residuals whose floor is"
-                      & Real'Image (Floor) & ", is" & Real'Image (Read));
-         Check (Alone > 3.0 * Floor,
-                "the noise the residuals show together is not several times their floor:" & Real'Image (Alone));
-         Check_Close (Alone, Driver.Stats.Median (Shown)
-                      / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5), 1.0E-9,
-                      "with nothing stated the floor is not the noise the residuals show");
-         Check (Driver.Robot.Kinematics.Fit.Scale_Of (0.0, 0.0) > 0.0, "a residual with neither floor nor stated has no scale");
-         Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of (0.3, 0.4), 0.5, 1.0E-12, "a scale is the floor and what is stated, as variances");
+         declare
+            Alone : constant Driver.Robot.Kinematics.Fit.Error_Model := Driver.Robot.Kinematics.Fit.Model_Of (R, None);
+         begin
+            Check (Alone.Floor > 3.0 * 0.1,
+                   "the noise the residuals show together is not several times their floor:" & Real'Image (Alone.Floor));
+            Check_Close (Alone.Floor, Driver.Stats.Median (Shown) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5),
+                         1.0E-9, "with nothing stated the floor is not the noise the residuals show");
+            Check (Alone.Gain = 1.0, "with nothing stated the gain is not one:" & Real'Image (Alone.Gain));
+         end;
       end;
+      Check (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.0, Gain => 0.0), 0.0) > 0.0,
+             "a residual with neither floor nor stated has no scale");
+      Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.3, Gain => 1.0), 0.4), 0.5, 1.0E-12,
+                   "a scale is the floor and what is stated, as variances");
+      Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.3, Gain => 0.5), 0.8), 0.5, 1.0E-12,
+                   "a scale is the floor and the gain times what is stated, as variances");
    end Scales_Beside_Stated_Sigmas;
 
    procedure Register is
    begin
-      Driver.Tests.Register ("robot.kinematics.scales", "the floor of the scales residuals are judged at is the noise "
-                             & "they show together though their sightings state more as they moved further, so those "
-                             & "that moved far are outliers", Scales_Beside_Stated_Sigmas'Access);
+      Driver.Tests.Register ("robot.kinematics.scales", "the floor and gain of the scales residuals are judged at are "
+                             & "read beside what their sightings state, whatever part of it the residuals bear out, so "
+                             & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
       Driver.Robot.Kinematics.Hand_Eye.Tests.Register;
       Driver.Robot.Surfaces.Tests.Register;

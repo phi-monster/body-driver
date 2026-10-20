@@ -217,6 +217,103 @@ package body Driver.Core_Tests is
       end;
    end Cholesky_Solve;
 
+   --  The small eigensystem against the standard one: every pair A v = lambda v, the vectors orthonormal, the values
+   --  the standard's; sizes one to five, a nought, a diagonal, repeated values and drawn matrices.
+   procedure Small_Eigensystem_Agrees is
+      Gen : Ada.Numerics.Float_Random.Generator;
+      procedure Try (A : Real_Matrix; What : String) is
+         N       : constant Positive := A'Length (1);
+         Values  : Real_Vector (1 .. N);
+         Vectors : Real_Matrix (1 .. N, 1 .. N);
+         Std_V   : Real_Vector (1 .. N);
+         Std_M   : Real_Matrix (1 .. N, 1 .. N);
+         Scale   : Real := 0.0;
+      begin
+         Driver.Numerics.Dense.Small_Eigensystem (A, Values, Vectors);
+         Eigensystem (A, Std_V, Std_M);
+         for X of Std_V loop
+            Scale := Real'Max (Scale, abs X);
+         end loop;
+         Scale := Real'Max (Scale, 1.0);
+         for K in 1 .. N loop
+            declare
+               V : constant Real_Vector := [for I in 1 .. N => Vectors (I, K)];
+            begin
+               Check (abs (A * V - Values (K) * V) <= 1.0e-12 * Scale, What & ": a pair is no eigenpair");
+               for L in 1 .. N loop
+                  declare
+                     W : constant Real_Vector := [for I in 1 .. N => Vectors (I, L)];
+                  begin
+                     Check (abs (V * W - (if K = L then 1.0 else 0.0)) <= 1.0e-12, What & ": the vectors are not orthonormal");
+                  end;
+               end loop;
+            end;
+         end loop;
+         --  The values as a set: each the standard's, matched in order of size.
+         declare
+            Mine : Real_Vector := Values;
+            T    : Real;
+         begin
+            for I in 1 .. N loop
+               for J in I + 1 .. N loop
+                  if Mine (J) > Mine (I) then
+                     T := Mine (I);
+                     Mine (I) := Mine (J);
+                     Mine (J) := T;
+                  end if;
+               end loop;
+            end loop;
+            for I in 1 .. N loop
+               Check (abs (Mine (I) - Std_V (I)) <= 1.0e-12 * Scale, What & ": a value is not the standard's");
+            end loop;
+         end;
+      end Try;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 7);
+      Try ([1 .. 1 => [1 .. 1 => 2.5]], "one by one");
+      Try ([1 .. 3 => [1 .. 3 => 0.0]], "nought");
+      Try ([[3.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 2.0]], "diagonal");
+      Try ([[2.0, 1.0, 0.0, 0.0], [1.0, 2.0, 0.0, 0.0], [0.0, 0.0, 3.0, 0.0], [0.0, 0.0, 0.0, 3.0]], "repeated");
+      for N in 2 .. 5 loop
+         for Draw in 1 .. 20 loop
+            declare
+               A : Real_Matrix (1 .. N, 1 .. N);
+            begin
+               for I in 1 .. N loop
+                  for J in I .. N loop
+                     A (I, J) := Real (Ada.Numerics.Float_Random.Random (Gen)) * 2.0 - 1.0;
+                     A (J, I) := A (I, J);
+                  end loop;
+               end loop;
+               Try (A, "drawn" & N'Image & " by" & N'Image);
+            end;
+         end loop;
+      end loop;
+   end Small_Eigensystem_Agrees;
+
+   --  The median taken in place is the median, for odd and even sizes, ties and both signs.
+   procedure Median_In_Place_Agrees is
+      Gen : Ada.Numerics.Float_Random.Generator;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 11);
+      for N in 1 .. 40 loop
+         declare
+            X : Real_Array (1 .. N);
+         begin
+            for I in X'Range loop
+               --  Ties: values on a coarse grid.
+               X (I) := Real (Integer (Real (Ada.Numerics.Float_Random.Random (Gen)) * 10.0)) - 5.0;
+            end loop;
+            declare
+               Want : constant Real := Driver.Stats.Median (X);
+               Y    : Real_Array := X;
+            begin
+               Check (Driver.Stats.Median_In_Place (Y) = Want, "the median in place of" & N'Image & " values differs");
+            end;
+         end;
+      end loop;
+   end Median_In_Place_Agrees;
+
    procedure Robust_Statistics is
       X : constant Real_Array := [1.0, 2.0, 3.0, 4.0, 1000.0];
    begin
@@ -881,6 +978,10 @@ package body Driver.Core_Tests is
                              Least_Squares_Exact'Access);
       Driver.Tests.Register ("core.cholesky", "Cholesky accepts indefinite input or solves wrongly",
                              Cholesky_Solve'Access);
+      Driver.Tests.Register ("core.small_eigensystem", "the small eigensystem leaves a pair that is no eigenpair, "
+                             & "vectors not orthonormal or values not the standard's", Small_Eigensystem_Agrees'Access);
+      Driver.Tests.Register ("core.median_in_place", "the median taken in place differs from the median",
+                             Median_In_Place_Agrees'Access);
       Driver.Tests.Register ("core.least_squares_task", "a tall least squares problem overflows a task's default stack",
                              Least_Squares_In_A_Task'Access);
       Driver.Tests.Register ("core.stats", "robust statistics moved by a single outlier", Robust_Statistics'Access);

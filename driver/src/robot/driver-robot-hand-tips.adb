@@ -1,3 +1,4 @@
+with Driver.Uncertain;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
@@ -596,10 +597,90 @@ package body Driver.Robot.Hand.Tips is
       end loop;
    end Settle;
 
+   --  Lobes measured again in another number keep the presses of the fingers they still show: a press stays with the
+   --  new lobe whose line of sight, at every opening where both are known, is the old lobe's within what the two are
+   --  uncertain by (their directions' sigmas and their tips' spreads, at Z), the nearest of those, and its slides
+   --  go with their lobes; the presses of a lobe no new one shows are dropped. Dropped with every lobe, the presses of
+   --  u28's hand 1 (servo seed 3 of the fake robot, 10-19), ten of them, its open tip confirmed, were gone when its
+   --  closer, swept again where its lobe was not followed, showed a fixed jaw beside the moving one; it pressed one
+   --  more, and its sizes were never measured.
    procedure Set_Sights (B : in out Book; Sights : Sight_Table) is
    begin
       if Lobes (B) /= Sights'Length then
-         B.Kept.Clear;
+         declare
+            Old  : constant Sight_Table := (if B.Sights.Is_Empty then Sights (Sights'First .. Sights'First - 1)
+                                            else B.Sights.Element);
+            Into : array (1 .. Old'Length) of Natural := [others => 0];
+            Now  : Kept_Vectors.Vector;
+         begin
+            for L in Old'Range loop
+               declare
+                  Nearest : Real := Real'Last;
+               begin
+                  for N in Sights'Range loop
+                     declare
+                        Agree : Boolean := True;
+                        Both  : Boolean := False;   --  some opening where both lines are known
+                        Worst : Real := 0.0;
+                     begin
+                        for O in Opening loop
+                           declare
+                              Was : Sight_Of renames Old (L) (O);
+                              Is_Now : Sight_Of renames Sights (N) (O);
+                           begin
+                              if Was.Known and then Is_Now.Known and then Was.Lined and then Is_Now.Lined then
+                                 declare
+                                    A     : constant Vec3 := Was.Ray.Direction.Unit_Vector;
+                                    C     : constant Vec3 := Is_Now.Ray.Direction.Unit_Vector;
+                                    Turn  : constant Real := Arcsin (Real'Min (1.0, abs Cross (A, C)));
+                                    Sigma : constant Real :=
+                                      Sqrt (Was.Ray.Direction.Sigma ** 2 + Is_Now.Ray.Direction.Sigma ** 2
+                                            + Was.Spread ** 2 + Is_Now.Spread ** 2);
+                                 begin
+                                    Both := True;
+                                    if A * C <= 0.0 or else Driver.Uncertain.Significant (Turn, Sigma) then
+                                       Agree := False;
+                                    end if;
+                                    Worst := Real'Max (Worst, Turn);
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        if Both and then Agree and then Worst < Nearest then
+                           Nearest := Worst;
+                           Into (L) := N;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end loop;
+            for K of B.Kept loop
+               if K.Lobe = 0 or else (K.Lobe <= Into'Last and then Into (K.Lobe) > 0) then
+                  declare
+                     Moved : Kept := K;
+                  begin
+                     if K.Lobe > 0 then
+                        Moved.Lobe := Into (K.Lobe);
+                     end if;
+                     Moved.Slides.Clear;
+                     for N in Sights'Range loop
+                        declare
+                           From : Natural := 0;
+                        begin
+                           for L in Into'Range loop
+                              if Into (L) = N and then L <= Natural (K.Slides.Length) then
+                                 From := L;
+                              end if;
+                           end loop;
+                           Moved.Slides.Append (if From > 0 then K.Slides (From) else (others => <>));
+                        end;
+                     end loop;
+                     Now.Append (Moved);
+                  end;
+               end if;
+            end loop;
+            B.Kept := Now;
+         end;
       end if;
       B.Sights := Table_Holders.To_Holder (Sights);
       B.Fitted := Fit_Holders.Empty_Holder;

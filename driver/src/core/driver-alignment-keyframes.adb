@@ -2674,15 +2674,18 @@ package body Driver.Alignment.Keyframes is
                            Apart : constant Real := Sqrt (Du ** 2 + Dv ** 2);
                            Rest  : constant Real := Real'Max (0.0, Apart - Sqrt (Places (K).Cov.UU));
                         begin
-                           --  A point the caller's model predicted (Supplied_At) is asked at a place of its own only
-                           --  inside the window that model states for it, and else as predicted, as where the whole
-                           --  keyframe is the caller's (above); every other point at a place of its own is asked there.
-                           if Supplied_At (K) then
-                              Own_Place (K) := Own_Place (K) and then Within (Places (K), G);
-                              if Own_Place (K) then
-                                 Asked (K) := Places (K);
-                              end if;
-                           elsif Own_Place (K) then
+                           --  A point is asked at a place of its own on the field only inside the window its own
+                           --  prediction states for it, the caller's model's (Supplied_At) or the keyframes' alike;
+                           --  else the prediction takes the rest of the disagreement (below), and a window as wide as
+                           --  that is searched coarsely and rests no fit (Narrow). Asked at its place on the field
+                           --  wherever that lay, w18's keyframe 95 (servo seed 11 of the fake robot, 10-19, arm 2)
+                           --  put 13 of its 24 sightings where they had stood, 21 to 37 px off the truth, the field
+                           --  told from the jaws and the table's grain (turned 6.6 degrees, its centre moved 8 px),
+                           --  where the keyframes' extrapolation had them 0.5 to 3 px off it, stating 3 to 4.5 px;
+                           --  w18's arm 2 kept 10 % of its sightings off the truth by more than 4 px, and its order,
+                           --  fitted true, was never told.
+                           Own_Place (K) := Own_Place (K) and then Within (Places (K), G);
+                           if Own_Place (K) then
                               Asked (K) := Places (K);
                            elsif Apart > 0.0 and then Rest > 0.0 then
                               Asked (K).Cov := (UU => G.Cov.UU + (Rest / Apart) ** 2 * Du ** 2,

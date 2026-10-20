@@ -239,10 +239,13 @@ package Driver.Robot.Hand is
    --  its face meets what it closes on.
 
    function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate;
-   --  How far back from the lobes' tips along the hand's axis their moving
-   --  parts reach: how far a thing may go in between them before it meets
-   --  them where they begin, from the middle of the tips at the open opening.
-   --  Known when every lobe is measured.
+   --  How far a thing may go in between the lobes before it meets the hand: from the middle of the tips at the open
+   --  opening toward the tool frame's origin (the hand's axis as the contact search takes it), as far as pictures an
+   --  eye off the hand took see past it (Set_Depth). Unknown until then.
+
+   procedure Set_Depth (H : in out Hands; Id : Hand_Id; Depth : Estimate; Why : String);
+   --  How far a thing may go into the hand, as the pictures an eye off it took see it (Driver.Robot.Hand.Hull), and
+   --  what ended the way in or why it is not measured; kept while the hand is measured again.
 
    function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate;
    --  The way the lobes point, in the tool frame: from the middle of their
