@@ -1331,6 +1331,46 @@ package body Fake_World is
          end loop;
       end;
    end Grip;
+   --  The joints that belong to no arm (a drone's motors, a base's travel taken as where it stands, a humanoid's torso,
+   --  neck and legs) follow their targets by the law an arm's joints follow, no further than their ends: nothing of
+   --  the fake stands between them and the world. Move_Arm moved only the joints of arms, and a body whose motors,
+   --  torso or neck no arm owns stood where it was built whatever it was asked (the first cold boots of a drone, a
+   --  base and a humanoid, 10-20: nothing any eye saw moved while every channel of the drone's group was pushed to
+   --  1E12 units).
+   procedure Move_Free (W : in out World) is
+      Moved : Boolean := False;
+   begin
+      for L of W.Links loop
+         if L.Arm = 0 and then L.Kind /= Fixed and then L.Mirror = 0 then
+            declare
+               T         : constant Real := L.Target;
+               Share     : constant Real := 1.0 - Exp (-1.0 / L.Tau);
+               From      : constant Real := L.Q;
+               Dead_Here : constant Real := (if W.Quirk.Dead then L.Dead else 0.0);
+               Landing   : constant Real := (if W.Quirk.Dead then L.Landing else 0.0);
+               Toward    : constant Real := (if T > From then T - Landing else T + Landing);
+               Within    : constant Boolean :=
+                 abs (T - From) <= Dead_Here or else abs (Toward - From) * L.Unit <= Still_Rad;
+               Aim       : constant Real := (if Within then From else Toward);
+               Step      : constant Real :=
+                 (if L.Rate > 0.0 and then abs ((Aim - From) * Share) > L.Rate / L.Unit
+                  then (if Aim > From then L.Rate / L.Unit else -L.Rate / L.Unit)
+                  else (Aim - From) * Share);
+               Q         : constant Real := Real'Max (L.Lo, Real'Min (L.Hi, From + Step));
+            begin
+               if abs (Q - L.Q) > 1.0e-15 * Real'Max (1.0, abs L.Q) then
+                  L.Moved_Beat := W.Beat;
+                  Moved := True;
+               end if;
+               L.Q := Q;
+            end;
+         end if;
+      end loop;
+      if Moved then
+         Forward (W);
+      end if;
+   end Move_Free;
+
    procedure Step (W : in out World) is
    begin
       W.Beat := W.Beat + 1;
@@ -1349,6 +1389,7 @@ package body Fake_World is
          end loop;
          W.Pending := Kept;
       end;
+      Move_Free (W);
       for A in 1 .. W.Arms loop
          Move_Arm (W, A);
       end loop;
