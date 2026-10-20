@@ -211,4 +211,28 @@ package body Driver.Numerics is
       return (Rotation => Rt, Translation => [-Tt (1), -Tt (2), -Tt (3)]);
    end Inverse;
 
+   function Spiral_Rotation (K, N : Positive) return Mat3 is
+      Phi : constant Real := Sqrt (2.0);
+      Psi : Real := 1.5;
+   begin
+      for Step in 1 .. Real'Machine_Mantissa loop
+         declare
+            Miss  : constant Real := Psi ** 4 - Psi - 4.0;
+            Slope : constant Real := 4.0 * Psi ** 3 - 1.0;
+         begin
+            exit when Miss = 0.0 or else abs (Miss / Slope) <= Real'Epsilon * Psi;
+            Psi := Psi - Miss / Slope;
+         end;
+      end loop;
+      declare
+         S : constant Real := Real (K) - 0.5;
+         T : constant Real := S / Real (N);
+         D : constant Real := 2.0 * Ada.Numerics.Pi * S;
+         A : constant Real := Sqrt (T);
+         B : constant Real := Sqrt (1.0 - T);
+      begin
+         return To_Matrix ((W => A * Sin (D / Phi), X => A * Cos (D / Phi), Y => B * Sin (D / Psi), Z => B * Cos (D / Psi)));
+      end;
+   end Spiral_Rotation;
+
 end Driver.Numerics;

@@ -17,6 +17,7 @@ with Driver.Parallel_For;
 with Driver.Pixels;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Kinematics.Hand_Eye;
+with Driver.Robot.Kinematics.Hand_Eye.Dumps;
 with Driver.Robot.Stillness;
 with Driver.Stats;
 with Driver.Uncertain;
@@ -48,6 +49,7 @@ package body Driver.Robot.Kinematics is
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
 
    package Hand renames Driver.Robot.Kinematics.Hand_Eye;
+   package Hand_Dumps renames Driver.Robot.Kinematics.Hand_Eye.Dumps;
    --  The terms of a fixed eye's covariance: its lens's six and its pose's six.
    Fixed_Terms : constant := Fit.Lens_Terms + Hand.Pose_Terms;
 
@@ -4476,6 +4478,7 @@ package body Driver.Robot.Kinematics is
                Prior.Arms.Append (Previous);
             end;
          end loop;
+         Hand_Dumps.Dump (Arms, Eye.Grid.Width, Eye.Grid.Height, "eye" & Ada.Strings.Fixed.Trim (H'Image, Ada.Strings.Left));
          Hand.Fit_Eye (Arms, Eye.Grid.Width, Eye.Grid.Height, Prior, Report);
          for K in 1 .. Count loop
             Free_Watched (Arms (K));

@@ -985,34 +985,6 @@ package body Driver.Robot.Kinematics.Hand_Eye is
    ---------------------------------------------------------------------------
    --  The start
 
-   --  The K-th of N rotations of the Super-Fibonacci spiral (Alexa, 2022), which covers the rotations evenly: a unit
-   --  quaternion of two circles, the angle of one 2 pi s over the square root of two and the angle of the other 2 pi
-   --  s over the real root of x^4 = x + 4 (found by Newton's method), s the rotation's place along the spiral.
-   function Spiral_Rotation (K, N : Positive) return Mat3 is
-      Phi : constant Real := Sqrt (2.0);
-      Psi : Real := 1.5;
-   begin
-      for Step in 1 .. Real'Machine_Mantissa loop
-         declare
-            Miss : constant Real := Psi ** 4 - Psi - 4.0;
-            Slope : constant Real := 4.0 * Psi ** 3 - 1.0;
-         begin
-            exit when Miss = 0.0 or else abs (Miss / Slope) <= Real'Epsilon * Psi;
-            Psi := Psi - Miss / Slope;
-         end;
-      end loop;
-      declare
-         S : constant Real := Real (K) - 0.5;
-         T : constant Real := S / Real (N);
-         D : constant Real := 2.0 * Ada.Numerics.Pi * S;
-         A : constant Real := Sqrt (T);
-         B : constant Real := Sqrt (1.0 - T);
-      begin
-         return Driver.Numerics.To_Matrix
-           ((W => A * Sin (D / Phi), X => A * Cos (D / Phi), Y => B * Sin (D / Psi), Z => B * Cos (D / Psi)));
-      end;
-   end Spiral_Rotation;
-
    --  The skew matrix of the line of sight B, as a Mat3.
    function Cross_Of (B : Vec3) return Mat3 is (Driver.Numerics.Skew (B));
 
@@ -1635,8 +1607,8 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Score_At : Real;
             Ok       : Boolean;
          begin
-            Solve_At (P, Arm, (R => Spiral_Rotation (K, Rotations), C => Zero3), L, Start_Link, Width, Height,
-                      Centre, Depth.all, Score_At, Ok);
+            Solve_At (P, Arm, (R => Driver.Numerics.Spiral_Rotation (K, Rotations), C => Zero3), L, Start_Link,
+                      Width, Height, Centre, Depth.all, Score_At, Ok);
             Column (K) := (if Ok then Score_At else Real'First);
             Free (Depth);
          end One;
@@ -1809,8 +1781,8 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                Ok       : Boolean;
             begin
                for M in Focals'Range loop
-                  Solve_At (P, Arm, (R => Spiral_Rotation (K, Rotations), C => Zero3), Lens_At (M), Start_Link, Width,
-                            Height, Centre, Depth.all, Score_At, Ok);
+                  Solve_At (P, Arm, (R => Driver.Numerics.Spiral_Rotation (K, Rotations), C => Zero3), Lens_At (M),
+                            Start_Link, Width, Height, Centre, Depth.all, Score_At, Ok);
                   Scores (K, M) := (if Ok then Score_At else Real'First);
                end loop;
                Free (Depth);
@@ -1848,7 +1820,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       end loop;
       declare
          procedure Start_One (C : Positive) is
-            Pose     : constant Pose_Value := (R => Spiral_Rotation (Picked_K (C), Rotations), C => Zero3);
+            Pose     : constant Pose_Value := (R => Driver.Numerics.Spiral_Rotation (Picked_K (C), Rotations), C => Zero3);
             Depth    : Real_Access := new Real_Array (1 .. P.Tracks);
             Centre   : Vec3;
             Score_At : Real;

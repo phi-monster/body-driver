@@ -939,7 +939,12 @@ driver-numerics.adb	C : constant Real := Real'Max (-1.0, Real'Min (1.0, (Trace -
 driver-numerics.adb	C : constant Real := Real'Max (-1.0, Real'Min (1.0, (Trace - 1.0) / 2.0));	1.0	math	identity: trace formula, clamp to [-1, 1], unit quaternion or inverse square root
 driver-numerics.adb	C : constant Real := Real'Max (-1.0, Real'Min (1.0, (Trace - 1.0) / 2.0));	1.0	math	identity: trace formula, clamp to [-1, 1], unit quaternion or inverse square root
 driver-numerics.adb	C : constant Real := Real'Max (-1.0, Real'Min (1.0, (Trace - 1.0) / 2.0));	2.0	math	identity: symmetric part, half-angle or quaternion formula
+driver-numerics.adb	D : constant Real := 2.0 * Ada.Numerics.Pi * S;	2.0	math	a whole turn is two pi
 driver-numerics.adb	Eigensystem ((M + Transpose (M)) / 2.0, Values, Vectors);	2.0	math	identity: symmetric part, half-angle or quaternion formula
+driver-numerics.adb	Miss : constant Real := Psi ** 4 - Psi - 4.0;	4.0	math	the Super-Fibonacci spiral's constant (Alexa 2022): the real root of x^4 = x + 4
+driver-numerics.adb	Phi : constant Real := Sqrt (2.0);	2.0	math	the Super-Fibonacci spiral's other constant, the square root of two (Alexa 2022)
+driver-numerics.adb	Psi : Real := 1.5;	1.5	numerics	a start above the real root of x^4 = x + 4 (about 1.53), past the quartic's turning point, from which Newton's method converges to it
+driver-numerics.adb	S : constant Real := Real (K) - 0.5;	0.5	math	the K-th of N points sits in the middle of its share of the spiral
 driver-numerics.adb	S : constant Real := abs W / 2.0;	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (1, 1) - R (2, 2) - R (3, 3));	1.0	math	identity: trace formula, clamp to [-1, 1], unit quaternion or inverse square root
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (1, 1) - R (2, 2) - R (3, 3));	2.0	math	identity: symmetric part, half-angle or quaternion formula
@@ -949,6 +954,8 @@ driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (3, 3) - R (1, 1) - R (2, 2));	1.0	
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + R (3, 3) - R (1, 1) - R (2, 2));	2.0	math	identity: symmetric part, half-angle or quaternion formula
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + Trace);	1.0	math	identity: trace formula, clamp to [-1, 1], unit quaternion or inverse square root
 driver-numerics.adb	S := 2.0 * Sqrt (1.0 + Trace);	2.0	math	identity: symmetric part, half-angle or quaternion formula
+driver-numerics.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	1.0	math	the derivative of x^4 - x - 4, for Newton's method
+driver-numerics.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	4.0	math	the derivative of x^4 - x - 4, for Newton's method
 driver-numerics.adb	U1 := Unit (R * Column (1));	1	structure	the eigenvectors in descending order: the two largest singular directions and the third, made their cross product
 driver-numerics.adb	U2 := R * Column (2);	2	structure	the eigenvectors in descending order: the two largest singular directions and the third, made their cross product
 driver-numerics.adb	Y => (R (2, 3) + R (3, 2)) / S, Z => S / 4.0);	4.0	math	Shepperd's quaternion formula
@@ -2586,6 +2593,16 @@ driver-robot-kinematics-fit.ads	Post => Plane_Response'Result'Length (1) = 3 and
 driver-robot-kinematics-fit.ads	State : Long_Long_Integer := 1;	1	structure	the sampler's state before its first draw: any number but zero
 driver-robot-kinematics-fit.ads	Track : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.ads	with Pre => Fraction > 0.0 and then Fraction <= 1.0;	1.0	math	a fraction
+driver-robot-kinematics-hand_eye-dumps.adb	A.Joint (J).Slide := Next_Natural = 1;	1	format	the dump writes a flag as 0 or 1
+driver-robot-kinematics-hand_eye-dumps.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	math	one digit after the point more than a real's own carries it to its last bit (17 significant digits round-trip a double)
+driver-robot-kinematics-hand_eye-dumps.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	a real in the dump has one digit before its point
+driver-robot-kinematics-hand_eye-dumps.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	the exponent's least width
+driver-robot-kinematics-hand_eye-dumps.adb	At_Token : Positive := 1;	1	structure	the first token of the dump
+driver-robot-kinematics-hand_eye-dumps.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-robot-kinematics-hand_eye-dumps.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-robot-kinematics-hand_eye-dumps.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-robot-kinematics-hand_eye-dumps.adb	for I in 1 .. 3 loop	3	structure	three dimensions
+driver-robot-kinematics-hand_eye-dumps.ads	Width, Height : Positive := 1;	1	structure	a picture of at least one pixel until the dump is read
 driver-robot-kinematics-hand_eye.adb	& "" & Driver.Log.Image (Linear_To, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-hand_eye.adb	& "" & Driver.Log.Image (S.Pose (Arm).C (3), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-hand_eye.adb	& "" & Driver.Log.Image (S.Pose (Arm).R (3, 3), 3) & "");	3	format	digits printed in a log line or a message
@@ -2647,7 +2664,6 @@ driver-robot-kinematics-hand_eye.adb	Cost := Cost + 2.0 * Huber_Cost (Behind / S
 driver-robot-kinematics-hand_eye.adb	Cost := Cost + Huber_Cost (R (2 * I - 1) / Scale_Of (P, W, I))	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Counted := Counted + 2;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;	1.0	math	the radial distortion polynomial, one at the centre
-driver-robot-kinematics-hand_eye.adb	D : constant Real := 2.0 * Ada.Numerics.Pi * S;	2.0	math	a whole turn is two pi
 driver-robot-kinematics-hand_eye.adb	Damped (T) := Dd (T) * (1.0 + Lambda) + Depth_Prior;	1.0	numerics	Levenberg-Marquardt: the diagonal damped by one plus lambda
 driver-robot-kinematics-hand_eye.adb	Depth_Prior : constant Real := 1.0;	1.0	statistics	a prior of one e-fold on a depth's logarithm: the range the perspective is linear in; it holds an unfelt depth and adds nothing worth the name to a felt one
 driver-robot-kinematics-hand_eye.adb	Difference_Step : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);	1.0	numerics	the step that balances a central difference's truncation against rounding: epsilon to the third
@@ -2697,7 +2713,6 @@ driver-robot-kinematics-hand_eye.adb	Lambda := Lambda / 2.0;	2.0	numerics	Levenb
 driver-robot-kinematics-hand_eye.adb	Least := Real'Min (Least, Sqrt (2.0 * Real'Max (0.0, Rise)));	2.0	statistics	a quadratic cost risen by r is sqrt (2 r) sigmas from its least
 driver-robot-kinematics-hand_eye.adb	Lens_Count : constant Natural := (if not Lens_Free then 0 elsif Distortion then Fit.Lens_Terms else 4);	4	structure	the lens's four terms without its distortion (Fit.Lens_Terms' first four)
 driver-robot-kinematics-hand_eye.adb	Low := -1;	1	structure	the first bracket: a step either side of the start, as the arm's fit's
-driver-robot-kinematics-hand_eye.adb	Miss : constant Real := Psi ** 4 - Psi - 4.0;	4.0	math	the Super-Fibonacci spiral's constant (Alexa 2022): the real root of x^4 = x + 4
 driver-robot-kinematics-hand_eye.adb	Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);	1.0	structure	sentinel: a negative floor says the error model is to be read from the residuals
 driver-robot-kinematics-hand_eye.adb	Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);	1.0	structure	sentinel: a negative floor says the error model is to be read from the residuals
 driver-robot-kinematics-hand_eye.adb	Model : Fit.Error_Model := (Floor => -1.0, Gain => 1.0);	1.0	structure	sentinel: a negative floor says the error model is to be read from the residuals
@@ -2711,10 +2726,8 @@ driver-robot-kinematics-hand_eye.adb	Own (Counted + 2) := P.Sight_Own (I);	2	str
 driver-robot-kinematics-hand_eye.adb	Own (K + 2) := P.Sight_Own (I);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Own : Real_Access := new Real_Array (1 .. 2 * Count);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Own : Real_Access := new Real_Array (1 .. 2 * P.Sightings);	2	structure	two residuals per sighting, across and down
-driver-robot-kinematics-hand_eye.adb	Phi : constant Real := Sqrt (2.0);	2.0	math	the Super-Fibonacci spiral's other constant, the square root of two (Alexa 2022)
 driver-robot-kinematics-hand_eye.adb	Placed (T) := W.Link (T) >= 1;	1	structure	a track's link 0 rides on nothing; 1 and more are links of the arm
 driver-robot-kinematics-hand_eye.adb	Placed (T) := Work_Now.Link (T) >= 1;	1	structure	a track's link 0 rides on nothing; 1 and more are links of the arm
-driver-robot-kinematics-hand_eye.adb	Psi : Real := 1.5;	1.5	numerics	a start above the real root of x^4 = x + 4 (about 1.53), past the quartic's turning point, from which Newton's method converges to it
 driver-robot-kinematics-hand_eye.adb	R (2 * I - 1) := Up - P.Sight_U (I);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	R (2 * I - 1) := Up - P.Sight_U (I);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	R (2 * I) := Vp - P.Sight_V (I);	2	structure	two residuals per sighting, across and down
@@ -2740,14 +2753,11 @@ driver-robot-kinematics-hand_eye.adb	Rotations := Natural'Min (2 * Rotations, Na
 driver-robot-kinematics-hand_eye.adb	Rows (2 * Taken - 1 + C, Q) := Jg (K, Q) / Scale ** 2;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Rows : Matrix_Access := new Real_Matrix (1 .. 2 * Used, 1 .. Count);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-hand_eye.adb	Run_Every (1, Count);	1	structure	from the first rotation or racer
-driver-robot-kinematics-hand_eye.adb	S : constant Real := Real (K) - 0.5;	0.5	math	the K-th of N points sits in the middle of its share of the spiral
 driver-robot-kinematics-hand_eye.adb	Sag : Real_Matrix (1 .. P.Tracks, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space: the centre's three coordinates
 driver-robot-kinematics-hand_eye.adb	Say ("" & Driver.Log.Image (Final.L.Fx, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-hand_eye.adb	Settle_Every (1, Count);	1	structure	from the first rotation or racer
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := (Up (K) - Down (K)) / (2.0 * Step) / Scale;	2.0	math	a central difference spans twice its step
 driver-robot-kinematics-hand_eye.adb	Slope : constant Real := (Up_R (K) - Down_R (K)) / (2.0 * Sigma) / Scale;	2.0	math	a central difference spans twice its step
-driver-robot-kinematics-hand_eye.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	1.0	math	the derivative of x^4 - x - 4, for Newton's method
-driver-robot-kinematics-hand_eye.adb	Slope : constant Real := 4.0 * Psi ** 3 - 1.0;	4.0	math	the derivative of x^4 - x - 4, for Newton's method
 driver-robot-kinematics-hand_eye.adb	Sm (Q, Q) := A (Q, Q) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	numerics	Levenberg-Marquardt: the diagonal damped by one plus lambda
 driver-robot-kinematics-hand_eye.adb	Start : constant Real := Real (Width) / 2.0;	2.0	math	the half width seen at a right angle's half (tan 45 degrees is one): where the arm's fit starts its focal search
 driver-robot-kinematics-hand_eye.adb	Start_Every (1, Count);	1	structure	from the first rotation or racer

@@ -73,6 +73,11 @@ package Driver.Numerics with Pure is
    function To_Matrix (Q : Quaternion) return Mat3;
    function To_Quaternion (R : Mat3) return Quaternion;
 
+   function Spiral_Rotation (K, N : Positive) return Mat3;
+   --  The K-th of N rotations of the Super-Fibonacci spiral (Alexa, 2022), which covers the rotations evenly: a unit
+   --  quaternion of two circles, the angle of one 2 pi s over the square root of two and the angle of the other 2 pi
+   --  s over the real root of x^4 = x + 4 (found by Newton's method), s the rotation's place along the spiral.
+
    type Rigid is record
       Rotation    : Mat3 := Identity3;
       Translation : Vec3 := Zero3;
