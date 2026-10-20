@@ -1,4 +1,5 @@
 with Ada.Containers.Vectors;
+with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Beats;
@@ -46,8 +47,9 @@ package body Driver.Robot.Flows is
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    --  A fitted arm the fixed eyes watch: its group, its channels along its chain from the base, per channel its
-   --  reference reading and the range its readings were seen over, its joints as its fit has them along the chain, the
-   --  turn each way per chain place (found at its first pose), and how many of its poses are taken.
+   --  reference reading and the range its readings were seen over, its joints as its fit has them along the chain and
+   --  the relative standard deviation of each one's unit (none when the fit states no covariance), the turn each way
+   --  per chain place (found at its first pose), and how many of its poses are taken.
    type Arm_Info is record
       Arm    : Arm_Id := 1;
       Group  : Group_Id'Base := 0;
@@ -55,6 +57,7 @@ package body Driver.Robot.Flows is
       Chain  : Count_Vectors.Vector;
       Ref, Low, High : Real_Vectors.Vector;
       Joints : Joint_Array_Access;
+      Unit_Sigma : Real_Access;
       Steps  : Real_Access;
       Taken  : Natural := 0;
    end record;
@@ -214,6 +217,21 @@ package body Driver.Robot.Flows is
                            Info.Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
                         end;
                      end loop;
+                     --  Each unit's relative deviation: the variance of its scale term in the fit's covariance.
+                     if Natural (R.Covariance.Length) = KFit.Terms (Size) ** 2 then
+                        Info.Unit_Sigma := new Real_Array (1 .. Size);
+                        for J in 1 .. Size loop
+                           declare
+                              T : constant Positive := KFit.Term_Of (R.Chain (J - 1), KFit.Scale);
+                              V : constant Real :=
+                                R.Covariance (R.Covariance.First_Index + (T - 1) * KFit.Terms (Size) + T - 1);
+                           begin
+                              Info.Unit_Sigma (J) :=
+                                (if V > 0.0 and then Info.Joints (J).C /= 0.0
+                                 then Ada.Numerics.Long_Elementary_Functions.Sqrt (V) / abs Info.Joints (J).C else 0.0);
+                           end;
+                        end loop;
+                     end if;
                      Arms.Append (Info);
                   end;
                end if;
@@ -234,6 +252,7 @@ package body Driver.Robot.Flows is
       if Eyes.Is_Empty or else Arms.Is_Empty then
          for A of Arms loop
             Free (A.Joints);
+            Free (A.Unit_Sigma);
             Free (A.Steps);
          end loop;
          return;
@@ -559,8 +578,12 @@ package body Driver.Robot.Flows is
                                                                        C.Minus, C.Plus, C.Steps, Width, Height);
                                     end;
                                  end loop;
-                                 In_Arms (U) := (Poses  => Views (U).all'Unchecked_Access,
-                                                 Joints => Arms (A).Joints.all'Unchecked_Access);
+                                 In_Arms (U) :=
+                                   (Poses      => Views (U).all'Unchecked_Access,
+                                    Joints     => Arms (A).Joints.all'Unchecked_Access,
+                                    Unit_Sigma =>
+                                      (if Arms (A).Unit_Sigma = null then null
+                                       else Arms (A).Unit_Sigma.all'Unchecked_Access));
                               end;
                            end loop;
                            Flow.Fit_Eye (In_Arms, Width, Height, Result);
@@ -643,6 +666,7 @@ package body Driver.Robot.Flows is
       end;
       for A of Arms loop
          Free (A.Joints);
+         Free (A.Unit_Sigma);
          Free (A.Steps);
       end loop;
    end Place;

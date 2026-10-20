@@ -68,10 +68,13 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  rates' bias +6 % at 0.001 rad, +1 % at 0.008, their spread up again at 0.016). Turn itself when no pixel moved.
 
    --  An arm the eye watched: its poses' evidence and its joints along its chain from the base, as its fit has them
-   --  (its reference frame and its unit).
+   --  (its reference frame and its unit), and per joint the relative standard deviation of its unit as its fit states
+   --  it (none: the units are exact). A unit off by 2 % moved an arm's centre by 1 to 5 mm on the model's own rates,
+   --  its sigma 0.4 (seed 22, 10-21): each joint's unit is a term of the fit, held to its own by that deviation.
    type Arm_Flow is record
-      Poses  : access constant Pose_Array;
-      Joints : access constant Fit.Joint_Array;
+      Poses      : access constant Pose_Array;
+      Joints     : access constant Fit.Joint_Array;
+      Unit_Sigma : access constant Real_Array := null;
    end record;
 
    type Arm_Flow_Array is array (Positive range <>) of Arm_Flow;

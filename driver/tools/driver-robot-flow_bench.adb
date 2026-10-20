@@ -385,10 +385,18 @@ begin
          In_Arms : Flow.Arm_Flow_Array (Sets'Range);
          Result  : Flow.Report (Arms => Sets'Length, Count => Flow.Terms_For (Sets'Length));
          Pixels_All : Natural := 0;
+         --  FLOW_UNIT_SIGMA: every joint's unit stated uncertain by that share, as an arm's own fit states it.
+         Unit_Share : constant Real := Setting ("FLOW_UNIT_SIGMA", 0.0);
+         type Sigmas_Access is access Real_Array;
+         Sigmas  : array (Sets'Range) of Sigmas_Access;
       begin
          for K in Sets'Range loop
-            In_Arms (K) := (Poses  => Sets (K).Views.all'Unchecked_Access,
-                            Joints => Sets (K).Joints.all'Unchecked_Access);
+            if Unit_Share > 0.0 then
+               Sigmas (K) := new Real_Array'(Sets (K).Joints'Range => Unit_Share);
+            end if;
+            In_Arms (K) := (Poses      => Sets (K).Views.all'Unchecked_Access,
+                            Joints     => Sets (K).Joints.all'Unchecked_Access,
+                            Unit_Sigma => (if Sigmas (K) = null then null else Sigmas (K).all'Unchecked_Access));
             Pixels_All := Pixels_All + Sets (K).Pixels;
          end loop;
          Flow.Fit_Eye (In_Arms, Width, Height, Result);

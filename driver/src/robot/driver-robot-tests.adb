@@ -8647,8 +8647,8 @@ package body Driver.Robot.Tests is
             Views (P) := View;
          end;
       end loop;
-      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access)], Width, Height,
-                    Result);
+      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access, Unit_Sigma => null)],
+                    Width, Height, Result);
       Check (Result.Determined, "the synthetic arm's eye is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
       if Result.Determined then
          declare
