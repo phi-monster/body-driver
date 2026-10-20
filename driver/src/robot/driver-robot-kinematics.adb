@@ -18,6 +18,7 @@ with Driver.Pixels;
 with Driver.Robot.Kinematics.Beacon;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Kinematics.Hand_Eye;
+with Driver.Robot.Kinematics.Placement;
 with Driver.Robot.Stillness;
 with Driver.Stats;
 with Driver.Uncertain;
@@ -49,6 +50,7 @@ package body Driver.Robot.Kinematics is
    procedure Free is new Ada.Unchecked_Deallocation (Flag_Array, Flag_Access);
 
    package Hand renames Driver.Robot.Kinematics.Hand_Eye;
+   package Arm_Placement renames Driver.Robot.Kinematics.Placement;
 
    --  The terms of a fixed eye's covariance: its lens's six and its pose's six.
    Fixed_Terms : constant := Fit.Lens_Terms + Hand.Pose_Terms;
@@ -486,6 +488,77 @@ package body Driver.Robot.Kinematics is
    --  has stopped changing and neither the arm nor the closer moves; when the closer comes to rest at another reading,
    --  the arm still where it was, the view there is set against the one before it (Driver.Pixels.Compare), and the
    --  centre of what changed is the flick, one a pose of the arm. An arm that moves starts the watch again.
+   function Flick_Watched_Still (M : Model; A : Arm_Id) return Boolean is
+      G : constant Group_Id := Arm_Group (M, A);
+   begin
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Is_Fixed (M, E) and then Sees (M, E, G) then
+            declare
+               Found : Boolean := False;
+            begin
+               for K in M.Flick_Watches.First_Index .. M.Flick_Watches.Last_Index loop
+                  if M.Flick_Watches (K).Arm = A and then M.Flick_Watches (K).Eye = E then
+                     Found := True;
+                     if Driver.Pixels.Frames (M.Flick_Watches (K).Gathering) < 2 then
+                        return False;
+                     end if;
+                  end if;
+               end loop;
+               if not Found then
+                  return False;
+               end if;
+            end;
+         end if;
+      end loop;
+      return True;
+   end Flick_Watched_Still;
+
+   procedure Flick_Blocked_By (M : Model; A : Arm_Id; Cause, Detail : out Ada.Strings.Unbounded.Unbounded_String) is
+      use Ada.Strings.Unbounded;
+      G    : constant Group_Id := Arm_Group (M, A);
+      Beat : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+   begin
+      Cause := Null_Unbounded_String;
+      Detail := Null_Unbounded_String;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Is_Fixed (M, E) and then Sees (M, E, G) then
+            declare
+               Found : Boolean := False;
+            begin
+               for K in M.Flick_Watches.First_Index .. M.Flick_Watches.Last_Index loop
+                  if M.Flick_Watches (K).Arm = A and then M.Flick_Watches (K).Eye = E then
+                     Found := True;
+                     declare
+                        W : Flick_Watch renames M.Flick_Watches (K);
+                        Frames : constant Natural := Driver.Pixels.Frames (W.Gathering);
+                     begin
+                        if Frames < 2 then
+                           Append (Cause, " eye" & E'Image & " has too few still views:");
+                           if not Stillness.Eye_Settled (M, E) then
+                              Append (Cause, " its picture is not settled;");
+                           end if;
+                           for G2 in 1 .. Group_Count (M) loop
+                              if Channels.Moving (M, Group_Id (G2), Beat) then
+                                 Append (Cause, " a group moves;");
+                                 exit;
+                              end if;
+                           end loop;
+                           Append (Detail, " eye" & E'Image & " has" & Frames'Image & " still views; its watch began again on"
+                                   & W.Resets'Image & " beats, found its picture unsettled on" & W.Unsettled'Image
+                                   & " and something moving on" & W.Moving'Image & ";");
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               if not Found then
+                  Append (Cause, " eye" & E'Image & " has no watch;");
+                  Append (Detail, " eye" & E'Image & " has no watch;");
+               end if;
+            end;
+         end if;
+      end loop;
+   end Flick_Blocked_By;
+
    procedure Watch_Flicks (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
@@ -578,6 +651,7 @@ package body Driver.Robot.Kinematics is
                                 Group_Id (G2) /= Closer and then Channels.Moving (M, Group_Id (G2), Beat));
                         begin
                            if Apart (Arm_Group (M, Arm), Arm_Now, W.Arm_At) or else Rest_Apart then
+                              W.Resets := W.Resets + 1;
                               Set (W.Arm_At, Arm_Now);
                               W.Rest_At := Rest;
                               Set (W.Closer_At, Closer_Now);
@@ -585,6 +659,15 @@ package body Driver.Robot.Kinematics is
                               W.Has_Before := False;
                               W.Taken := False;
                            elsif Apart (Closer, Closer_Now, W.Closer_At) then
+                              Driver.Log.Line
+                                (Driver.Log.Robot, "kinematics: eye" & E'Image & "'s watch of arm" & Arm'Image
+                                 & "'s closer: it moved with" & Driver.Pixels.Frames (W.Gathering)'Image
+                                 & " still views of the picture gathered at its last reading; since the last, the arm or the"
+                                 & " rest of the body moved on" & W.Resets'Image & " beats, the picture was not settled on"
+                                 & W.Unsettled'Image & ", something moved on" & W.Moving'Image);
+                              W.Resets := 0;
+                              W.Unsettled := 0;
+                              W.Moving := 0;
                               if Driver.Pixels.Frames (W.Gathering) >= 2 then
                                  W.Before := W.Gathering;
                                  W.Before_Closer := W.Closer_At;
@@ -592,6 +675,11 @@ package body Driver.Robot.Kinematics is
                               end if;
                               Set (W.Closer_At, Closer_Now);
                               W.Gathering := Fresh;
+                           end if;
+                           if not Stillness.Eye_Settled (M, E) then
+                              W.Unsettled := W.Unsettled + 1;
+                           elsif Rest_Moving or else Channels.Moving (M, Closer, Beat) then
+                              W.Moving := W.Moving + 1;
                            end if;
                            if Stillness.Eye_Settled (M, E) and then not Rest_Moving
                              and then not Channels.Moving (M, Closer, Beat)
@@ -623,6 +711,13 @@ package body Driver.Robot.Kinematics is
                                        end loop;
                                     end if;
                                     W.Taken := True;
+                                    if not C.Trusted or else N = 0 then
+                                       Driver.Log.Line
+                                         (Driver.Log.Robot, "kinematics: eye" & E'Image & " compared its two still views of arm"
+                                          & Arm'Image & "'s closer and saw no flick:"
+                                          & (if C.Trusted then "" else " the comparison is not trusted;")
+                                          & N'Image & " pixels changed");
+                                    end if;
                                     if N > 0 then
                                        declare
                                           U : constant Real := Su / Real (N);
@@ -662,7 +757,6 @@ package body Driver.Robot.Kinematics is
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
-      Watch_Flicks (M, O);
       for A in 1 .. Arm_Count (M) loop
          declare
             Arm : constant Arm_Id := Arm_Id (A);
@@ -671,19 +765,30 @@ package body Driver.Robot.Kinematics is
             Index : Natural := 0;
          begin
             if E > 0 then
+               --  An arm is a group and the eye it carries: the arms of one group (the 2b split, a humanoid's two eyes)
+               --  each keep their own evidence. Found by the pair; failing that, the group's evidence of an eye that no
+               --  arm of the group carries now, which the graph tells differently, starts afresh for this one; failing
+               --  that, a new arm starts its evidence.
                for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
-                  if M.Kinematics (K).Group = G then
+                  if M.Kinematics (K).Group = G and then M.Kinematics (K).Eye = E then
                      Index := K;
                   end if;
                end loop;
-               --  A group met as an arm for the first time, or one whose eye the
-               --  graph now tells differently, starts its evidence afresh; one
-               --  renumbered by a new arm keeps it under its new number.
                if Index = 0 then
-                  M.Kinematics.Append (Arm_Evidence'(Arm => Arm, Group => G, Eye => E, others => <>));
-                  Index := M.Kinematics.Last_Index;
-               elsif M.Kinematics (Index).Eye /= E then
-                  M.Kinematics.Replace_Element (Index, (Arm => Arm, Group => G, Eye => E, others => <>));
+                  for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                     if M.Kinematics (K).Group = G
+                       and then not (for some B in 1 .. Arm_Count (M) =>
+                                       Arm_Group (M, Arm_Id (B)) = G and then Eye_Of (M, Arm_Id (B)) = M.Kinematics (K).Eye)
+                     then
+                        Index := K;
+                     end if;
+                  end loop;
+                  if Index = 0 then
+                     M.Kinematics.Append (Arm_Evidence'(Arm => Arm, Group => G, Eye => E, others => <>));
+                     Index := M.Kinematics.Last_Index;
+                  else
+                     M.Kinematics.Replace_Element (Index, (Arm => Arm, Group => G, Eye => E, others => <>));
+                  end if;
                elsif M.Kinematics (Index).Arm /= Arm then
                   M.Kinematics (Index).Arm := Arm;
                end if;
@@ -881,6 +986,137 @@ package body Driver.Robot.Kinematics is
          return R.Twin_Taken;
       end;
    end Twin_Answered;
+
+   procedure Still_Blocked_By (M : Model; A : Arm_Id; Cause, Detail : out Ada.Strings.Unbounded.Unbounded_String) is
+      use Ada.Strings.Unbounded;
+      E    : constant Eye_Id'Base := Eye_Of (M, A);
+      G    : constant Group_Id := Arm_Group (M, A);
+      Beat : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+      --  The span Held_Still holds the readings still over.
+      Span : constant Positive := 1 + (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats else 0)
+        + (if E = 0 then 0 else Natural'Max (0, Image_Lag (M, E)));
+
+      --  The channels of the group that changed at B, with the change against the noise and the step they are held to.
+      function Changed_At (B : Natural) return String is
+         Text : Unbounded_String;
+      begin
+         for C in 1 .. M.Groups (G).Size loop
+            declare
+               D : constant Real := Channels.Change (M, G, B, C);
+               V : constant Estimate := Visible_Step (M, G, C);
+            begin
+               if D /= 0.0 then
+                  Append (Text, " channel" & C'Image & " changed by " & Driver.Log.Image (D, 2) & " (its noise "
+                          & (if Channels.Noise (M, G, C) < Real'Last then Driver.Log.Image (Channels.Noise (M, G, C), 2)
+                             else "unmeasured")
+                          & ", the step an eye sees it make "
+                          & (if Known (V) then Driver.Log.Image (V.Value, 2) else "unknown") & ");");
+               end if;
+            end;
+         end loop;
+         return To_String (Text);
+      end Changed_At;
+   begin
+      Cause := Null_Unbounded_String;
+      Detail := Null_Unbounded_String;
+      if E = 0 then
+         Cause := To_Unbounded_String ("the arm has no eye");
+         Detail := Cause;
+         return;
+      end if;
+      if Beat < Span then
+         Cause := To_Unbounded_String ("too early in the run to judge");
+         Detail := Cause;
+         return;
+      end if;
+      if not Stillness.Eye_Settled (M, E) then
+         Append (Cause, " its eye's picture is not settled;");
+         Append (Detail, " its eye's picture is not settled;");
+      end if;
+      for B in Beat - Span + 1 .. Beat loop
+         if not Channels.Has_Reading (M, G, B) or else not Channels.Has_Reading (M, G, B - 1) then
+            Append (Cause, " a beat of the span has no reading;");
+            Append (Detail, " a beat of the span has no reading;");
+            exit;
+         elsif Channels.Moving (M, G, B) then
+            Append (Cause, " the readings move;");
+            Append (Detail, " the readings move at beat" & B'Image & ":" & Changed_At (B));
+            exit;
+         end if;
+      end loop;
+      if Length (Cause) = 0 then
+         declare
+            Now   : constant Real_Array := Readings_Of (M, G, Beat);
+            Since : constant Real_Array := Readings_Of (M, G, Beat - Span);
+            D     : Real_Array (1 .. Now'Length);
+         begin
+            for C in D'Range loop
+               D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1);
+            end loop;
+            if Channels.Visible (M, G, D) then
+               Append (Cause, " the readings changed over the span as a whole;");
+               Append (Detail, " the readings changed over the" & Span'Image & " beats of the span as a whole:");
+               for C in D'Range loop
+                  if D (C) /= 0.0 then
+                     Append (Detail, " channel" & C'Image & " by " & Driver.Log.Image (D (C), 2) & ";");
+                  end if;
+               end loop;
+            end if;
+         end;
+      end if;
+   end Still_Blocked_By;
+
+   procedure Twin_Blocked_By (M : Model; A : Arm_Id; Cause, Detail : out Ada.Strings.Unbounded.Unbounded_String) is
+      use Ada.Strings.Unbounded;
+      K : constant Natural := Index_Of (M, A);
+      E : constant Eye_Id'Base := Eye_Of (M, A);
+      G : constant Group_Id := Arm_Group (M, A);
+   begin
+      Cause := Null_Unbounded_String;
+      Detail := Null_Unbounded_String;
+      if K = 0 or else E = 0 or else M.Beats = 0 then
+         --  The evidence of an arm is current while the graph still gives the arm its group and its eye (Current).
+         Cause := To_Unbounded_String
+           (if M.Beats = 0 then "no beat yet"
+            elsif E = 0 then "the graph gives the arm no eye that it carries"
+            else "the arm has no evidence that is current in the graph (the arm's group or its eye changed since its sweep began)");
+         Detail := Cause & To_Unbounded_String
+           (": the graph's group of the arm" & Arm_Group (M, A)'Image & ", its eye" & E'Image & ", the evidence kept for"
+            & Natural'Image (Natural (M.Kinematics.Length)) & " arms");
+         return;
+      end if;
+      declare
+         R    : Arm_Evidence renames M.Kinematics (K);
+         Beat : constant Natural := M.Beats - 1;
+      begin
+         if R.Frames.Is_Empty then
+            Cause := To_Unbounded_String ("no reference keyframe yet");
+            Detail := Cause;
+            return;
+         end if;
+         Still_Blocked_By (M, A, Cause, Detail);
+         declare
+            Now : constant Real_Array := Readings_Of (M, G, Beat);
+         begin
+            for C in Now'Range loop
+               declare
+                  Step : constant Real := Step_Of (M, A, C);
+                  Off  : constant Real := Now (C) - R.Frames (R.Frames.First_Index).Readings (C - 1);
+               begin
+                  if Step > 0.0 and then abs Off >= Step then
+                     Append (Cause, " channel" & C'Image & " stands off the reference's reading;");
+                     Append (Detail, " channel" & C'Image & " stands" & Driver.Log.Image (Off, 2)
+                             & " off the reference's reading, a step of" & Driver.Log.Image (Step, 2) & ";");
+                  end if;
+               end;
+            end loop;
+         end;
+         if Length (Cause) = 0 then
+            Cause := To_Unbounded_String ("still, at the reference, and no keyframe taken for it yet");
+            Detail := Cause;
+         end if;
+      end;
+   end Twin_Blocked_By;
 
    --  The boot's word to the kinematics goes into the recording (kinds G and Q) where it was said, so a replay
    --  says it to its models at the same point (Driver.Robot.Replay_Sweep): a replay runs no boot, and without
@@ -3638,6 +3874,9 @@ package body Driver.Robot.Kinematics is
    --  Every arm but the first placed in the world, through a fixed eye that saw it and the first arm move (In_World).
    procedure Place (M : in out Model);
 
+   --  An arm but the first put into the world by its closer's flicks (Placement.Fit_Arm).
+   procedure Place_By_Flicks (M : in out Model; K : Positive);
+
    type Sight_Access is access Fit.Sight_Point_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Fit.Sight_Point_Array, Sight_Access);
    type Fit_Flag_Access is access Fit.Flag_Array;
@@ -4685,6 +4924,8 @@ package body Driver.Robot.Kinematics is
                Sigmas (K) := X.Sigma;
             end if;
          end loop;
+         Beacon.Dump (Seen, M.Eyes (H).Grid.Width, M.Eyes (H).Grid.Height,
+                      "eye" & Ada.Strings.Fixed.Trim (H'Image, Ada.Strings.Left));
          Beacon.Fit_Eye (Seen, M.Eyes (H).Grid.Width, M.Eyes (H).Grid.Height, Report);
          if not Report.Determined then
             Said := Ada.Strings.Unbounded.To_Unbounded_String
@@ -4848,6 +5089,21 @@ package body Driver.Robot.Kinematics is
          end if;
       end loop;
    end Fit_Hands;
+
+   procedure Refit_Eyes (M : in out Model) is
+   begin
+      while M.Fixed_Eyes.Last_Index < M.Eyes.Last_Index loop
+         M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
+      end loop;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Is_Fixed (M, E) then
+            Fit_Beacon (M, E);
+         end if;
+      end loop;
+      for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         Place_By_Flicks (M, K);
+      end loop;
+   end Refit_Eyes;
 
    ---------------------------------------------------------------------------
    --  The arms placed in the world
@@ -5161,6 +5417,117 @@ package body Driver.Robot.Kinematics is
       end;
    end Through;
 
+   --  An arm but the first put into the world by its closer's flicks as a fixed eye already placed saw them, with the
+   --  table the arm's eye and the first arm's both saw as what they have in common (Placement.Fit_Arm): one eye cannot
+   --  give the arm's unit, a pinhole being as good at every scale. The eye with the most of the arm's flicks that
+   --  places it is the one it is placed through.
+   procedure Place_By_Flicks (M : in out Model; K : Positive) is
+      World : constant Natural := Index_Of (M, 1);
+      R     : Arm_Evidence renames M.Kinematics (K);
+
+      --  The plane as the fit takes it: its normal and distance from the frame's origin, each with its sigma (the
+      --  distance's from the offset at the plane's centre and the tilt over the lever to it).
+      function Plane_Of (P : Driver.Geometry.Plane_Estimate) return Arm_Placement.Plane is
+         use Driver.Numerics.Arrays;
+      begin
+         if P.Tilt_11 >= Real'Last or else P.Tilt_22 >= Real'Last then
+            return (Normal => P.Normal, Distance => P.Normal * P.Centre, others => <>);
+         end if;
+         declare
+            Tilt : constant Real := Square_Root (Real'Max (P.Tilt_11, P.Tilt_22));
+         begin
+            return (Normal         => P.Normal,
+                    Distance       => P.Normal * P.Centre,
+                    Sigma_Normal   => Tilt,
+                    Sigma_Distance => Square_Root (P.Offset_Sigma ** 2 + (abs P.Centre * Tilt) ** 2));
+         end;
+      end Plane_Of;
+   begin
+      if World = 0 or else K = World or else R.Result.Placed or else not R.Result.Fitted or else not Current (M, R)
+        or else not M.Kinematics (World).Result.Fitted
+      then
+         return;
+      end if;
+      declare
+         World_Table_Is : constant Driver.Geometry.Plane_Estimate := World_Table (M);
+         Arm_Table_Is   : constant Driver.Geometry.Plane_Estimate := Table (M, R.Arm);
+         Most           : Natural := 0;
+         Through_Eye    : Eye_Id'Base := 0;
+         Chosen         : Arm_Placement.Report;
+         Chosen_Sigmas  : Real_Array (1 .. Natural (M.Flicks.Length)) := [others => 0.0];
+      begin
+         if not (Driver.Geometry.Known (World_Table_Is) and then Driver.Geometry.Known (Arm_Table_Is)) then
+            return;
+         end if;
+         for E in M.Fixed_Eyes.First_Index .. M.Fixed_Eyes.Last_Index loop
+            if Is_Fixed (M, E) and then M.Fixed_Eyes (E).Known then
+               declare
+                  Count : Natural := 0;
+               begin
+                  for X of M.Flicks loop
+                     if X.Eye = E and then X.Arm = R.Arm then
+                        Count := Count + 1;
+                     end if;
+                  end loop;
+                  if Count >= Arm_Placement.Least_Sightings and then Count > Most then
+                     declare
+                        Seen   : Beacon.Sighting_Array (1 .. Count);
+                        Sigmas : Real_Array (1 .. Count);
+                        N      : Natural := 0;
+                        Report : Arm_Placement.Report;
+                     begin
+                        for X of M.Flicks loop
+                           if X.Eye = E and then X.Arm = R.Arm then
+                              N := N + 1;
+                              Seen (N) :=
+                                (Carrier => Eye_In_Reference (M, R.Arm, [for I in 1 .. Natural (X.Readings.Length) =>
+                                                                         X.Readings (X.Readings.First_Index + I - 1)]),
+                                 U => X.U, V => X.V, Sigma => X.Sigma);
+                              Sigmas (N) := X.Sigma;
+                           end if;
+                        end loop;
+                        Arm_Placement.Fit_Arm (Seen, Fit_Lens (M.Fixed_Eyes (E).Lens), M.Fixed_Eyes (E).Pose,
+                                               Plane_Of (World_Table_Is), Plane_Of (Arm_Table_Is), Report);
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " in the world through eye" & E'Image
+                           & ", by" & Report.Used'Image & " of" & Count'Image & " flicks of its closer: "
+                           & (if Report.Determined
+                              then "unit " & Driver.Log.Image (Report.Scale, 4) & " +- "
+                                   & Driver.Log.Image (Report.Scale * Square_Root (Report.Covariance (7, 7)), 4)
+                                   & ", turn +- "
+                                   & Driver.Log.Image (Square_Root (Report.Covariance (1, 1) + Report.Covariance (2, 2)
+                                                                    + Report.Covariance (3, 3)), 4)
+                                   & " rad, scatter " & Driver.Log.Image (Report.Scatter, 2)
+                              else "not determined (" & Ada.Strings.Unbounded.To_String (Report.Why) & ")"));
+                        if Report.Determined then
+                           Most := Count;
+                           Through_Eye := E;
+                           Chosen := Report;
+                           Chosen_Sigmas (1 .. Count) := Sigmas;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end if;
+         end loop;
+         if Through_Eye > 0 then
+            R.Result.Placed := True;
+            R.Result.Placement := Chosen.Placement;
+            R.Result.Scale := Chosen.Scale;
+            R.Result.Scale_Sigma := Chosen.Scale * Square_Root (Chosen.Covariance (7, 7));
+            R.Result.Placement_Covariance.Clear;
+            for P in 1 .. Outputs loop
+               for Q in 1 .. Outputs loop
+                  R.Result.Placement_Covariance.Append (Chosen.Covariance (P, Q));
+               end loop;
+            end loop;
+            R.Result.Placed_Px := Chosen.Scatter * Driver.Stats.Median (Chosen_Sigmas (1 .. Most));
+            R.Result.Placed_Points := Chosen.Used;
+            R.Result.Placed_Through := Natural (Through_Eye);
+         end if;
+      end;
+   end Place_By_Flicks;
+
    procedure Place (M : in out Model) is
       W : constant Natural := Index_Of (M, 1);
    begin
@@ -5256,6 +5623,9 @@ package body Driver.Robot.Kinematics is
                           ("no fixed eye has both it and the first arm move in its view with its pose in both");
                      end if;
                   end;
+               end if;
+               if not R2.Result.Placed and then W > 0 then
+                  Place_By_Flicks (M, K);
                end if;
                if not R2.Result.Placed and then Current (M, R2) and then R2.Result.Fitted then
                   Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R2.Arm'Image & " not placed in the world: "

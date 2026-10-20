@@ -261,6 +261,8 @@ package body Driver.Robot is
          while Kinematics.Realign (M) loop
             Kinematics.Refit (M, Again => True);
          end loop;
+      else
+         Kinematics.Refit_Eyes (M);
       end if;
       Took ("kinematics");
       M.Graph_Evidence := M.Beats;
@@ -350,6 +352,7 @@ package body Driver.Robot is
       Channels.Append (M, O, Sent);
       Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
+      Kinematics.Watch_Flicks (M, O);
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Observe (M, O);
       end if;
@@ -383,10 +386,19 @@ package body Driver.Robot is
       declare
          F    : Ada.Text_IO.File_Type;
          Text : Unbounded_String;
+         --  A line is read in pieces by a loop: the function form of Get_Line reads the rest of a line by recursion, a
+         --  frame to every piece, and the body file is one line, a megabyte for a body of thirty joints (the
+         --  humanoid's reload died of a stack overflow in its first Get_Line, 10-20).
+         Piece : String (1 .. 4096);
+         Last  : Natural;
       begin
          Ada.Text_IO.Open (F, Ada.Text_IO.In_File, Path);
          while not Ada.Text_IO.End_Of_File (F) loop
-            Append (Text, Ada.Text_IO.Get_Line (F) & ASCII.LF);
+            Ada.Text_IO.Get_Line (F, Piece, Last);
+            Append (Text, Piece (1 .. Last));
+            if Last < Piece'Last then
+               Append (Text, ASCII.LF);
+            end if;
          end loop;
          Ada.Text_IO.Close (F);
          Driver.Recording.Write_Shared

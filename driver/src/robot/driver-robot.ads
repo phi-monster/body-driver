@@ -969,6 +969,10 @@ private
       Before_Closer : Real_Vectors.Vector;
       Has_Before    : Boolean := False;
       Taken         : Boolean := False;
+      --  Since the log last said what the watch met, for a watch that sees no flick to say why: the beats it began
+      --  again because the arm or the rest of the body moved, those the eye's picture was not settled, and those
+      --  something else moved.
+      Resets, Unsettled, Moving : Natural := 0;
    end record;
 
    package Flick_Watch_Vectors is new Ada.Containers.Vectors (Positive, Flick_Watch);

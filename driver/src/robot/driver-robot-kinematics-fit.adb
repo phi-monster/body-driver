@@ -5851,13 +5851,13 @@ package body Driver.Robot.Kinematics.Fit is
                               Mc : constant Real := Cheap (C);
                               Cc : constant Natural := Cheap_Count;
                            begin
-                              if C /= G
-                                and then (not Adequate
-                                          or else (Mc < Real'Last and then Co > 0 and then Cc > 0
-                                                   and then Mc - Mo <= Driver.Conventions.Z
-                                                                      * Sqrt (Median_Error (Mo, Co) ** 2
-                                                                              + Median_Error (Mc, Cc) ** 2)))
-                              then
+                              --  Every move of one joint is weighed, in its own fit: the cheap score is the sightings
+                              --  under the joints of the order kept, which fit that order and no other, so an order
+                              --  that is the truth with the joints of a wrong one scores worse than the wrong one
+                              --  does, and weighing only the moves that score close to it kept the wrong order: w20's
+                              --  arm 1 at 77 keyframes (replayed from its dump, 10-20) was told as 2 1 6 3 5 4 with no
+                              --  order weighed, where the truth, 1 6 3 2 5 4, is one move from it.
+                              if C /= G then
                                  Closes := Closes + 1;
                                  Close (Closes) := C;
                                  Close_M (Closes) := Mc;

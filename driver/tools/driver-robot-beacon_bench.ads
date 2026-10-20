@@ -1,0 +1,13 @@
+--  driver-robot-beacon_bench SEED[:ARM]... : step 3's closer-flick route (Kinematics.Beacon) on the arms of the fake
+--  robot's body of each seed, without pictures, beats or a driver: where a point of the arm's closer lands in the eye
+--  fixed in the world at the poses of a strategy, with the noise a flick's centre has (BEACON_NOISE) and what hides the
+--  point (the arm's own links, things on the table), given to the fit (Beacon.Fit_Eye) as the boot gives it its flicks.
+--  Each strategy's line says how many poses it took, how many the eye saw, and, when the fit told the eye, after how
+--  many sightings and how far the lens and the place are from the body's. A version of the pose design judged in
+--  seconds: the boot takes minutes to try one.
+--
+--  Strategies, each begun at the arm's reference pose: "range F" takes every joint alone half way and the whole way
+--  along F of the room it has either side of the reference, and every two joints half way, farthest pose first;
+--  "ladder F" takes every joint alone along F of its room, then twice that, and so on while the eye sees the point and
+--  the joint goes on, and then every two joints half way along what was seen.
+procedure Driver.Robot.Beacon_Bench;

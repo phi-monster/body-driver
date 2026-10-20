@@ -131,6 +131,42 @@ package Driver.Robot.Kinematics.Hand_Eye is
       --  covariance's principal directions and both ways: Z where the cost is quadratic over it
    end record;
 
+   --  What a measurement of a fixed eye must tell for the eye to count as placed, by whatever it was measured: the
+   --  points tracked on the arms (Fit_Eye) or the flicks of a closer (Beacon.Fit_Eye). One rule, so that two
+   --  measurements do not place an eye by two standards: the flicks placed an eye at 58 by 20 px (the truth's 153 by
+   --  153) with its principal point outside the picture, "determined" by 14 flicks of 13 terms and a positive
+   --  definite matrix (e14, 10-19), where the points' rule would have called it undetermined.
+   --  The lens (Judge_Lens): both focal lengths significant against their own sigmas at the freedom the measurement
+   --  has (Student's t), the principal point located in the picture to within half of it at Z sigmas. Cov holds the
+   --  covariance of the logarithms of Fx and Fy, Cx and Cy in its first four terms, Freedom the measurement's degrees
+   --  of freedom.
+   type Lens_Verdict is record
+      Focal_Told  : Boolean := False;
+      Centre_Told : Boolean := False;
+      Sigma_Fx, Sigma_Fy, Sigma_Cx, Sigma_Cy : Real := Real'Last;   --  pixels
+   end record;
+
+   function Judge_Lens
+     (L : Fit.Lens; Cov : Driver.Numerics.Arrays.Real_Matrix; Freedom : Natural; Width, Height : Positive)
+      return Lens_Verdict
+   with Pre => Cov'First (1) = 1 and then Cov'First (2) = 1 and then Cov'Length (1) >= 4 and then Cov'Length (2) >= 4;
+
+   --  A pose (Judge_Pose): its turn about the camera's own axes known to within a quarter turn at the sigmas the
+   --  freedom allows, and the camera's distance from the arm's reference significant against its own sigma. Its six
+   --  terms, the turn's three then the centre's, stand in Cov from First.
+   type Pose_Verdict is record
+      Told       : Boolean := False;
+      Turn_Sigma : Real := Real'Last;   --  radians, the root of the three turn terms' variances together
+      Away       : Real := 0.0;         --  the camera's distance from the arm's reference
+      Away_Sigma : Real := Real'Last;
+   end record;
+
+   function Judge_Pose
+     (Centre : Driver.Numerics.Vec3; Cov : Driver.Numerics.Arrays.Real_Matrix; First : Positive; Freedom : Natural)
+      return Pose_Verdict
+   with Pre => Cov'First (1) = 1 and then Cov'First (2) = 1 and then Cov'Length (1) >= First + Pose_Terms - 1
+               and then Cov'Length (2) >= First + Pose_Terms - 1;
+
    procedure Fit_Eye
      (Arms          : Watched_Array;
       Width, Height : Positive;

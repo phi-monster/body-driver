@@ -1,5 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Conventions;
@@ -745,8 +746,11 @@ package body Driver.Robot.Motion is
    end Sweep_Start;
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
+      B      : Driver.Clock.Beat;
+      Done   : Boolean;
+      Cause  : Ada.Strings.Unbounded.Unbounded_String;   --  what stands in the way now
+      Detail : Ada.Strings.Unbounded.Unbounded_String;
+      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
 
       function Carries_An_Eye return Boolean is
         (for some E in 1 .. Eye_Count (M) =>
@@ -755,14 +759,50 @@ package body Driver.Robot.Motion is
       loop
          Driver.Beats.Next (B);
          Done := not Carries_An_Eye or else (M.Beats > 0 and then Kinematics.Held_Still (M, A, M.Beats - 1));
+         --  A wait says what it waits for, each cause once: the drone's first sweep held for a keyframe 2300 beats
+         --  and more with nothing in the log (m1020_d5, 10-20).
+         if not Done then
+            Kinematics.Still_Blocked_By (M, A, Cause, Detail);
+            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
+               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
+               Driver.Log.Line (Driver.Log.Robot, "motion: arm" & A'Image & " is not held still for a keyframe:"
+                                & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end if;
          Driver.Beats.Send (Driver.Commands.Hold);
          exit when Done;
       end loop;
    end Hold_For_Keyframe;
 
+   procedure Hold_For_Flick (M : in out Model; A : Arm_Id) is
+      B      : Driver.Clock.Beat;
+      Done   : Boolean;
+      Cause  : Ada.Strings.Unbounded.Unbounded_String;
+      Detail : Ada.Strings.Unbounded.Unbounded_String;
+      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
+   begin
+      loop
+         Driver.Beats.Next (B);
+         Done := Kinematics.Flick_Watched_Still (M, A);
+         if not Done then
+            Kinematics.Flick_Blocked_By (M, A, Cause, Detail);
+            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
+               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
+               Driver.Log.Line (Driver.Log.Robot, "motion: the flick of arm" & A'Image & "'s closer waits for the eyes' views:"
+                                & Ada.Strings.Unbounded.To_String (Detail) & Ada.Strings.Unbounded.To_String (Cause));
+            end if;
+         end if;
+         Driver.Beats.Send (Driver.Commands.Hold);
+         exit when Done;
+      end loop;
+   end Hold_For_Flick;
+
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
+      B      : Driver.Clock.Beat;
+      Done   : Boolean;
+      Cause  : Ada.Strings.Unbounded.Unbounded_String;   --  what stands in the way now
+      Detail : Ada.Strings.Unbounded.Unbounded_String;
+      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
 
       function Carries_An_Eye return Boolean is
         (for some E in 1 .. Eye_Count (M) =>
@@ -771,6 +811,16 @@ package body Driver.Robot.Motion is
       loop
          Driver.Beats.Next (B);
          Done := not Carries_An_Eye or else Kinematics.Twin_Answered (M, A);
+         --  A wait says what it waits for, each time that changes: the twin waited 2200 to 2800 beats on the drone and
+         --  more than 7000 on the humanoid (m1020_h7, 10-20) with nothing in the log.
+         if not Done then
+            Kinematics.Twin_Blocked_By (M, A, Cause, Detail);
+            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
+               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
+               Driver.Log.Line (Driver.Log.Robot, "motion: arm" & A'Image & "'s reference has no still twin yet: "
+                                & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end if;
          Driver.Beats.Send (Driver.Commands.Hold);
          exit when Done;
       end loop;

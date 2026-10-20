@@ -43,15 +43,23 @@ package Driver.Robot.Kinematics.Beacon is
       Beacon     : Driver.Numerics.Vec3 := [0.0, 0.0, 0.0];
       Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. Terms, 1 .. Terms) := [others => [others => 0.0]];
       Scatter    : Real := 1.0;     --  the residuals' spread over their stated sigmas, never below one
+      Pinhole    : Boolean := False;   --  the lens is a pinhole: one focal length, the principal point at the middle
       Used       : Natural := 0;    --  the sightings kept
       Offered    : Natural := 0;    --  the sightings given
    end record;
+
+   procedure Dump (Seen : Sighting_Array; Width, Height : Positive; Name : String);
+   --  For a fit studied alone (tools/driver-robot-beacon_replay): with BD_DUMP_FITS naming a folder, the sightings of
+   --  a fit in a file there called beacon_NAME_N.txt, N counting the dumps of the run, every real to its last bit;
+   --  nothing without the variable.
 
    procedure Fit_Eye (Seen : Sighting_Array; Width, Height : Positive; Result : out Report);
    --  The eye's lens, its pose and the beacon that put the beacon where the eye saw it at every sighting: a direct
    --  linear start (the beacon at the arm's eye, Hartley's normalized DLT, the camera split from its projection), then
    --  every term by damped Gauss-Newton on the sightings in units of their sigmas; a sighting off by more than Z of the
    --  fit's scatter is left out and the fit run again, until none is. Determined when the sightings kept outnumber the
-   --  terms and the normal equations are positive definite; the covariance is theirs, times the scatter squared.
+   --  terms, the normal equations are positive definite, and the lens and the pose are told by the standard that the
+   --  points on the arms meet (Hand_Eye.Judge_Lens, Judge_Pose) at the freedom the sightings have; the covariance is
+   --  theirs, times the scatter squared.
 
 end Driver.Robot.Kinematics.Beacon;

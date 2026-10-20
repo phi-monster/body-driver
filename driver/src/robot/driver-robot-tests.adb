@@ -29,6 +29,7 @@ with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Kinematics.Beacon;
+with Driver.Robot.Kinematics.Placement;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
@@ -692,6 +693,27 @@ package body Driver.Robot.Tests is
              and then Eye_Mount (M, 1).Arm /= Eye_Mount (M, 2).Arm
              and then Arm_Group (M, Eye_Mount (M, 1).Arm) = Group and then Arm_Group (M, Eye_Mount (M, 2).Arm) = Group,
              "the two eyes do not ride on two arms of the group");
+      --  The two arms of the group each keep their own evidence through the beats that follow: the evidence was found
+      --  by the group alone, and two arms of one group took each other's over every beat (the humanoid's arm 1 had
+      --  no current evidence for 7700 beats, and its reference never got a still twin, m1020_h7, 10-20).
+      declare
+         R    : Rig;
+         Rest : constant Rig_State := (others => <>);
+         Cause, Detail : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         R.Beat := M.Beats;
+         for B in 1 .. 3 loop
+            Step (M, R, Rest);
+         end loop;
+         for A in 1 .. Arm_Count (M) loop
+            if Arm_Group (M, Arm_Id (A)) = Group then
+               Driver.Robot.Kinematics.Twin_Blocked_By (M, Arm_Id (A), Cause, Detail);
+               Check (Ada.Strings.Unbounded.Index (Cause, "no evidence") = 0,
+                      "arm" & A'Image & " of the split group has no current evidence: "
+                      & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end loop;
+      end;
       --  Both channels move both eyes (an arm with two cameras): one arm.
       Set (Whole_Effect, Whole_Effect, Whole_Effect, Whole_Effect, Nothing_Effect);
       Check (Arms_Of_Group (M) = 1, "channels that move the same two eyes split the group into" & Natural'Image (Arms_Of_Group (M)) & " arms");
@@ -7250,6 +7272,49 @@ package body Driver.Robot.Tests is
       GNAT.OS_Lib.Free (Recording_Name);
    end Body_File_In_The_Recording;
 
+   --  A body file is one line, and a body of thirty joints writes a megabyte of it: the humanoid's reload died of a
+   --  stack overflow in the function form of Get_Line, which reads a line's rest by recursion (10-20). A file of the
+   --  body's text and thirty-two megabytes of blanks (8192 pieces of 4096) before its last brace, one line, loads and
+   --  is the body it held.
+   procedure Body_File_One_Long_Line is
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M, Live : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+      FD      : GNAT.OS_Lib.File_Descriptor;
+      File_Name : GNAT.OS_Lib.String_Access;
+      Gone    : Boolean;
+   begin
+      Measured_Body (M);
+      GNAT.OS_Lib.Create_Temp_File (FD, File_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      GNAT.OS_Lib.Close (FD);
+      if File_Name = null then
+         return;
+      end if;
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+         Brace   : constant Natural := Ada.Strings.Fixed.Index (Written, "}", Ada.Strings.Backward);
+         Piece   : constant String (1 .. 4096) := [others => ' '];
+         F       : Ada.Text_IO.File_Type;
+      begin
+         Check (Brace > 0, "the body's text has no closing brace");
+         Ada.Text_IO.Open (F, Ada.Text_IO.Out_File, File_Name.all);
+         Ada.Text_IO.Put (F, Written (Written'First .. Brace - 1));
+         for Pieces in 1 .. 8192 loop
+            Ada.Text_IO.Put (F, Piece);
+         end loop;
+         Ada.Text_IO.Put (F, Written (Brace .. Written'Last));
+         Ada.Text_IO.Close (F);
+         Load_Body (Live, File_Name.all, Ok, Why);
+         Check (Ok, "the long body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Driver.Robot.Body_File.Text (Live) = Written, "the long body file loaded another body than it held");
+      end;
+      GNAT.OS_Lib.Delete_File (File_Name.all, Gone);
+      GNAT.OS_Lib.Free (File_Name);
+   end Body_File_One_Long_Line;
+
    --  A decider's Estimate_Now goes into the recording once per call; the
    --  recomputations Observe makes as the evidence doubles do not, since a
    --  replay makes those itself.
@@ -8337,7 +8402,11 @@ package body Driver.Robot.Tests is
    --  sigma each states (1 to 2 pixels); the eye's lens, pose and the beacon come back within Z of their sigmas.
    --  Gross of the sightings are moved far off where the beacon shows (60 to 200 px), as another arm's moves taken for
    --  a flick were (u14, servo seed 3 of the fake robot, both arms, 10-19: 90 and 210 px off the jaw among 14).
-   procedure Beacon_Placement_At (N : Positive; Gross : Natural) is
+   --  Must_Place: the sightings are enough for the standard that every measurement of a fixed eye meets
+   --  (Hand_Eye.Judge_Lens, Judge_Pose); where they are not (sixteen sightings of thirteen terms leave three degrees of
+   --  freedom, and Student's t asks the focal lengths and the distance many sigmas) the eye is not placed, and what it
+   --  comes back with is checked when it is.
+   procedure Beacon_Placement_At (N : Positive; Gross : Natural; Must_Place : Boolean := True) is
       package Beacon renames Driver.Robot.Kinematics.Beacon;
       Gen    : Ada.Numerics.Float_Random.Generator;
       Truth_Lens : constant Driver.Robot.Kinematics.Fit.Lens :=
@@ -8384,7 +8453,8 @@ package body Driver.Robot.Tests is
          end;
       end loop;
       Beacon.Fit_Eye (Seen, 640, 480, Result);
-      Check (Result.Determined, "the eye is not placed: " & Ada.Strings.Unbounded.To_String (Result.Why));
+      Check (Result.Determined or else not Must_Place,
+             "the eye is not placed: " & Ada.Strings.Unbounded.To_String (Result.Why));
       if Result.Determined then
          declare
             function Sd (T : Positive) return Real is (Ada.Numerics.Long_Elementary_Functions.Sqrt (Result.Covariance (T, T)));
@@ -8422,8 +8492,126 @@ package body Driver.Robot.Tests is
 
    procedure Beacon_Placement_Few is
    begin
-      Beacon_Placement_At (16, 0);
+      Beacon_Placement_At (16, 0, Must_Place => False);
    end Beacon_Placement_Few;
+
+   --  The carriers of the first poses of an arm whose joints turn about parallel axes all lie on one plane: no
+   --  projection is fixed by them, the start's normal equations are singular, and the fit used to raise (seeds 3, 23, 28
+   --  and 34 of the beacon bench, 10-20). It says it has no placement.
+   procedure Beacon_Placement_Flat is
+      package Beacon renames Driver.Robot.Kinematics.Beacon;
+      Truth_Lens : constant Driver.Robot.Kinematics.Fit.Lens :=
+        (Fx => 300.0, Fy => 290.0, Cx => 330.0, Cy => 235.0, K1 => 0.0, K2 => 0.0);
+      Truth  : constant Rigid :=
+        (Rotation    => Exp (Vec3'[-(Ada.Numerics.Pi / 2.0 + 0.6), 0.0, 0.0]),
+         Translation => [0.0, -0.6, 0.8]);
+      Seen   : Beacon.Sighting_Array (1 .. 8);
+      Result : Beacon.Report;
+   begin
+      for K in Seen'Range loop
+         declare
+            Turn    : constant Real := 0.1 * Real (K);
+            Carrier : constant Rigid :=
+              (Rotation    => Exp (Vec3'[Turn, 0.0, 0.0]) * Exp (Vec3'[Ada.Numerics.Pi, 0.0, 0.0]),
+               Translation => [0.0, 0.05 * Real (K), 0.3 - 0.02 * Real (K)]);
+            In_Eye  : constant Vec3 := Transpose (Truth.Rotation) * (Carrier * Vec3'[0.0, 0.0, 0.1] - Truth.Translation);
+            U, V    : Real;
+            Front   : Boolean;
+         begin
+            Driver.Robot.Kinematics.Fit.Project (Truth_Lens, In_Eye, U, V, Front);
+            Seen (K) := (Carrier => Carrier, U => U, V => V, Sigma => 1.0);
+         end;
+      end loop;
+      Beacon.Fit_Eye (Seen, 640, 480, Result);
+      Check (not Result.Determined, "carriers on one plane placed the eye");
+   end Beacon_Placement_Flat;
+
+   --  A second arm put into the world by the flicks of its closer seen by an eye whose lens and place are known, with
+   --  the table the two arms' eyes both saw: its turn, place and unit come back within their own sigmas. The arm's unit
+   --  is 1.3 of the first's: the rays alone could not tell, the table does.
+   procedure Arm_Placement_At (N : Positive; Must_Place : Boolean) is
+      package Beacon renames Driver.Robot.Kinematics.Beacon;
+      package Placement renames Driver.Robot.Kinematics.Placement;
+      Gen    : Ada.Numerics.Float_Random.Generator;
+      Lens   : constant Driver.Robot.Kinematics.Fit.Lens :=
+        (Fx => 300.0, Fy => 300.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Eye    : constant Rigid :=
+        (Rotation => Exp (Vec3'[-(Ada.Numerics.Pi / 2.0 + 0.6), 0.0, 0.0]), Translation => [0.0, -0.6, 0.8]);
+      Up     : constant Vec3 := [0.0, 0.0, 1.0];
+      Truth  : constant Rigid := (Rotation => Exp (Vec3'[0.1, -0.05, 0.7]), Translation => [0.3, 0.1, 0.25]);
+      Unit   : constant Real := 1.3;
+      Truth_Beacon : constant Vec3 := [0.01, 0.02, 0.1];
+      World_Plane  : constant Placement.Plane :=
+        (Normal => Up, Distance => 0.0, Sigma_Normal => 0.01, Sigma_Distance => 0.01);
+      Arm_Plane    : constant Placement.Plane :=
+        (Normal         => Transpose (Truth.Rotation) * Up,
+         Distance       => (0.0 - Up * Truth.Translation) / Unit,
+         Sigma_Normal   => 0.01,
+         Sigma_Distance => 0.01 / Unit);
+      Seen   : Beacon.Sighting_Array (1 .. N);
+      Kept   : Natural := 0;
+      Result : Placement.Report;
+      function Draw (Low, High : Real) return Real is
+        (Low + (High - Low) * Real (Ada.Numerics.Float_Random.Random (Gen)));
+      function Gaussian return Real is
+        (Ada.Numerics.Long_Elementary_Functions.Sqrt
+           (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Real'Max (Real'Model_Small, Draw (0.0, 1.0))))
+         * Ada.Numerics.Long_Elementary_Functions.Cos (2.0 * Ada.Numerics.Pi * Draw (0.0, 1.0)));
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 23);
+      while Kept < N loop
+         declare
+            Carrier : constant Rigid :=
+              (Rotation    => Exp (Vec3'[Draw (-0.4, 0.4), Draw (-0.4, 0.4), Draw (-0.4, 0.4)]),
+               Translation => [Draw (-0.15, 0.15), Draw (-0.15, 0.15), Draw (0.0, 0.2)]);
+            X      : constant Vec3 := Truth.Rotation * (Unit * (Carrier * Truth_Beacon)) + Truth.Translation;
+            In_Eye : constant Vec3 := Transpose (Eye.Rotation) * (X - Eye.Translation);
+            U, V   : Real;
+            Front  : Boolean;
+            Sigma  : constant Real := Draw (1.0, 2.0);
+         begin
+            Driver.Robot.Kinematics.Fit.Project (Lens, In_Eye, U, V, Front);
+            if Front and then U > 0.0 and then U < 640.0 and then V > 0.0 and then V < 480.0 then
+               Kept := Kept + 1;
+               Seen (Kept) := (Carrier => Carrier, U => U + Sigma * Gaussian, V => V + Sigma * Gaussian, Sigma => Sigma);
+            end if;
+         end;
+      end loop;
+      Placement.Fit_Arm (Seen, Lens, Eye, World_Plane, Arm_Plane, Result);
+      Check (Result.Determined or else not Must_Place,
+             "the arm is not placed: " & Ada.Strings.Unbounded.To_String (Result.Why));
+      if Result.Determined then
+         declare
+            function Sd (T : Positive) return Real is (Ada.Numerics.Long_Elementary_Functions.Sqrt (Result.Covariance (T, T)));
+            Off_Turn   : constant Vec3 := Driver.Numerics.Log (Truth.Rotation * Transpose (Result.Placement.Rotation));
+            Off_Centre : constant Vec3 := Result.Placement.Translation - Truth.Translation;
+            Off_Unit   : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Result.Scale / Unit);
+         begin
+            Driver.Log.Line (Driver.Log.Robot, "arm placement test: unit" & Result.Scale'Image & " turn off" & Real'Image (abs Off_Turn)
+                             & " centre off" & Real'Image (abs Off_Centre) & " scatter" & Result.Scatter'Image
+                             & " used" & Result.Used'Image);
+            Check (abs Off_Unit <= Driver.Conventions.Z * Sd (7), "the arm's unit is off its sigma:" & Off_Unit'Image
+                   & " against" & Sd (7)'Image);
+            for A in 1 .. 3 loop
+               Check (abs Off_Turn (A) <= Driver.Conventions.Z * Sd (A),
+                      "the arm's turn is off its sigma about axis" & A'Image & ":" & Off_Turn (A)'Image & " against" & Sd (A)'Image);
+               Check (abs Off_Centre (A) <= Driver.Conventions.Z * Sd (3 + A),
+                      "the arm's place is off its sigma along axis" & A'Image & ":" & Off_Centre (A)'Image
+                      & " against" & Sd (3 + A)'Image);
+            end loop;
+         end;
+      end if;
+   end Arm_Placement_At;
+
+   procedure Arm_Placement is
+   begin
+      Arm_Placement_At (24, Must_Place => True);
+   end Arm_Placement;
+
+   procedure Arm_Placement_Few is
+   begin
+      Arm_Placement_At (6, Must_Place => False);
+   end Arm_Placement_Few;
 
    procedure Order_Exam_Hard is
    begin
@@ -9022,6 +9210,12 @@ package body Driver.Robot.Tests is
                              & "sigmas", Beacon_Placement'Access);
       Driver.Tests.Register ("robot.beacon.few", "a fixed eye placed by a beacon on the tool from sixteen sightings is not "
                              & "placed or comes back off its own sigmas", Beacon_Placement_Few'Access);
+      Driver.Tests.Register ("robot.beacon.flat", "sightings whose carriers lie on one plane give no start and no placement, "
+                             & "and no exception", Beacon_Placement_Flat'Access);
+      Driver.Tests.Register ("robot.beacon.arm", "a second arm put into the world by its closer's flicks and the two tables "
+                             & "comes back off its own sigmas, its unit among them", Arm_Placement'Access);
+      Driver.Tests.Register ("robot.beacon.arm_few", "a second arm put into the world from six flicks is not placed or comes "
+                             & "back off its own sigmas", Arm_Placement_Few'Access);
       Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",
@@ -9053,6 +9247,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
                              & "where it was read, or its recorded text reloads another body",
                              Body_File_In_The_Recording'Access);
+      Driver.Tests.Register ("robot.body.line", "a body file of one line of tens of megabytes is not loaded, or is "
+                             & "another body than it held", Body_File_One_Long_Line'Access);
       Driver.Tests.Register ("robot.estimate.recorded", "a decider's Estimate_Now is not in the recording once per "
                              & "call, or Observe's own recomputations are", Estimate_In_The_Recording'Access);
       Driver.Tests.Register ("robot.world.head", "two arms whose eyes never see each other's table are not placed "

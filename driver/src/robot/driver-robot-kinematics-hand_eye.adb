@@ -2538,6 +2538,47 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Free (Dg);
    end Covariance_At;
 
+   function Judge_Lens
+     (L : Fit.Lens; Cov : Driver.Numerics.Arrays.Real_Matrix; Freedom : Natural; Width, Height : Positive)
+      return Lens_Verdict
+   is
+      Sigma_Fx : constant Real := L.Fx * Sqrt (Cov (1, 1));
+      Sigma_Fy : constant Real := L.Fy * Sqrt (Cov (2, 2));
+   begin
+      return (Focal_Told  => Driver.Uncertain.Significant (L.Fx, Sigma_Fx, Freedom)
+                             and then Driver.Uncertain.Significant (L.Fy, Sigma_Fy, Freedom),
+              --  The optical axis is located in the picture to within half of it.
+              Centre_Told => Driver.Conventions.Z * Sqrt (Cov (3, 3)) < Real (Width) / 2.0
+                             and then Driver.Conventions.Z * Sqrt (Cov (4, 4)) < Real (Height) / 2.0,
+              Sigma_Fx    => Sigma_Fx,
+              Sigma_Fy    => Sigma_Fy,
+              Sigma_Cx    => Sqrt (Cov (3, 3)),
+              Sigma_Cy    => Sqrt (Cov (4, 4)));
+   end Judge_Lens;
+
+   function Judge_Pose
+     (Centre : Driver.Numerics.Vec3; Cov : Driver.Numerics.Arrays.Real_Matrix; First : Positive; Freedom : Natural)
+      return Pose_Verdict
+   is
+      O          : constant Natural := First - 1;
+      Turn_Var   : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);
+      Away       : constant Real := Sqrt (Dot (Centre, Centre));
+      Centre_Cov : constant Mat3 := [for I in 1 .. 3 => [for J in 1 .. 3 => Cov (O + 3 + I, O + 3 + J)]];
+      Away_Sigma : constant Real :=
+        (if Away > 0.0 then Driver.Uncertain.Sigma_Along (Centre_Cov, (1.0 / Away) * Centre) else Real'Last);
+      T          : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Freedom));
+   begin
+      --  The turn within a quarter turn, and the eye's distance from the arm's reference significant against its own
+      --  sigma, each at the sigmas the freedom allows (Student's t). A centre whose variance was merely finite was
+      --  taken as placed: 0.3 to 4.6 m from the arm's eye where the truth stands 0.6 to 0.7 m, two of them said
+      --  determined (the bench's fixed eye over table arms, 10-20: 6 to 24 points of the arm, 13 to 33 pictures).
+      return (Told       => T * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0
+                            and then Driver.Uncertain.Significant (Away, Away_Sigma, Freedom),
+              Turn_Sigma => Sqrt (Turn_Var),
+              Away       => Away,
+              Away_Sigma => Away_Sigma);
+   end Judge_Pose;
+
    ---------------------------------------------------------------------------
    --  The fit
 
@@ -2818,8 +2859,9 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                        & " pictures");
                else
                   declare
-                     Sigma_Fx : constant Real := Final.L.Fx * Sqrt (Cov (1, 1));
-                     Sigma_Fy : constant Real := Final.L.Fy * Sqrt (Cov (2, 2));
+                     Lens_Is  : constant Lens_Verdict := Judge_Lens (Final.L, Cov, Natural (Freedom), Width, Height);
+                     Sigma_Fx : constant Real := Lens_Is.Sigma_Fx;
+                     Sigma_Fy : constant Real := Lens_Is.Sigma_Fy;
                      Failed   : Boolean := False;
                   begin
                      if Linear_To < Driver.Conventions.Z - 1.0 then
@@ -2832,21 +2874,16 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                              & ", so its covariance does not stand");
                         Failed := True;
                      end if;
-                     if not Driver.Uncertain.Significant (Final.L.Fx, Sigma_Fx, Freedom)
-                       or else not Driver.Uncertain.Significant (Final.L.Fy, Sigma_Fy, Freedom)
-                     then
+                     if not Lens_Is.Focal_Told then
                         Say ("the points leave the focal lengths undetermined:" & Driver.Log.Image (Final.L.Fx, 1)
                              & " +-" & Driver.Log.Image (Sigma_Fx, 1) & " and" & Driver.Log.Image (Final.L.Fy, 1)
                              & " +-" & Driver.Log.Image (Sigma_Fy, 1) & " px");
                         Failed := True;
                      end if;
-                     if not (Driver.Conventions.Z * Sqrt (Cov (3, 3)) < Real (Width) / 2.0
-                             and then Driver.Conventions.Z * Sqrt (Cov (4, 4)) < Real (Height) / 2.0)
-                     then
-                        --  The optical axis is not located in the picture to within half of it.
+                     if not Lens_Is.Centre_Told then
                         Say ("the points leave the eye's principal point known only to within"
-                             & Driver.Log.Image (Sqrt (Cov (3, 3)), 1) & " and"
-                             & Driver.Log.Image (Sqrt (Cov (4, 4)), 1)
+                             & Driver.Log.Image (Lens_Is.Sigma_Cx, 1) & " and"
+                             & Driver.Log.Image (Lens_Is.Sigma_Cy, 1)
                              & " px in a picture of" & Width'Image & " by" & Height'Image);
                         Failed := True;
                      end if;
@@ -2854,29 +2891,14 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                      for A in 1 .. N_Arms loop
                         if Active (A) then
                            declare
-                              O          : constant Natural := Pose_At (A);
-                              Turn_Var   : constant Real := Cov (O + 1, O + 1) + Cov (O + 2, O + 2) + Cov (O + 3, O + 3);
-                              Centre     : constant Vec3 := Final.Pose (A).C;
-                              Away       : constant Real := Sqrt (Dot (Centre, Centre));
-                              Centre_Cov : constant Mat3 :=
-                                [for I in 1 .. 3 => [for J in 1 .. 3 => Cov (O + 3 + I, O + 3 + J)]];
-                              Away_Sigma : constant Real :=
-                                (if Away > 0.0 then Driver.Uncertain.Sigma_Along (Centre_Cov, (1.0 / Away) * Centre)
-                                 else Real'Last);
-                              T          : constant Real :=
-                                Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Natural (Freedom)));
+                              Pose_Is : constant Pose_Verdict :=
+                                Judge_Pose (Final.Pose (A).C, Cov, Pose_At (A) + 1, Natural (Freedom));
                            begin
-                              --  The turn within a quarter turn, and the eye's distance from the arm's eye significant
-                              --  against its own sigma, each at the sigmas the covariance's freedom allows (Student's
-                              --  t). A centre whose variance was merely finite was taken as placed: 0.3 to 4.6 m from
-                              --  the arm's eye where the truth stands 0.6 to 0.7 m, two of them said determined (the
-                              --  bench's fixed eye over table arms, 10-20: 6 to 24 points of the arm, 13 to 33 pictures).
-                              Placed (A) := T * Sqrt (Turn_Var) < Ada.Numerics.Pi / 2.0
-                                and then Driver.Uncertain.Significant (Away, Away_Sigma, Natural (Freedom));
+                              Placed (A) := Pose_Is.Told;
                               if not Placed (A) then
                                  Say ("the points leave arm" & A'Image & "'s eye turn known only to"
-                                      & Driver.Log.Image (Sqrt (Turn_Var), 3) & " rad, its distance from the arm's eye"
-                                      & Driver.Log.Image (Away, 3) & " +-" & Driver.Log.Image (Away_Sigma, 3));
+                                      & Driver.Log.Image (Pose_Is.Turn_Sigma, 3) & " rad, its distance from the arm's eye"
+                                      & Driver.Log.Image (Pose_Is.Away, 3) & " +-" & Driver.Log.Image (Pose_Is.Away_Sigma, 3));
                               end if;
                            end;
                         end if;
