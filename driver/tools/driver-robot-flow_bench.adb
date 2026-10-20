@@ -304,6 +304,35 @@ begin
                   Background (K) := (if Poses mod 2 = 1 then Column ((Poses + 1) / 2)
                                      else (Column (Poses / 2) + Column (Poses / 2 + 1)) / 2.0);
                end loop;
+               --  FLOW_TRUE_BACK (a study): the background as it is, this arm's solids taken out of the world (moved
+               --  a kilometre below it) and the picture rendered, against the stills' median.
+               if Ada.Environment_Variables.Exists ("FLOW_TRUE_BACK") then
+                  declare
+                     Saved  : array (W.Solids.First_Index .. W.Solids.Last_Index) of Rigid;
+                     Bare   : Flow.Luma_Access;
+                     Differ : Natural := 0;
+                  begin
+                     for I in Saved'Range loop
+                        Saved (I) := W.Solids (I).Pose;
+                        if W.Solids (I).Link > 0 and then W.Links (W.Solids (I).Link).Arm = Number then
+                           W.Solids (I).Pose.Translation := [0.0, 0.0, -1000.0];
+                        end if;
+                     end loop;
+                     Bare := Picture;
+                     for I in Saved'Range loop
+                        W.Solids (I).Pose := Saved (I);
+                     end loop;
+                     for K in Background'Range loop
+                        if abs (Background (K) - Bare (K)) > 4.0 * Noise then
+                           Differ := Differ + 1;
+                        end if;
+                        Background (K) := Bare (K);
+                     end loop;
+                     Free (Bare);
+                     Put_Line ("arm" & Number'Image & ": the true background, the stills' median off it at"
+                               & Differ'Image & " pixels");
+                  end;
+               end if;
                for V in 1 .. Poses loop
                   Set.Views (V) := Flow.Evidence (All_Readings (V), All_Still (V).all, Background, Noise,
                                                   All_Minus (V), All_Plus (V), All_Steps (V), Width, Height);
