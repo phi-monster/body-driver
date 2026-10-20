@@ -854,8 +854,10 @@ package body Driver.Robot.Body_File is
                                  Ps : constant Node := Field (X, "poses");
                               begin
                                  for P in 1 .. Size (Ps) loop
-                                    F.Poses.Append (Driver.Numerics.Rigid'(Rotation    => Nine_Of (Field (Item (Ps, P), "rotation")),
-                                                                          Translation => Three_Of (Field (Item (Ps, P), "centre"))));
+                                    F.Poses.Append
+                                      (Driver.Numerics.Rigid'
+                                         (Rotation    => Nine_Of (Field (Item (Ps, P), "rotation")),
+                                          Translation => Three_Of (Field (Item (Ps, P), "centre"))));
                                  end loop;
                               end;
                            end;

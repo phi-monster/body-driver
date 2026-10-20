@@ -53,6 +53,20 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  stands out of the noise and the change of some joint does, each pixel one test of a family of as many as the
    --  picture has (Driver.Uncertain, Tests).
 
+   function Best_Turn
+     (Still, Turned : Real_Array;
+      Turn          : Real;
+      Noise         : Real;
+      Width, Height : Positive) return Real
+   with Pre => Still'Length = Width * Height and then Turned'Length = Width * Height and then Turn > 0.0;
+   --  The turn either way that measures a joint's rates best, from the picture at the pose (Still) and with the joint
+   --  turned by Turn reading units (Turned), Noise as Evidence has it. The pixels the turn moved (their change and
+   --  gradient standing out of the noise, as Evidence keeps them) move by the median of |change| / |gradient| over
+   --  Turn pixels a unit; a central difference over a motion d either way errs by d^2 / (6 s^2) of the rate on an edge
+   --  blurred by s (the smoothing's own sigma at least) and by the smoothed change's noise over 2 d |g| (|g| their
+   --  median gradient), the two balanced at d = (3 s^2 sigma_C / (sqrt 2 |g|)) ^ (1/3) (the turn sweep of 10-20: the
+   --  rates' bias +6 % at 0.001 rad, +1 % at 0.008, their spread up again at 0.016). Turn itself when no pixel moved.
+
    --  An arm the eye watched: its poses' evidence and its joints along its chain from the base, as its fit has them
    --  (its reference frame and its unit).
    type Arm_Flow is record

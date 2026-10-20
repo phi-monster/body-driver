@@ -18,7 +18,6 @@ package body Driver.Robot.Motion is
 
    use Ada.Numerics.Long_Elementary_Functions;
 
-
    type Count_Array is array (Positive range <>) of Natural;
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
@@ -406,15 +405,15 @@ package body Driver.Robot.Motion is
                      Farthest : Real := Real'Last;
                      Stopped  : Boolean := False;   --  the last sending ended against something: no sending again
                      Errors : Ada.Strings.Unbounded.Unbounded_String;
-                     --  The least turn of channel C that any arm of the group counts (Kinematics.Counted_Turn): a landing
-                     --  of an arm's joint off its target by less than that is no turn of it to the fit, which takes a
-                     --  keyframe's joints from their readings and counts a joint as turned only from that turn, so it
-                     --  changes nothing the sweep's keyframes are for and is not sent again (the eye's visible step alone
-                     --  let it be where the lock-in tells sub-pixel motion: a25, 10-16, a simulated arm in noise-free
-                     --  pictures, sent 172 landings again in its second pass, 663 of its 2186 beats, each error under a
-                     --  twentieth of a unit, where the matcher's steps were 0.04 to 0.28 units and the lock-in's 0.001 to
-                     --  0.009); a group several arms share (a humanoid's torso is the joints of every arm) lands a joint
-                     --  within none of their turns.
+                     --  The least turn of channel C that any arm of the group counts (Kinematics.Counted_Turn): a
+                     --  landing of an arm's joint off its target by less than that is no turn of it to the fit, which
+                     --  takes a keyframe's joints from their readings and counts a joint as turned only from that turn,
+                     --  so it changes nothing the sweep's keyframes are for and is not sent again (the eye's visible
+                     --  step alone let it be where the lock-in tells sub-pixel motion: a25, 10-16, a simulated arm in
+                     --  noise-free pictures, sent 172 landings again in its second pass, 663 of its 2186 beats, each
+                     --  error under a twentieth of a unit, where the matcher's steps were 0.04 to 0.28 units and the
+                     --  lock-in's 0.001 to 0.009); a group several arms share (a humanoid's torso is the joints of
+                     --  every arm) lands a joint within none of their turns.
                      function Least_Counted (C : Positive) return Real is
                         Result : Real := 0.0;
                      begin

@@ -3300,7 +3300,8 @@ package body Driver.Robot.Kinematics is
                                  Not_Placed : Ada.Strings.Unbounded.Unbounded_String;
                               begin
                                  Ways := Ways + 1;
-                                 Through (R1, R2, F, S1, S2, Placement, Scale, Covariance, Response, Placed, Not_Placed);
+                                 Through
+                                   (R1, R2, F, S1, S2, Placement, Scale, Covariance, Response, Placed, Not_Placed);
                                  if not Placed then
                                     Why := Why & "through eye" & E'Image & ", " & Not_Placed & "; ";
                                  elsif Covariance (4, 4) + Covariance (5, 5) + Covariance (6, 6) < Best then

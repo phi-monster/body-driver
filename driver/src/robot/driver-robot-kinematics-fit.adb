@@ -2737,12 +2737,12 @@ package body Driver.Robot.Kinematics.Fit is
 
          --  Stage 5: the tracks.
          Enter (5);
-         --  The lens's aspect and distortion are kept only when the fit with them is determined and they are significant
-         --  together by its covariance (Extras_Significant: which holds how the sightings' errors depend on each other);
-         --  the pinhole otherwise, refined from the same start. Judged by the sightings' residuals instead, the median
-         --  over every sighting kept the pinhole for the desktop arm's wide barrel lens, its centre 33 px off, and a
-         --  likelihood ratio of their robust costs counts every sighting's error as its own, the errors a keyframe's
-         --  points share and a point's in every keyframe as evidence (10-20).
+         --  The lens's aspect and distortion are kept only when the fit with them is determined and they are
+         --  significant together by its covariance (Extras_Significant: which holds how the sightings' errors depend on
+         --  each other); the pinhole otherwise, refined from the same start. Judged by the sightings' residuals
+         --  instead, the median over every sighting kept the pinhole for the desktop arm's wide barrel lens, its centre
+         --  33 px off, and a likelihood ratio of their robust costs counts every sighting's error as its own, the
+         --  errors a keyframe's points share and a point's in every keyframe as evidence (10-20).
          --  One axis of turn (a drone's, a wheeled base's carrying its eye over the floor) tells
          --  the focal length, the distortion and the turn's scale only along a valley, and the pixels' aspect not at all
          --  where the eye looks level: free, they left the bench's drones and mast eyes undetermined, 5 of 6 and 2 of 3,

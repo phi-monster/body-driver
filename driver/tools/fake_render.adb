@@ -177,8 +177,8 @@ package body Fake_Render is
       end case;
    end Distance;
 
-   --  The place of a pixel's sub-sample Sub (from 0) along Axis (1 across, 2 down), in pixels from its corner: the
-   --  R2 sequence, the steps the inverse powers of the plastic number (the real root of x ** 3 = x + 1), the first at the
+   --  The place of a pixel's sub-sample Sub (from 0) along Axis (1 across, 2 down), in pixels from its corner: the R2
+   --  sequence, the steps the inverse powers of the plastic number (the real root of x ** 3 = x + 1), the first at the
    --  pixel's centre.
    Plastic : constant Real := 1.324_717_957_244_746_025_960_908_854;
 
@@ -189,9 +189,9 @@ package body Fake_Render is
    end Lattice;
 
    --  With a lens blur, the sub-sample's place carries the lens's spread on top: the four-dimensional R2 sequence (the
-   --  steps the inverse powers of the real root of x ** 5 = x + 1), its first two coordinates the place in the pixel and
-   --  the last two a Gaussian offset of Lens_Blur pixels (Box and Muller), so that the rays fall as the pixel's area
-   --  spread by the lens weighs the light.
+   --  steps the inverse powers of the real root of x ** 5 = x + 1), its first two coordinates the place in the pixel
+   --  and the last two a Gaussian offset of Lens_Blur pixels (Box and Muller), so that the rays fall as the pixel's
+   --  area spread by the lens weighs the light.
    Quintic : constant Real := 1.167_303_978_261_418_684_256_045_899;
 
    function Spread (Sub : Natural; Axis : Positive) return Real is
@@ -206,7 +206,9 @@ package body Fake_Render is
          return Lattice (Sub, Axis);
       end if;
       declare
-         Radius : constant Real := Lens_Blur * Sqrt (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Real'Max (Spread (Sub, 3), Real'Model_Small)));
+         Radius : constant Real :=
+           Lens_Blur
+           * Sqrt (-2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Real'Max (Spread (Sub, 3), Real'Model_Small)));
          Turn   : constant Real := 2.0 * Ada.Numerics.Pi * Spread (Sub, 4);
       begin
          return Spread (Sub, Axis) + Radius * (if Axis = 1 then Cos (Turn) else Sin (Turn));
@@ -228,8 +230,8 @@ package body Fake_Render is
             begin
                for Sub in 0 .. Supersample * Supersample - 1 loop
                   declare
-                     --  The ray through the sub-sample's place in the pixel, in the camera's frame then the world's: the
-                     --  places on the plastic number's lattice (Roberts' R2), every one of them at its own distance
+                     --  The ray through the sub-sample's place in the pixel, in the camera's frame then the world's:
+                     --  the places on the plastic number's lattice (Roberts' R2), every one of them at its own distance
                      --  along any line, so that an edge moving across the pixel changes it at as many places as there
                      --  are rays (a square grid of k by k crosses k of them at once when the edge lies along it).
                      Px : constant Real := (Real (Col) + Offset (Sub, 1) - C.Cx) / C.Fx;

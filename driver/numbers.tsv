@@ -1224,6 +1224,8 @@ driver-robot-flows.adb	Terms : constant Natural := KFit.Lens_Terms + 6 * Slots;	
 driver-robot-flows.adb	Turn := 2.0 * Turn;	2.0	structure	the turn doubled until an eye sees a change
 driver-robot-flows.adb	Wanted : Positive := 2;	2	statistics	the fewest poses a pose can be left out of (the jackknife over the poses)
 driver-robot-flows.adb	Wanted := 2 * Wanted;	2	structure	the poses double until the eye is told or no surer
+driver-robot-flows.adb	and then 2.0 * Best <= Range_Seen);	2.0	math	a turn either way spans twice the turn, inside the range seen
+driver-robot-flows.adb	and then Best > (1.0 + Driver.Conventions.Unchanged_Fraction) * Turn	1.0	math	grows by more than the fraction that is no change
 driver-robot-flows.adb	else (Column (P / 2) + Column (P / 2 + 1)) / 2.0);	2	statistics	the median of an even count: the mean of the middle two
 driver-robot-flows.adb	else (Column (P / 2) + Column (P / 2 + 1)) / 2.0);	2	statistics	the median of an even count: the mean of the middle two
 driver-robot-flows.adb	else (Column (P / 2) + Column (P / 2 + 1)) / 2.0);	2.0	statistics	the median of an even count: the mean of the middle two
@@ -2621,6 +2623,10 @@ driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Driver.Clock
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "" & Driver.Log.Image (Now.Score, 2)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "" & Driver.Log.Image (Now.Score, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	("" & Driver.Log.Image (Result.Spread, 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	1.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
+driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	2.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
+driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	3.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
+driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	3.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
 driver-robot-kinematics-flow_eye.adb	([X (X'First), X (X'First + Offset (A)), X (X'First + Offset (A) + 1), X (X'First + Offset (A) + 2),	2	structure	the lens's three terms then the arm's turn and centre
 driver-robot-kinematics-flow_eye.adb	(if T <= 4 then Eps3 else Eps3 * Real'Max (S (A).Spread_Of_Arm, abs XA (T)));	4	structure	the logarithm of the focal length and the turn are unitless; the rest in the arm's unit
 driver-robot-kinematics-flow_eye.adb	A (T, T) := A (T, T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	numerics	Marquardt's damping of the diagonal
@@ -2729,6 +2735,7 @@ driver-robot-kinematics-flow_eye.adb	Scatter : Real := 1.0;	1.0	statistics	the r
 driver-robot-kinematics-flow_eye.adb	Scatter := Real'Max (1.0, (if Freedom > G then Sqrt (Sum / Real (Freedom - G)) else 1.0));	1.0	statistics	the residuals' spread over their sigmas, never below one
 driver-robot-kinematics-flow_eye.adb	Scatter := Real'Max (1.0, (if Freedom > G then Sqrt (Sum / Real (Freedom - G)) else 1.0));	1.0	statistics	the residuals' spread over their sigmas, never below one
 driver-robot-kinematics-flow_eye.adb	Score := (if 2 * In_Front > Sampled and then Freedom > 0 then Cost / Real (Freedom) else Real'Last);	2	statistics	more than half the pixels moved: a state lowers its cost by losing them
+driver-robot-kinematics-flow_eye.adb	Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));	2.0	statistics	a still is a mean of two frames' worth: its noise is the difference's over the root of two
 driver-robot-kinematics-flow_eye.adb	Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));	2.0	statistics	a still is a mean of two frames' worth: its noise is the difference's over the root of two
 driver-robot-kinematics-flow_eye.adb	Smooth_Sigma : constant Real := Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Levels)) / Ada.Numerics.Pi;	2.0	math	the Gaussian whose response at half the sampling rate is one level in the picture's
 driver-robot-kinematics-flow_eye.adb	Start_Ln : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Real (Width) / 2.0);	2.0	math	the half width seen at a right angle's half (no field of view assumed)

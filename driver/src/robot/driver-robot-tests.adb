@@ -6128,7 +6128,8 @@ package body Driver.Robot.Tests is
                D (J) := Changes (F, J);
             end loop;
             declare
-               T : constant Vec3 := Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D).Translation;
+               T : constant Vec3 :=
+                 Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D).Translation;
                G : constant Vec3 := Driver.Robot.Kinematics.Eye_In_Reference (M, Arm_Id (A), D).Translation;
             begin
                Num := Num + T * G;
@@ -8551,11 +8552,11 @@ package body Driver.Robot.Tests is
    end Scales_Beside_Stated_Sigmas;
 
    --  A fixed eye placed by the edge flow of a synthetic arm (Kinematics.Flow_Eye): three joints (a turn about the
-   --  vertical, two about level axes), points of its second and third links seen by an eye 0.9 away looking down at
-   --  the arm, each with a gradient of 30 levels a pixel in a direction of its own and, for every joint, the change of
-   --  the picture there a reading unit as the arm's motion has it (central differences of the point's projection, not
-   --  the fit's own formula) with Gaussian noise of the sigma each states; the joints that do not move a point change it
-   --  by noise alone. The lens and the pose come back within Z of their sigmas, and the eye is told.
+   --  vertical, two about level axes), points of its second and third links seen by an eye 0.9 away looking down at the
+   --  arm, each with a gradient of 30 levels a pixel in a direction of its own and, for every joint, the change of the
+   --  picture there a reading unit as the arm's motion has it (central differences of the point's projection, not the
+   --  fit's own formula) with Gaussian noise of the sigma each states; the joints that do not move a point change it by
+   --  noise alone. The lens and the pose come back within Z of their sigmas, and the eye is told.
    procedure Flow_Eye_On_A_Synthetic_Arm is
       package Flow renames Driver.Robot.Kinematics.Flow_Eye;
       package KFit renames Driver.Robot.Kinematics.Fit;
@@ -8606,8 +8607,10 @@ package body Driver.Robot.Tests is
                   K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
                   Along : constant Real := Uniform (G);
                   Point : constant Vec3 :=
-                    (if K = 2 then [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]
-                     else [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]);
+                    (if K = 2
+                     then [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]
+                     else [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along,
+                           0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]);
                   Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
                   U, V  : Real;
                   Ahead : Boolean;

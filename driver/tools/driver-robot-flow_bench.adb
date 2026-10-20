@@ -245,6 +245,20 @@ begin
                         end loop;
                      end if;
                   end if;
+                  --  FLOW_BEST_TURN: each joint's best turn (Flow_Eye.Best_Turn) from this pose's still and its
+                  --  turn either way, in radians, against the turn rendered.
+                  if Ada.Environment_Variables.Exists ("FLOW_BEST_TURN") then
+                     for J in 1 .. N loop
+                        declare
+                           L    : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                           Best : constant Real :=
+                             Flow.Best_Turn (Still.all, Plus (J).all, Steps (J), Noise, Width, Height);
+                        begin
+                           Put_Line ("arm" & Number'Image & " pose" & V'Image & " joint" & J'Image & ": best turn "
+                                     & Image (Best * L.Unit, 5) & " rad, rendered " & Image (Steps (J) * L.Unit, 5));
+                        end;
+                     end loop;
+                  end if;
                   All_Still (V) := Still;
                   All_Minus (V) := Minus;
                   All_Plus (V) := Plus;
@@ -345,6 +359,26 @@ begin
                                 Gaussian'Access);
             end loop;
             Put_Line ("the rates made the model's at the true eye");
+         end if;
+         --  FLOW_SCALE = "K,J,F": every rate of arm K's joint J times F (a joint's rates sharing one error).
+         if Ada.Environment_Variables.Exists ("FLOW_SCALE") then
+            declare
+               Text  : constant String := Ada.Environment_Variables.Value ("FLOW_SCALE");
+               C1    : constant Natural := Ada.Strings.Fixed.Index (Text, ",");
+               C2    : constant Natural := Ada.Strings.Fixed.Index (Text (C1 + 1 .. Text'Last), ",");
+               K     : constant Positive := Positive'Value (Text (Text'First .. C1 - 1));
+               J     : constant Positive := Positive'Value (Text (C1 + 1 .. C2 - 1));
+               By    : constant Real := Real'Value (Text (C2 + 1 .. Text'Last));
+            begin
+               for V of Sets (K).Views.all loop
+                  for I in 1 .. V.Pixels loop
+                     if V.Link (I) >= J then
+                        V.Rate (I, J) := By * V.Rate (I, J);
+                     end if;
+                  end loop;
+               end loop;
+               Put_Line ("arm" & K'Image & " joint" & J'Image & "'s rates times " & Image (By, 4));
+            end;
          end if;
       end;
       declare

@@ -11,15 +11,16 @@ with Fake_World;
 package Fake_Render is
 
    Supersample : Positive := 1;
-   --  Its square the rays per pixel, their light averaged, their places in the pixel a lattice that puts each at its own
-   --  distance along any line: a camera's pixel integrates the light over its area, a texture finer than a pixel shows as
-   --  its mean there and an edge moving across it changes it in proportion, where one ray through the pixel's centre
-   --  shows whatever value of the texture the centre falls on and an edge all at once (fake_robot --supersample).
+   --  Its square the rays per pixel, their light averaged, their places in the pixel a lattice that puts each at its
+   --  own distance along any line: a camera's pixel integrates the light over its area, a texture finer than a pixel
+   --  shows as its mean there and an edge moving across it changes it in proportion, where one ray through the pixel's
+   --  centre shows whatever value of the texture the centre falls on and an edge all at once (fake_robot
+   --  --supersample).
 
    Lens_Blur : Driver.Real := 0.0;
    --  The lens's spread of a point's light over the picture, a Gaussian's standard deviation in pixels: a real camera's
-   --  lens and its sensor's demosaicing blur what a pinhole would show, and a picture of no blur at all aliases (an edge
-   --  that moves a tenth of a pixel changes the pixels by what its place in the pixel makes it, not by its slope).
+   --  lens and its sensor's demosaicing blur what a pinhole would show, and a picture of no blur at all aliases (an
+   --  edge that moves a tenth of a pixel changes the pixels by what its place in the pixel makes it, not by its slope).
 
    Even_Light : Boolean := False;
    --  Every surface lit alike whatever way it faces, no highlight: a surface that turns keeps its shade (studies of

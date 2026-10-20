@@ -3,6 +3,7 @@ with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Beats;
 with Driver.Commands;
+with Driver.Conventions;
 with Driver.Images;
 with Driver.Log;
 with Driver.Observations;
@@ -93,11 +94,11 @@ package body Driver.Robot.Flows is
    type Arm_Id_Array is array (Positive range <>) of Arm_Id;
 
    --  The flow's fit stored as the fixed eye's place (Fixed_Fit): its lens (one focal length both ways, the principal
-   --  point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the
-   --  covariance of the lens's six terms as an arm's fit has them (the logarithms of the two focal lengths, the
-   --  principal point, the two distortion terms, held) and of every arm's turn about the camera's own axes and centre;
-   --  the world arm's pose (the first arm's) and its twelve terms' covariance as the fixed eye's users read them, the eye
-   --  known only when it saw that arm. Its spread the place it leaves the arms' points in its picture uncertain by.
+   --  point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the covariance
+   --  of the lens's six terms as an arm's fit has them (the logarithms of the two focal lengths, the principal point,
+   --  the two distortion terms, held) and of every arm's turn about the camera's own axes and centre; the world arm's
+   --  pose (the first arm's) and its twelve terms' covariance as the fixed eye's users read them, the eye known only
+   --  when it saw that arm. Its spread the place it leaves the arms' points in its picture uncertain by.
    procedure Store (M : in out Model; E : Eye_Id; Arms : Arm_Id_Array; Result : Flow.Report) is
       Slots : constant Natural := Arms'Length;
       Terms : constant Natural := KFit.Lens_Terms + 6 * Slots;
@@ -306,9 +307,11 @@ package body Driver.Robot.Flows is
                return Result;
             end Pose_Targets;
 
-            --  Every joint's turn either way: the least turn the arm's fit counts (Motion.Least_Turn), doubled until
-            --  an eye that sees the arm sees the picture change with it (Pixels.Compare) or the turn would leave the
-            --  range seen.
+            --  Every joint's turn either way: the least turn the arm's fit counts (Motion.Least_Turn) doubled until an
+            --  eye that sees the arm sees the picture change with it (Pixels.Compare), then the turn that measures the
+            --  rates best by what that change showed (Flow_Eye.Best_Turn: the motion that balances the central
+            --  difference's bias against the noise), the least over the eyes and no less than the turn seen; none when
+            --  no turn inside the range seen shows.
             procedure Find_Steps (Pose : Real_Array; Still : View_Vectors.Vector) is
             begin
                for J in 1 .. N loop
@@ -338,7 +341,43 @@ package body Driver.Robot.Flows is
                                  end;
                               end if;
                            end loop;
-                           exit when Shows;
+                           if Shows then
+                              --  The best turn by the pixels this turn moved, taken and judged again until it no
+                              --  longer grows by more than what is no change: the pixels a turn shows moving are
+                              --  those of its own size (the fake, 10-21: 0.0040, 0.0048 and 0.0057 rad from trials
+                              --  of 0.001, 0.002 and 0.004), and the turn used is the one whose pixels chose it.
+                              loop
+                                 declare
+                                    Best : Real := Real'Last;
+                                 begin
+                                    for K in 1 .. Count_E loop
+                                       if Sees_It (K, A) then
+                                          declare
+                                             Before : Flow.Luma_Access := Means_Of (Still (K));
+                                             After  : Flow.Luma_Access := Means_Of (Views (K));
+                                          begin
+                                             Best := Real'Min
+                                               (Best,
+                                                Flow.Best_Turn
+                                                  (Before.all, After.all, Turn,
+                                                   Driver.Pixels.Compare (Still (K), Views (K)).Spread,
+                                                   Driver.Pixels.Width (Views (K)), Driver.Pixels.Height (Views (K))));
+                                             Free (Before);
+                                             Free (After);
+                                          end;
+                                       end if;
+                                    end loop;
+                                    exit when not (Best < Real'Last
+                                                   and then Best > (1.0 + Driver.Conventions.Unchanged_Fraction) * Turn
+                                                   and then 2.0 * Best <= Range_Seen);
+                                    Turn := Best;
+                                    Target (C) := Pose (C) + Turn;
+                                    Go_To (Target);
+                                    Take (Views);
+                                 end;
+                              end loop;
+                              exit;
+                           end if;
                            Turn := 2.0 * Turn;
                         end;
                      end loop;

@@ -9,6 +9,7 @@ with Driver.Distributions;
 with Driver.Log;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
+with Driver.Stats;
 with Driver.Uncertain;
 
 package body Driver.Robot.Kinematics.Flow_Eye is
@@ -164,10 +165,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  What the arm moves against: the picture with the arm elsewhere (Background, the poses' stills' per-pixel
       --  median), and where this pose's still shows it (agrees with it within the gate of the noise). Its own gradient
       --  moves with nothing, and where the smoothing takes it in with an edge of the arm the change there is the edge's
-      --  alone (the fake's textured table, 10-20: at the true eye its gradient left the outline's pixels 25 to 45 % off;
-      --  taken from the still only where no joint's turn changed the pixel, the band an edge sweeps kept it, and the
-      --  principal point came out 13 to 16 px off on three seeds). The gradient of what moves is the smoothed gradient
-      --  less the smoothed gradient of the background where it shows.
+      --  alone (the fake's textured table, 10-20: at the true eye its gradient left the outline's pixels 25 to 45 %
+      --  off; taken from the still only where no joint's turn changed the pixel, the band an edge sweeps kept it, and
+      --  the principal point came out 13 to 16 px off on three seeds). The gradient of what moves is the smoothed
+      --  gradient less the smoothed gradient of the background where it shows.
       declare
          Su, Sv : Real_Access := new Real_Array (1 .. Pixels);
          function Back_At (K : Natural) return Real is (Background (Background'First + K));
@@ -214,10 +215,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
             end;
          end loop;
       end loop;
-      --  One pixel of every cell a smoothing radius wide, the one whose changes stand out the most: the smoothed noise of
-      --  pixels that far apart correlates by exp (-radius^2 / (4 sigma^2)), an eighth, and the pixels of one edge closer
-      --  than that tell the fit the same thing again while each takes its time (10-20: some 20 000 pixels for two arms
-      --  at six poses each, a fit minutes long).
+      --  One pixel of every cell a smoothing radius wide, the one whose changes stand out the most: the smoothed noise
+      --  of pixels that far apart correlates by exp (-radius^2 / (4 sigma^2)), an eighth, and the pixels of one edge
+      --  closer than that tell the fit the same thing again while each takes its time (10-20: some 20 000 pixels for
+      --  two arms at six poses each, a fit minutes long).
       declare
          Cell   : constant Positive := Positive'Max (1, Smooth_Radius);
          Across : constant Positive := (Width + Cell - 1) / Cell;
@@ -295,6 +296,71 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          return Result;
       end;
    end Evidence;
+
+   function Best_Turn
+     (Still, Turned : Real_Array;
+      Turn          : Real;
+      Noise         : Real;
+      Width, Height : Positive) return Real
+   is
+      Pixels  : constant Positive := Width * Height;
+      Gate    : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Tests => Pixels));
+      Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));
+      Sigma_C : constant Real := Noise * Square_Sum (Smoothing);
+      Gu      : Real_Access := new Real_Array (1 .. Pixels);
+      Gv      : Real_Access := new Real_Array (1 .. Pixels);
+      Change  : Real_Access := new Real_Array (1 .. Pixels);
+      Diff    : Real_Access := new Real_Array (1 .. Pixels);
+      Moved   : Natural := 0;
+      Result  : Real := Turn;
+   begin
+      Filter (Still, Width, Height, Slope, Smoothing, Gu.all);
+      Filter (Still, Width, Height, Smoothing, Slope, Gv.all);
+      for K in 0 .. Pixels - 1 loop
+         Diff (K + 1) := Turned (Turned'First + K) - Still (Still'First + K);
+      end loop;
+      Filter (Diff.all, Width, Height, Smoothing, Smoothing, Change.all);
+      for K in 1 .. Pixels loop
+         if Sqrt (Gu (K) ** 2 + Gv (K) ** 2) > Gate * Sigma_G and then abs Change (K) > Gate * Sigma_C then
+            Moved := Moved + 1;
+         end if;
+      end loop;
+      if Moved > 0 then
+         declare
+            Motions, Slopes : Real_Access := new Real_Array (1 .. Moved);
+            I : Natural := 0;
+         begin
+            for K in 1 .. Pixels loop
+               declare
+                  G : constant Real := Sqrt (Gu (K) ** 2 + Gv (K) ** 2);
+               begin
+                  if G > Gate * Sigma_G and then abs Change (K) > Gate * Sigma_C then
+                     I := I + 1;
+                     Motions (I) := abs Change (K) / G / Turn;
+                     Slopes (I) := G;
+                  end if;
+               end;
+            end loop;
+            declare
+               Per_Unit : constant Real := Driver.Stats.Median_In_Place (Motions.all);
+               Slope_M  : constant Real := Driver.Stats.Median_In_Place (Slopes.all);
+               Best     : constant Real :=
+                 (3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);
+            begin
+               if Per_Unit > 0.0 then
+                  Result := Best / Per_Unit;
+               end if;
+            end;
+            Free (Motions);
+            Free (Slopes);
+         end;
+      end if;
+      Free (Gu);
+      Free (Gv);
+      Free (Change);
+      Free (Diff);
+      return Result;
+   end Best_Turn;
 
    ---------------------------------------------------------------------------
    --  The model
@@ -940,7 +1006,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   end;
                end if;
             end loop;
-            --  A centre the terms move no more than half the pixels at is no start: a state lowers its cost by losing them.
+            --  A centre the terms move no more than half the pixels at is no start: a state lowers its cost by losing
+            --  them.
             Cost := (if 2 * Ok_Count > Sampled then Now else Real'Last);
             --  Done when a round lowers the cost by less than one residual's worth (Refine_Step).
             exit when Last - Now <= Real'Max (1.0, (if Freedom > 0 then Now / Real (Freedom) else 1.0));
@@ -977,9 +1044,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    type Racer_Access is access Racer_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Racer_Array, Racer_Access);
 
-   --  A state's cost over the pixels Kept and its score: the cost over the freedom the pixels leave (a row for each joint
-   --  that moves one, less one for its depth); Real'Last when the terms move no more than half of them (as a start of
-   --  Solve_Centre's).
+   --  A state's cost over the pixels Kept and its score: the cost over the freedom the pixels leave (a row for each
+   --  joint that moves one, less one for its depth); Real'Last when the terms move no more than half of them (as a
+   --  start of Solve_Centre's).
    procedure Judge (P : Problem; L : Layout; Kept : Flag_Array; Base : Mat3; X : Parameters; Cost, Score : out Real) is
       R    : Real_Access := new Real_Array (1 .. L.Rows);
       Seen : Flag_Access := new Flag_Array (1 .. L.Pixels_All);
@@ -1026,10 +1093,11 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  One race over Rotations turns of the spiral (Driver.Numerics.Spiral_Rotation) at the focal lengths of the scan:
    --  the lengths from the half width seen at a right angle's half, half an octave apart, as the arm's own fit starts
    --  its, widened by a length on the side whose end scores best until a length inside scores at least as well as both
-   --  ends (no field of view is assumed); every candidate's centre and depths by Solve_Centre. The best-ranked candidates, as many as there are turns, start the race: each takes a step
-   --  of its refinement over the sample, the worse half drops out, the rest take twice as many, until the finalists are
-   --  left; they run to their ends. Found_One when two of them ended at the best optimum and none ended at another that
-   --  the pixels do not tell from it (Ambiguous); Reached: the finalists that ended at the best optimum.
+   --  ends (no field of view is assumed); every candidate's centre and depths by Solve_Centre. The best-ranked
+   --  candidates, as many as there are turns, start the race: each takes a step of its refinement over the sample, the
+   --  worse half drops out, the rest take twice as many, until the finalists are left; they run to their ends.
+   --  Found_One when two of them ended at the best optimum and none ended at another that the pixels do not tell from
+   --  it (Ambiguous); Reached: the finalists that ended at the best optimum.
    procedure Search_At
      (P : Problem; L : Layout; Sample : Flag_Array; Rotations : Positive; Arm_Spread, Pixel_Spread : Real;
       Middle : Vec3; Width : Positive; Best : out Racer; Verdict : out Search_Verdict; Reached : out Natural)
@@ -2000,7 +2068,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   for K in 1 .. N_Out loop
                      for A in 1 .. G loop
                         for B in 1 .. G loop
-                           Result_S (A, B) := Result_S (A, B) + Weight (K) * Theta (K) (A) * Theta (K) (B) / Real (N_Out);
+                           Result_S (A, B) :=
+                             Result_S (A, B) + Weight (K) * Theta (K) (A) * Theta (K) (B) / Real (N_Out);
                         end loop;
                      end loop;
                   end loop;
@@ -2146,7 +2215,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       if (for some A of S => A.Searched = Ambiguous) then
          Result.Why := To_Unbounded_String ("an arm's search ended at two eyes its pixels do not tell apart");
       elsif (for some A of S => A.Searched /= Found_One) then
-         Result.Why := To_Unbounded_String ("no two of an arm's search's starts ended at its best eye, nor did two races");
+         Result.Why := To_Unbounded_String
+           ("no two of an arm's search's starts ended at its best eye, nor did two races");
       elsif Result.Spread * Driver.Conventions.Z >= Real (Driver.Alignment.Half_Patch (Width, Height)) then
          Result.Why := To_Unbounded_String
            ("the pixels leave the arms' points in the picture uncertain by" & Driver.Log.Image (Result.Spread, 2)
@@ -2203,7 +2273,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   Rho   : Real;
                   Ok    : Boolean;
                begin
-                  Pixel_Residuals (P, L.Pose_Of_Pixel (Q), L.Pixel_Of_Pixel (Q), Pose.Rotation, X, Part, Count, Rho, Ok);
+                  Pixel_Residuals
+                    (P, L.Pose_Of_Pixel (Q), L.Pixel_Of_Pixel (Q), Pose.Rotation, X, Part, Count, Rho, Ok);
                   if Rho > 0.0 then
                      In_Front := In_Front + 1;
                   end if;
