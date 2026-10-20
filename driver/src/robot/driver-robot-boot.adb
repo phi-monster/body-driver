@@ -724,6 +724,19 @@ package body Driver.Robot.Boot is
                               end;
                            end loop;
                            Go_To (G, Pose, Report, Land => True);
+                           declare
+                              Said : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for J in 1 .. Count loop
+                                 Ada.Strings.Unbounded.Append
+                                   (Said, " c" & Swept (Turned (J))'Image & " "
+                                    & Driver.Log.Image (Pose (Swept (Turned (J))) - Start (Swept (Turned (J))), 3));
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " cell" & Row'Image & " asks"
+                                               & Ada.Strings.Unbounded.To_String (Said) & " units: "
+                                               & Ada.Characters.Handling.To_Lower (Report.Outcome'Image)
+                                               & (if Report.At_Rest then ", at rest" else ", not at rest"));
+                           end;
                            if Report.At_Rest then
                               Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                            end if;
@@ -933,6 +946,10 @@ package body Driver.Robot.Boot is
                           and then (for all K in 1 .. N => Per_Unit (Swept (K)) > 0.0)
                         then
                            Together (Shares, Climb => True);
+                        elsif N > 1 and then not Fitted_Now then
+                           Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " round" & Rounds'Image
+                                            & ": no cell of several joints yet, the view's motion per unit of a joint is"
+                                            & " unmeasured for some of them");
                         end if;
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Round'Access);
@@ -1208,11 +1225,18 @@ package body Driver.Robot.Boot is
                      Placed  : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Showing_Eyes (M, A);
                      Viewing : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Viewing_Eyes (M, A);
                      Last    : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+                     --  An arm with a closer has the fixed eyes that see it placed by the closer's flicks after the
+                     --  sweeps (Driver.Robot.Flicks), which tell a lens and a place from a third of the beats that the
+                     --  carrying took, and the carrying found none of them in the cold boots of 10-20 (c20, c21: every
+                     --  joint carried both ways, thousands of beats, 10 to 12 tracks seen twice or more).
+                     Flicked : constant Boolean :=
+                       (for some H in 1 .. Group_Count (M) => Closer_Arm (M, Group_Id (H)) = A);
                   begin
                      Unplaced.Clear;
                      for E of Viewing loop
                         if not Placed.Contains (E)
                           and then Eye_Mount (M, Eye_Id (E)).Kind /= Arm_Carried
+                          and then not Flicked
                         then
                            Unplaced.Append (E);
                         end if;

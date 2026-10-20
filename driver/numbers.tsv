@@ -1063,6 +1063,7 @@ driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3) & ""	3	format	digits pri
 driver-robot-boot.adb	& Driver.Log.Image (Offset + Step, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Plan.Noise, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Plan.Worst, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Pose (Swept (Turned (J))) - Start (Swept (Turned (J))), 3));	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Later), 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Step, 3) & "" & Sighted_Now'Image	3	format	digits printed in a log line or a message
@@ -1144,6 +1145,7 @@ driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0]
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Followed_Most (I) = 0.0 and then not Descending (I) and then Lost = 1	1	structure	the push's first level of the pass
+driver-robot-boot.adb	elsif N > 1 and then not Fitted_Now then	1	structure	more than one swept joint: a cell moves several at once, and the log says why none was taken
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
 driver-robot-boot.adb	exit when Step / 2.0 < Least (C);	2.0	structure	the half of a step under the least turn a keyframe counts is no step: the way ends

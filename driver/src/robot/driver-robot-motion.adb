@@ -1612,9 +1612,16 @@ package body Driver.Robot.Motion is
                   end if;
                   declare
                      Confirmed : Boolean := False;
+                     --  And the step is one an eye's cells can tell (Lockin.Shows_Step): a channel seen at a level that
+                     --  moves the picture by a hundredth of a pixel is seen by the regression's pooled gain and by no
+                     --  push a decision could rest on (a drone's motors, d20 on 10-20: levels of 0.05 to 3 thousandths of a
+                     --  metre, its own camera shown nothing at them, the group left a part with no arm to sweep).
                      procedure Read_Seen is
+                        Step : Real_Array (1 .. Group_Size (M, Ref.Group)) := [others => 0.0];
                      begin
-                        Confirmed := (for some E in 1 .. Eye_Count (M) => Lockin.Seen (M, Eye_Id (E), Ref.Group, Ref.Channel));
+                        Step (Ref.Channel) := Offset;
+                        Confirmed := (for some E in 1 .. Eye_Count (M) => Lockin.Seen (M, Eye_Id (E), Ref.Group, Ref.Channel))
+                          and then (for some E in 1 .. Eye_Count (M) => Lockin.Shows_Step (M, Eye_Id (E), Ref.Group, Step));
                      end Read_Seen;
                   begin
                      Hold_And_Estimate (M);
@@ -1627,7 +1634,7 @@ package body Driver.Robot.Motion is
                         Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
                                          & " level" & Report.Levels (Way)'Image & " " & Way'Image & ", " & Scientific (Offset)
                                          & " units, was seen by an eye (chance of a false alarm "
-                                         & Driver.Log.Image (Chance, 3) & ") but the lock-in sees no eye moved by it");
+                                         & Driver.Log.Image (Chance, 3) & ") but the lock-in sees no eye moved by it, or by a step its cells tell");
                      end if;
                   end;
                end if;
