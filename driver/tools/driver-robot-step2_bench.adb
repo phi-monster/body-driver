@@ -307,7 +307,8 @@ procedure Driver.Robot.Step2_Bench is
 
          --  The median residual across and down of the sightings of keyframes that moved several joints, with the
          --  joints J, lens Lx and depths of R in order C (the truth's diagnostics).
-         function Multi_Score (J : Fit.Joint_Array; Lx : Fit.Lens; R : Fit.Fit_Report; C : Fit.Chain_Order) return Real is
+         function Multi_Score
+           (J : Fit.Joint_Array; Lx : Fit.Lens; R : Fit.Fit_Report; C : Fit.Chain_Order) return Real is
             D : Row_Vectors.Vector;
          begin
             for X of Seen_All loop
@@ -315,7 +316,8 @@ procedure Driver.Robot.Step2_Bench is
                   Change : Real_Array (1 .. N);
                   Moving : Natural := 0;
                   Depth  : constant Real :=
-                    (if X.Track <= Natural (R.Depths.Length) then R.Depths (R.Depths.First_Index + X.Track - 1) else 0.0);
+                    (if X.Track <= Natural (R.Depths.Length) then R.Depths (R.Depths.First_Index + X.Track - 1)
+                     else 0.0);
                begin
                   for K in 1 .. N loop
                      Change (K) := Rows ((X.Frame - 2) * N + K);
@@ -407,7 +409,9 @@ procedure Driver.Robot.Step2_Bench is
                declare
                   Taken : Boolean := False;
                begin
-                  while Ladder_Open (J, Way) and then Next_Level (J, Way) <= Most and then not (Once and then Taken) loop
+                  while Ladder_Open (J, Way) and then Next_Level (J, Way) <= Most
+                    and then not (Once and then Taken)
+                  loop
                      declare
                         Try  : Real_Array := Q0;
                         Ask  : Real_Array (1 .. N) := [others => 0.0];
@@ -656,7 +660,9 @@ procedure Driver.Robot.Step2_Bench is
                      Prev_Chain := Chain;
                      Prev_L := L;
                      Prev := Report;
-                     if Report.Fitted and then not Climbed and then not Ada.Environment_Variables.Exists ("BENCH_NO_CLIMB") then
+                     if Report.Fitted and then not Climbed
+                       and then not Ada.Environment_Variables.Exists ("BENCH_NO_CLIMB")
+                     then
                         Climbed := True;
                         for J in 1 .. N loop
                            if Slopes (J) > 0.0 then
@@ -692,6 +698,16 @@ procedure Driver.Robot.Step2_Bench is
                         end;
                         goto Next_Round;
                      end if;
+                     for Kp in Report.Untold.First_Index .. Report.Untold.Last_Index loop
+                        Put_Line ("    untold pair: channels" & Report.Untold (Kp).Earlier'Image & " and"
+                                  & Report.Untold (Kp).Later'Image & " (the body's joints"
+                                  & Order_D (Report.Untold (Kp).Earlier)'Image & " and"
+                                  & Order_D (Report.Untold (Kp).Later)'Image & "), turns"
+                                  & Real'Image (Report.Untold_Turns (Report.Untold_Turns.First_Index
+                                     + 2 * (Kp - Report.Untold.First_Index))) & " and"
+                                  & Real'Image (Report.Untold_Turns (Report.Untold_Turns.First_Index
+                                     + 2 * (Kp - Report.Untold.First_Index) + 1)));
+                     end loop;
                      exit when Told or else Report.Untold.Is_Empty;
                      Stalled := (if Untold >= Last_Untold then Stalled + 1 else 0);
                      Last_Untold := Untold;
@@ -782,6 +798,81 @@ procedure Driver.Robot.Step2_Bench is
                         Near  : constant Vec3 := At_P - Along * Axis;
                      begin
                         True_J (C) := (W => Axis, P => Near, C => L.Unit / Factor (C), Slide => L.Kind = FW.Prismatic);
+                     end;
+                  end loop;
+                  --  The true joints in the reference eye's frame, and for each pair the last fit left untold, the true
+                  --  joints in the true order against the same joints with the two swapped at the turns the fit asked:
+                  --  the median distance between the two places of the points the eye sees at both.
+                  for C in 1 .. N loop
+                     Put_Line ("    true joint c" & C'Image & " (body" & Order_D (C)'Image & "): "
+                               & (if True_J (C).Slide then "slide" else "turn") & ", axis"
+                               & True_J (C).W (1)'Image & True_J (C).W (2)'Image & True_J (C).W (3)'Image & ", near"
+                               & True_J (C).P (1)'Image & True_J (C).P (2)'Image & True_J (C).P (3)'Image & ", unit"
+                               & True_J (C).C'Image);
+                  end loop;
+                  for Kp in Prev.Untold.First_Index .. Prev.Untold.Last_Index loop
+                     declare
+                        E  : constant Positive := Prev.Untold (Kp).Earlier;
+                        La : constant Positive := Prev.Untold (Kp).Later;
+                        Te : constant Real := Prev.Untold_Turns (Prev.Untold_Turns.First_Index
+                                                                 + 2 * (Kp - Prev.Untold.First_Index));
+                        Tl : constant Real := Prev.Untold_Turns (Prev.Untold_Turns.First_Index
+                                                                 + 2 * (Kp - Prev.Untold.First_Index) + 1);
+                        Swapped : Fit.Chain_Order := Truth;
+                        Cosine  : constant Real :=
+                          True_J (E).W (1) * True_J (La).W (1) + True_J (E).W (2) * True_J (La).W (2)
+                          + True_J (E).W (3) * True_J (La).W (3);
+                        Cr : constant Vec3 := Cross (True_J (E).W, True_J (La).W);
+                        Dp : constant Vec3 := True_J (La).P - True_J (E).P;
+                        Gap : constant Real :=
+                          (if abs Cr > 1.0E-9 then abs (Cr (1) * Dp (1) + Cr (2) * Dp (2) + Cr (3) * Dp (3)) / abs Cr
+                           else abs Cross (Dp, True_J (E).W));
+                     begin
+                        for I in Swapped'Range loop
+                           if Truth (I) = E then
+                              Swapped (I) := La;
+                           elsif Truth (I) = La then
+                              Swapped (I) := E;
+                           end if;
+                        end loop;
+                        Put_Line ("    untold c" & E'Image & " with c" & La'Image & ": axes"
+                                  & Integer'Image (Integer (57.3 * EF.Arccos (Real'Max (-1.0, Real'Min (1.0, Cosine)))))
+                                  & " deg apart, lines" & Integer'Image (Integer (1000.0 * Gap)) & " mm apart");
+                        for Row in 0 .. 3 loop
+                           declare
+                              Change : Real_Array (1 .. N) := [others => 0.0];
+                              T1, T2 : Rigid;
+                              D      : Row_Vectors.Vector;
+                           begin
+                              Change (E) := (if Row mod 2 = 1 then -Te else Te);
+                              Change (La) := (if Row / 2 = 1 then -Tl else Tl);
+                              T1 := Fit.Eye_At (True_J, Truth, Change);
+                              T2 := Fit.Eye_At (True_J, Swapped, Change);
+                              for P of Points loop
+                                 declare
+                                    P1 : constant Vec3 := Inverse (T1) * (Inverse (Cam0) * P);
+                                    P2 : constant Vec3 := Inverse (T2) * (Inverse (Cam0) * P);
+                                 begin
+                                    if P1 (3) > 0.0 and then P2 (3) > 0.0 then
+                                       D.Append
+                                         (EF.Sqrt ((W.Cameras (Cam).Fx * (P1 (1) / P1 (3) - P2 (1) / P2 (3))) ** 2
+                                                   + (W.Cameras (Cam).Fy * (P1 (2) / P1 (3) - P2 (2) / P2 (3))) ** 2));
+                                    end if;
+                                 end;
+                              end loop;
+                              declare
+                                 A : Real_Array (1 .. Natural (D.Length));
+                              begin
+                                 for I in A'Range loop
+                                    A (I) := D (I);
+                                 end loop;
+                                 Put_Line ("      turns" & Change (E)'Image & " and" & Change (La)'Image
+                                           & ": the two orders' places of" & A'Length'Image & " points a median"
+                                           & Real'Image (if A'Length = 0 then 0.0 else Driver.Stats.Median (A))
+                                           & " px apart");
+                              end;
+                           end;
+                        end loop;
                      end;
                   end loop;
                   --  Every order scored as the fit's stage 4 scores it (its joints, lens and tracks' depths, the
@@ -946,7 +1037,8 @@ procedure Driver.Robot.Step2_Bench is
                                      & Natural'Image (Natural (1000.0 * Report.Median_Px)) & " over"
                                      & Report.Used'Image & " sightings, every sighting's"
                                      & Natural'Image (Natural (1000.0 * Report.All_Median_Px))
-                                     & ", its keyframes of several joints" & Milli (Multi_Score (Joints, L, Report, Chain)));
+                                     & ", its keyframes of several joints"
+                                     & Milli (Multi_Score (Joints, L, Report, Chain)));
                         end;
                      end;
                   end loop;
@@ -1042,7 +1134,8 @@ procedure Driver.Robot.Step2_Bench is
                         Off_Table := Off_Table + 1;
                      end if;
                   end loop;
-                  Put_Line ("  seed" & Seed'Image & " eye " & Name & ": " & Off_Table'Image & " of" & Points.Length'Image
+                  Put_Line ("  seed" & Seed'Image & " eye " & Name & ": " & Off_Table'Image & " of"
+                            & Points.Length'Image
                             & " points off the table's plane");
                end;
                Put_Line ("seed" & Seed'Image & " eye " & Name & ":" & N'Image & " joints, "

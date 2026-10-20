@@ -53,6 +53,10 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  stands out of the noise and the change of some joint does, each pixel one test of a family of as many as the
    --  picture has (Driver.Uncertain, Tests).
 
+   function Smoothing_Radius return Natural;
+   --  How far, in whole pixels, the smoothing reaches that Evidence takes the picture's gradient and its changes
+   --  through (for studies: tools/driver-robot-flow_bench).
+
    function Best_Turn
      (Still, Turned : Real_Array;
       Turn          : Real;
@@ -129,6 +133,19 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  widened by the eye's spread over the poses (the jackknife). Determined when the search found its optimum, the
    --  covariance is positive definite and Z times Spread is less than the half patch the aligner follows
    --  (Driver.Alignment.Half_Patch).
+
+   function Residuals_At
+     (Poses         : Pose_Array;
+      Joints        : Fit.Joint_Array;
+      Width, Height : Positive;
+      Pose          : Driver.Numerics.Rigid;
+      Lens          : Fit.Lens;
+      Relative      : Real) return Real_Array;
+   --  Every pixel's residuals at a given eye (a pinhole of that lens at that pose) with the given joints, its depth
+   --  eliminated, each in units of its rate's spread (its sigma and Relative times the rate, in quadrature): pixel
+   --  after pixel and each one's joints in order, nought where the terms move no point on its line of sight, as many
+   --  for the same poses whatever the joints and the eye. For a fit studied against the truth
+   --  (tools/driver-robot-flow_bench).
 
    procedure Synthesize
      (Poses         : Pose_Array;

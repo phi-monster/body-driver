@@ -40,6 +40,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    Smooth_Radius : constant Natural :=
      Natural (Real'Floor (Smooth_Sigma * Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Levels))));
 
+   function Smoothing_Radius return Natural is (Smooth_Radius);
+
    type Kernel is array (Integer range -Smooth_Radius .. Smooth_Radius) of Real;
 
    function Weights return Kernel is
@@ -2472,6 +2474,49 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Free (L);
       Free (P.Twists);
    end Judge_At;
+
+   function Residuals_At
+     (Poses         : Pose_Array;
+      Joints        : Fit.Joint_Array;
+      Width, Height : Positive;
+      Pose          : Driver.Numerics.Rigid;
+      Lens          : Fit.Lens;
+      Relative      : Real) return Real_Array
+   is
+      Held : aliased constant Pose_Array := Poses;
+      P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
+                         Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null);
+      L    : Layout_Access;
+   begin
+      P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
+      for V in Poses'Range loop
+         declare
+            T : constant Twist_Array := Twists_At (Joints, Poses (V).Readings);
+         begin
+            for J in T'Range loop
+               P.Twists (V, J) := T (J);
+            end loop;
+         end;
+      end loop;
+      L := Lay_Out (P);
+      declare
+         X    : constant Parameters :=
+           [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
+            Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy];
+         Kept : constant Flag_Array (1 .. L.Pixels_All) := [others => True];
+         R    : Real_Access := new Real_Array (1 .. L.Rows);
+         Seen : Flag_Access := new Flag_Array (1 .. L.Pixels_All);
+      begin
+         All_Residuals (P, L.all, Pose.Rotation, X, Kept, R.all, Seen.all);
+         return Result : constant Real_Array := R.all do
+            Free (R);
+            Free (Seen);
+            Free (L);
+            Free (P.Twists);
+         end return;
+      end;
+   end Residuals_At;
 
    procedure Synthesize
      (Poses         : Pose_Array;

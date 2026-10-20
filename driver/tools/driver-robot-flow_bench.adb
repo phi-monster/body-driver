@@ -1,4 +1,5 @@
 with Ada.Calendar;
+with Ada.Containers.Vectors;
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Environment_Variables;
@@ -11,8 +12,10 @@ with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Driver.Log;
 with Driver.Numerics;
+with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Kinematics.Flow_Eye;
+with Driver.Stats;
 with Fake_Render;
 with Fake_World;
 
@@ -37,6 +40,7 @@ procedure Driver.Robot.Flow_Bench is
      (if Ada.Environment_Variables.Exists (Name) then Real'Value (Ada.Environment_Variables.Value (Name)) else Default);
 
    Noise_Level : constant Real := Setting ("FLOW_NOISE", 0.7);
+   Unrounded   : constant Boolean := Ada.Environment_Variables.Exists ("FLOW_NO_ROUND");
    Frames      : constant Positive := Positive (Setting ("FLOW_FRAMES", 4.0));
    Turn        : constant Real := Setting ("FLOW_TURN", 0.004);   --  radians each way, every joint
    Swing       : constant Real := Setting ("FLOW_SWING", 0.35);   --  radians about rest, the poses' spread
@@ -56,6 +60,8 @@ procedure Driver.Robot.Flow_Bench is
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Flow.Luma_Access);
    type Rgb_Access is access Real_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Rgb_Access);
+   type Real_Matrix_Access is access Real_Matrix;
+   procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Real_Matrix_Access);
 
    Seed   : constant Natural := Natural'Value (Ada.Command_Line.Argument (1));
    Poses  : constant Positive :=
@@ -83,8 +89,10 @@ procedure Driver.Robot.Flow_Bench is
       for F in 1 .. Frames loop
          for K in 0 .. Width * Height - 1 loop
             declare
+               --  FLOW_NO_ROUND (a study): the levels not rounded to whole grey levels.
                function Level (X : Real) return Real is
-                 (Real'Max (0.0, Real'Min (255.0, Real'Rounding (X + Noise_Level * Gaussian))));
+                 (Real'Max (0.0, Real'Min (255.0, (if Unrounded then X + Noise_Level * Gaussian
+                                                       else Real'Rounding (X + Noise_Level * Gaussian)))));
                R : constant Real := Level (Rgb (Rgb'First + 3 * K));
                G : constant Real := Level (Rgb (Rgb'First + 3 * K + 1));
                B : constant Real := Level (Rgb (Rgb'First + 3 * K + 2));
@@ -348,6 +356,232 @@ begin
                       & ": scatter ") & Image (Scatter, 3) & ", in front" & In_Front'Image & ", "
                       & Image (Real (Ada.Calendar.Clock - Began), 1) & " s");
          end loop;
+         --  FLOW_TRUTH_FLOW = K (BENCH): arm K's measured rates against the truth's at every kept pixel: the surface
+         --  the pixel's centre sees (Fake_Render.Nearest), its motion as each joint turns it (nought on a surface no
+         --  joint of the arm moves), through the true lens into the picture and through the pixel's gradient into a
+         --  rate.
+         --  Pixels by what their centre sees (the arm, or something the arm does not move: its outline's change spread
+         --  there by the pictures' blur and the smoothing) and by whether a neighbour a pixel and a half away sees
+         --  another solid: per class the count, the median of the measured over the truth's rate and the root mean
+         --  square of their difference over its sigma. FLOW_TRUTH_DUMP names a file for every pixel's line.
+         if Ada.Environment_Variables.Exists ("FLOW_TRUTH_FLOW") then
+            declare
+               K     : constant Positive := Positive'Value (Ada.Environment_Variables.Value ("FLOW_TRUTH_FLOW"));
+               Group : Natural := 0;
+               Dump  : File_Type;
+               Dumping : constant Boolean := Ada.Environment_Variables.Exists ("FLOW_TRUTH_DUMP");
+               type Class_Stat is record
+                  Count : Natural := 0;
+                  Sq    : Real := 0.0;
+                  Rates : Natural := 0;
+               end record;
+               --  classes: 1 on the arm inside, 2 on the arm at an edge, 3 beside the arm
+               Stats  : array (1 .. 3) of Class_Stat;
+               package Row_Vectors is new Ada.Containers.Vectors (Positive, Real);
+               Ratios : array (1 .. 3) of Row_Vectors.Vector;
+               function Hit_Link (U, V : Real) return Natural is
+                  Solid : Natural;
+                  Along : Real;
+               begin
+                  Fake_Render.Nearest (W, W.Cameras (Eye), U, V, Solid, Along);
+                  return (if Solid = 0 then 0 else W.Solids (Solid).Link);
+               end Hit_Link;
+            begin
+               for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+                  if To_String (W.Groups (G).Name) = "arm" & Trim (Sets (K).Number) & "_joints" then
+                     Group := G;
+                  end if;
+               end loop;
+               if Dumping then
+                  Create (Dump, Out_File, Ada.Environment_Variables.Value ("FLOW_TRUTH_DUMP"));
+               end if;
+               declare
+                  Links : FW.Index_Vectors.Vector renames W.Groups (Group).Joints;
+                  N     : constant Natural := Natural (Links.Length);
+                  Rest  : Real_Array (1 .. N);
+                  Cam   : FW.Camera renames W.Cameras (Eye);
+                  --  Whether joint J's link carries link L (L is it or below it).
+                  function Carries (J : Positive; L : Natural) return Boolean is
+                     Here : Natural := L;
+                  begin
+                     while Here /= 0 loop
+                        if Here = Links (Links.First_Index + J - 1) then
+                           return True;
+                        end if;
+                        Here := W.Links (Here).Parent;
+                     end loop;
+                     return False;
+                  end Carries;
+               begin
+                  for J in 1 .. N loop
+                     Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
+                  end loop;
+                  for V in Sets (K).Views'Range loop
+                     declare
+                        View : Flow.Pose_View renames Sets (K).Views (V).all;
+                     begin
+                        for J in 1 .. N loop
+                           W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J) + View.Readings (J);
+                        end loop;
+                        FW.Forward (W);
+                        for I in 1 .. View.Pixels loop
+                           declare
+                              Solid : Natural;
+                              Along : Real;
+                              Px    : constant Real := (View.U (I) - Cam.Cx) / Cam.Fx;
+                              Py    : constant Real := (View.V (I) - Cam.Cy) / Cam.Fy;
+                              Pn    : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
+                              Link  : Natural;
+                              Edge  : Boolean := False;
+                              Class : Positive;
+                           begin
+                              Fake_Render.Nearest (W, Cam, View.U (I), View.V (I), Solid, Along);
+                              Link := (if Solid = 0 then 0 else W.Solids (Solid).Link);
+                              for D of Real_Array'[1.5, -1.5] loop
+                                 Edge := Edge or else Hit_Link (View.U (I) + D, View.V (I)) /= Link
+                                   or else Hit_Link (View.U (I), View.V (I) + D) /= Link;
+                              end loop;
+                              Class := (if Solid /= 0 and then Carries (1, Link) then (if Edge then 2 else 1) else 3);
+                              Stats (Class).Count := Stats (Class).Count + 1;
+                              for J in 1 .. View.Link (I) loop
+                                 declare
+                                    --  The true motion along the gradient at a place of the picture as joint J turns
+                                    --  (the surface there, nought where J does not move it).
+                                    function Along_Gradient (U, V : Real) return Real is
+                                       S2 : Natural;
+                                       A2 : Real;
+                                       Qx : constant Real := (U - Cam.Cx) / Cam.Fx;
+                                       Qy : constant Real := (V - Cam.Cy) / Cam.Fy;
+                                       Qn : constant Real := EF.Sqrt (Qx * Qx + Qy * Qy + 1.0);
+                                       Lk : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                                       Ax : constant Vec3 := Times (Lk.Pose.Rotation, Lk.Axis);
+                                    begin
+                                       Fake_Render.Nearest (W, Cam, U, V, S2, A2);
+                                       if S2 = 0 or else not Carries (J, W.Solids (S2).Link) then
+                                          return 0.0;
+                                       end if;
+                                       declare
+                                          P2 : constant Vec3 := Cam.Pose.Translation
+                                            + A2 * Times (Cam.Pose.Rotation, Vec3'[Qx / Qn, Qy / Qn, 1.0 / Qn]);
+                                          V2 : constant Vec3 :=
+                                            (if Lk.Kind = FW.Prismatic then Scaled (Lk.Unit, Ax)
+                                             else Cross (Scaled (Lk.Unit, Ax), Minus (P2, Lk.Pose.Translation)));
+                                          Pc : constant Vec3 :=
+                                            Transposed_Times (Cam.Pose.Rotation, Minus (P2, Cam.Pose.Translation));
+                                          Vc2 : constant Vec3 := Transposed_Times (Cam.Pose.Rotation, V2);
+                                          G   : constant Real := EF.Sqrt (View.Gu (I) ** 2 + View.Gv (I) ** 2);
+                                       begin
+                                          return (View.Gu (I) * Cam.Fx * (Vc2 (1) * Pc (3) - Pc (1) * Vc2 (3))
+                                                  + View.Gv (I) * Cam.Fy * (Vc2 (2) * Pc (3) - Pc (2) * Vc2 (3)))
+                                            / (Pc (3) ** 2 * Real'Max (G, Real'Model_Small));
+                                       end;
+                                    end Along_Gradient;
+                                    Centre : constant Real := Along_Gradient (View.U (I), View.V (I));
+                                    Spread : Real := 0.0;
+                                    --  The share of the smoothing's reach (whole pixels within its radius) whose
+                                    --  surface joint J moves.
+                                    function Moving_Share return Real is
+                                       Moved, All_Of : Natural := 0;
+                                       S3 : Natural;
+                                       A3 : Real;
+                                    begin
+                                       for Dy in -Flow.Smoothing_Radius .. Flow.Smoothing_Radius loop
+                                          for Dx in -Flow.Smoothing_Radius .. Flow.Smoothing_Radius loop
+                                             if Dx * Dx + Dy * Dy <= Flow.Smoothing_Radius ** 2 then
+                                                All_Of := All_Of + 1;
+                                                Fake_Render.Nearest
+                                                  (W, Cam, View.U (I) + Real (Dx), View.V (I) + Real (Dy), S3, A3);
+                                                if S3 /= 0 and then Carries (J, W.Solids (S3).Link) then
+                                                   Moved := Moved + 1;
+                                                end if;
+                                             end if;
+                                          end loop;
+                                       end loop;
+                                       return Real (Moved) / Real (Natural'Max (1, All_Of));
+                                    end Moving_Share;
+                                 begin
+                                    for D of Real_Array'[1.0, -1.0] loop
+                                       Spread := Real'Max
+                                         (Spread, abs (Along_Gradient (View.U (I) + D, View.V (I)) - Centre));
+                                       Spread := Real'Max
+                                         (Spread, abs (Along_Gradient (View.U (I), View.V (I) + D) - Centre));
+                                    end loop;
+                                    Spread := (if abs Centre > 0.0 then Spread / abs Centre else Real'Last);
+                                 declare
+                                    Lj   : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                                    Axis : constant Vec3 := Times (Lj.Pose.Rotation, Lj.Axis);
+                                    X    : constant Vec3 :=
+                                      (if Solid = 0 then [0.0, 0.0, 0.0]
+                                       else Cam.Pose.Translation
+                                            + Along * Times (Cam.Pose.Rotation, Vec3'[Px / Pn, Py / Pn, 1.0 / Pn]));
+                                    Vel  : constant Vec3 :=
+                                      (if Solid = 0 or else not Carries (J, Link) then [0.0, 0.0, 0.0]
+                                       elsif Lj.Kind = FW.Prismatic then Scaled (Lj.Unit, Axis)
+                                       else Cross (Scaled (Lj.Unit, Axis), Minus (X, Lj.Pose.Translation)));
+                                    Xc   : constant Vec3 := Transposed_Times (Cam.Pose.Rotation,
+                                                                              Minus (X, Cam.Pose.Translation));
+                                    Vc   : constant Vec3 := Transposed_Times (Cam.Pose.Rotation, Vel);
+                                    Du   : constant Real :=
+                                      (if Solid = 0 then 0.0
+                                       else Cam.Fx * (Vc (1) * Xc (3) - Xc (1) * Vc (3)) / Xc (3) ** 2);
+                                    Dv   : constant Real :=
+                                      (if Solid = 0 then 0.0
+                                       else Cam.Fy * (Vc (2) * Xc (3) - Xc (2) * Vc (3)) / Xc (3) ** 2);
+                                    Pred : constant Real := -(View.Gu (I) * Du + View.Gv (I) * Dv);
+                                 begin
+                                    Stats (Class).Sq :=
+                                      Stats (Class).Sq + ((View.Rate (I, J) - Pred) / View.Sigma (I, J)) ** 2;
+                                    Stats (Class).Rates := Stats (Class).Rates + 1;
+                                    if abs Pred > 5.0 * View.Sigma (I, J) then
+                                       Ratios (Class).Append (View.Rate (I, J) / Pred);
+                                    end if;
+                                    if Dumping then
+                                       Put_Line (Dump, V'Image & I'Image & " " & Image (View.U (I), 1) & " "
+                                                 & Image (View.V (I), 1) & Class'Image & J'Image & View.Link (I)'Image
+                                                 & " " & Image (View.Rate (I, J), 4) & " " & Image (Pred, 4) & " "
+                                                 & Image (View.Sigma (I, J), 4) & " "
+                                                 & Image (EF.Sqrt (View.Gu (I) ** 2 + View.Gv (I) ** 2), 3) & " "
+                                                 & Image (View.Back (I), 3) & " "
+                                                 & Image ((if Solid = 0 then 0.0 else Xc (3)), 4) & " "
+                                                 & Image (Real'Min (Spread, 1.0E6), 4) & " "
+                                                 & Image (EF.Sqrt (Du ** 2 + Dv ** 2), 5) & " "
+                                                 & Image (Moving_Share, 3));
+                                    end if;
+                                 end;
+                                 end;
+                              end loop;
+                           end;
+                        end loop;
+                     end;
+                  end loop;
+                  for J in 1 .. N loop
+                     W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
+                  end loop;
+                  FW.Forward (W);
+               end;
+               if Dumping then
+                  Close (Dump);
+               end if;
+               for C in 1 .. 3 loop
+                  declare
+                     A : Real_Array (1 .. Natural (Ratios (C).Length));
+                  begin
+                     for I in A'Range loop
+                        A (I) := Ratios (C) (I);
+                     end loop;
+                     Put_Line ("truth flow, "
+                               & (case C is when 1 => "on the arm inside", when 2 => "on the arm at an edge",
+                                   when others => "beside the arm")
+                               & ":" & Stats (C).Count'Image
+                               & " pixels," & Stats (C).Rates'Image & " rates, rms "
+                               & Image (EF.Sqrt (Stats (C).Sq / Real (Natural'Max (1, Stats (C).Rates))), 2)
+                               & " sigmas off the truth's; measured over the truth's, median "
+                               & (if A'Length > 0 then Image (Driver.Stats.Median (A), 3) else "-") & " of"
+                               & A'Length'Image);
+                  end;
+               end loop;
+            end;
+         end if;
          if Ada.Environment_Variables.Exists ("FLOW_TRUTH_ONLY") then
             return;
          end if;
@@ -359,6 +593,207 @@ begin
                                 Gaussian'Access);
             end loop;
             Put_Line ("the rates made the model's at the true eye");
+         end if;
+         --  FLOW_CHAIN = K (BENCH, class B's fit): arm K's joints and the eye's lens fitted to every pose's rates, the
+         --  eye held at its true pose (the arm's frame is the eye's for an arm that carries none): per joint its
+         --  axis's tilt across itself (two), its line's move across it (two) and its unit's logarithm, and the lens's
+         --  focal length's logarithm and principal point, by Levenberg-Marquardt on a central-difference Jacobian,
+         --  from the truth tilted by FLOW_CHAIN_TILT degrees and moved by FLOW_CHAIN_MOVE metres along the first
+         --  direction across each axis, its unit times 1 + FLOW_CHAIN_UNIT; each rate's spread its sigma and
+         --  FLOW_CHAIN_REL of the rate in quadrature. Against the truth: each axis's angle, its line's distance from
+         --  the true one's point, its unit, and the lens.
+         if Ada.Environment_Variables.Exists ("FLOW_CHAIN") then
+            declare
+               K     : constant Positive := Positive'Value (Ada.Environment_Variables.Value ("FLOW_CHAIN"));
+               function Env (Name : String; Default : Real) return Real is
+                 (if Ada.Environment_Variables.Exists (Name) then Real'Value (Ada.Environment_Variables.Value (Name))
+                  else Default);
+               Rel   : constant Real := Env ("FLOW_CHAIN_REL", 0.0);
+               Tilt  : constant Real := Env ("FLOW_CHAIN_TILT", 0.0) / 57.29577951308232;
+               Move  : constant Real := Env ("FLOW_CHAIN_MOVE", 0.0);
+               Unit  : constant Real := Env ("FLOW_CHAIN_UNIT", 0.0);
+               Views : Flow.Pose_Array renames Sets (K).Views.all;
+               True_J : Fit.Joint_Array renames Sets (K).Joints.all;
+               N     : constant Positive := True_J'Length;
+               T     : constant Positive := 3 + 5 * N;
+               type Basis is array (1 .. N) of Vec3;
+               E1, E2 : Basis;
+               X     : Real_Vector (1 .. T) := [others => 0.0];
+               function Joints_Of (Y : Real_Vector) return Fit.Joint_Array is
+                  Result : Fit.Joint_Array (1 .. N);
+               begin
+                  for J in 1 .. N loop
+                     declare
+                        A  : Fit.Joint renames True_J (True_J'First + J - 1);
+                        B  : constant Positive := 3 + 5 * (J - 1);
+                        W  : constant Vec3 :=
+                          [A.W (1) + Y (B + 1) * E1 (J) (1) + Y (B + 2) * E2 (J) (1),
+                           A.W (2) + Y (B + 1) * E1 (J) (2) + Y (B + 2) * E2 (J) (2),
+                           A.W (3) + Y (B + 1) * E1 (J) (3) + Y (B + 2) * E2 (J) (3)];
+                        Nw : constant Real := abs W;
+                     begin
+                        Result (J) := (W => [W (1) / Nw, W (2) / Nw, W (3) / Nw],
+                                       P => [A.P (1) + Y (B + 3) * E1 (J) (1) + Y (B + 4) * E2 (J) (1),
+                                             A.P (2) + Y (B + 3) * E1 (J) (2) + Y (B + 4) * E2 (J) (2),
+                                             A.P (3) + Y (B + 3) * E1 (J) (3) + Y (B + 4) * E2 (J) (3)],
+                                       C => A.C * Ada.Numerics.Long_Elementary_Functions.Exp (Y (B + 5)),
+                                       Slide => A.Slide);
+                     end;
+                  end loop;
+                  return Result;
+               end Joints_Of;
+               function Lens_Of (Y : Real_Vector) return Fit.Lens is
+                 ((Fx => True_Lens.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (Y (1)),
+                   Fy => True_Lens.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (Y (1)),
+                   Cx => True_Lens.Cx + Y (2), Cy => True_Lens.Cy + Y (3), K1 => 0.0, K2 => 0.0));
+               function Res (Y : Real_Vector) return Real_Array is
+                 (Flow.Residuals_At (Views, Joints_Of (Y), Width, Height, Truth, Lens_Of (Y), Rel));
+               function Cost (R : Real_Array) return Real is
+                  Sum : Real := 0.0;
+               begin
+                  for V of R loop
+                     Sum := Sum + V * V;
+                  end loop;
+                  return Sum;
+               end Cost;
+               procedure Compare (Label : String; Y : Real_Vector) is
+                  J1 : constant Fit.Joint_Array := Joints_Of (Y);
+                  L1 : constant Fit.Lens := Lens_Of (Y);
+               begin
+                  for J in 1 .. N loop
+                     declare
+                        A  : Fit.Joint renames True_J (True_J'First + J - 1);
+                        Cs : constant Real := Dot (A.W, J1 (J).W);
+                        D  : constant Vec3 := Minus (A.P, J1 (J).P);
+                        --  the true line's point's distance from the fitted line
+                        Off : constant Real := abs Minus (D, Scaled (Dot (D, J1 (J).W), J1 (J).W));
+                     begin
+                        Put_Line ("chain " & Label & ": joint" & J'Image & " axis off "
+                                  & Image (57.29577951308232 * Ada.Numerics.Long_Elementary_Functions.Arccos
+                                             (Real'Max (-1.0, Real'Min (1.0, Cs))), 2)
+                                  & " deg, line off " & Image (1000.0 * Off, 1) & " mm, unit "
+                                  & Image (J1 (J).C / A.C, 4) & " of the truth's");
+                     end;
+                  end loop;
+                  Put_Line ("chain " & Label & ": focal " & Image (L1.Fx / True_Lens.Fx, 4)
+                            & " of the truth's, centre off "
+                            & Image (L1.Cx - True_Lens.Cx, 2) & " " & Image (L1.Cy - True_Lens.Cy, 2) & " px");
+               end Compare;
+               Began : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+            begin
+               for J in 1 .. N loop
+                  Fit.Across (True_J (True_J'First + J - 1).W, E1 (J), E2 (J));
+                  X (3 + 5 * (J - 1) + 1) := Tilt;
+                  X (3 + 5 * (J - 1) + 3) := Move;
+                  X (3 + 5 * (J - 1) + 5) := Ada.Numerics.Long_Elementary_Functions.Log (1.0 + Unit);
+               end loop;
+               declare
+                  R0 : constant Real_Array := Res (X);
+                  Zero : constant Real_Vector (1 .. T) := [others => 0.0];
+               begin
+                  Put_Line ("chain: the truth's cost " & Image (Cost (Res (Zero)), 1) & " over" & R0'Length'Image
+                            & " rates; the start's " & Image (Cost (R0), 1));
+               end;
+               Compare ("start", X);
+               declare
+                  Lambda : Real := 1.0E-3;
+                  Steps  : constant Real_Vector (1 .. T) :=
+                    [for I in 1 .. T =>
+                       (if I = 1 then 1.0E-5 elsif I <= 3 then 1.0E-3
+                        elsif (I - 4) mod 5 in 0 .. 1 then 1.0E-5
+                        elsif (I - 4) mod 5 in 2 .. 3 then 1.0E-6 else 1.0E-5)];
+               begin
+                  for It in 1 .. 40 loop
+                     declare
+                        R0  : constant Real_Array := Res (X);
+                        C0  : constant Real := Cost (R0);
+                        Jac : Real_Matrix_Access := new Real_Matrix (R0'Range, 1 .. T);
+                        Ata : Real_Matrix (1 .. T, 1 .. T) := [others => [others => 0.0]];
+                        Atb : Real_Vector (1 .. T) := [others => 0.0];
+                        Done : Boolean := False;
+                     begin
+                        for C in 1 .. T loop
+                           declare
+                              Xp : Real_Vector := X;
+                              Xm : Real_Vector := X;
+                           begin
+                              Xp (C) := X (C) + Steps (C);
+                              Xm (C) := X (C) - Steps (C);
+                              declare
+                                 Rp : constant Real_Array := Res (Xp);
+                                 Rm : constant Real_Array := Res (Xm);
+                              begin
+                                 for I in R0'Range loop
+                                    Jac (I, C) := (Rp (I) - Rm (I)) / (2.0 * Steps (C));
+                                 end loop;
+                              end;
+                           end;
+                        end loop;
+                        for I in R0'Range loop
+                           for A in 1 .. T loop
+                              if Jac (I, A) /= 0.0 then
+                                 Atb (A) := Atb (A) + Jac (I, A) * R0 (I);
+                                 for B in A .. T loop
+                                    Ata (A, B) := Ata (A, B) + Jac (I, A) * Jac (I, B);
+                                 end loop;
+                              end if;
+                           end loop;
+                        end loop;
+                        for A in 1 .. T loop
+                           for B in A + 1 .. T loop
+                              Ata (B, A) := Ata (A, B);
+                           end loop;
+                        end loop;
+                        Free (Jac);
+                        loop
+                           declare
+                              M     : Real_Matrix := Ata;
+                              Lower : Real_Matrix (1 .. T, 1 .. T);
+                              Ok    : Boolean;
+                           begin
+                              for A in 1 .. T loop
+                                 M (A, A) := Ata (A, A) * (1.0 + Lambda) + 1.0E-12;
+                              end loop;
+                              Driver.Numerics.Dense.Cholesky (M, Lower, Ok);
+                              if Ok then
+                                 declare
+                                    D  : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lower, Atb);
+                                    X1 : Real_Vector := X;
+                                 begin
+                                    for A in 1 .. T loop
+                                       X1 (A) := X (A) - D (A);
+                                    end loop;
+                                    declare
+                                       C1 : constant Real := Cost (Res (X1));
+                                    begin
+                                       if C1 < C0 then
+                                          X := X1;
+                                          Lambda := Real'Max (1.0E-7, Lambda / 3.0);
+                                          Put_Line ("chain: step" & It'Image & ", cost " & Image (C0, 1) & " -> "
+                                                    & Image (C1, 1) & ", lambda " & Lambda'Image & ", "
+                                                    & Image (Real (Ada.Calendar.Clock - Began), 1) & " s");
+                                          Done := C0 - C1 < 1.0E-6 * C0;
+                                          exit;
+                                       end if;
+                                    end;
+                                 end;
+                              end if;
+                              Lambda := Lambda * 4.0;
+                              if Lambda > 1.0E8 then
+                                 Done := True;
+                                 exit;
+                              end if;
+                           end;
+                        end loop;
+                        exit when Done;
+                     end;
+                  end loop;
+               end;
+               Compare ("fitted", X);
+            end;
+            if Ada.Environment_Variables.Exists ("FLOW_CHAIN_ONLY") then
+               return;
+            end if;
          end if;
          --  FLOW_SCALE = "K,J,F": every rate of arm K's joint J times F (a joint's rates sharing one error).
          if Ada.Environment_Variables.Exists ("FLOW_SCALE") then
