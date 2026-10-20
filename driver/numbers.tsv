@@ -2164,6 +2164,7 @@ driver-robot-kinematics-fit.adb	Enter (5);	5	structure	the stages' numbers
 driver-robot-kinematics-fit.adb	Entries : constant := 9;	9	structure	the entries of a 3 by 3 matrix
 driver-robot-kinematics-fit.adb	Equal (P) := (if Ar (P, P) > 0.0 then 1.0 / Sqrt (Ar (P, P)) else 0.0);	1.0	math	a term in units of the standard error it would have were the others known: the inverse root of its diagonal entry
 driver-robot-kinematics-fit.adb	Every : Real := 1.0;	1.0	math	the whole, before it is halved
+driver-robot-kinematics-fit.adb	Every_Piece (1, Pieces);	1	structure	the pieces from the first
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
@@ -2420,6 +2421,7 @@ driver-robot-kinematics-fit.adb	Vy := 1.0;	1.0	math	a coordinate axis, a cosine,
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
 driver-robot-kinematics-fit.adb	W : constant Real := 1.0 / Inverse_Sigma (Points (I)) ** 2;	1.0	statistics	weights are inverse variances
+driver-robot-kinematics-fit.adb	Walked : constant Positive := Directions / 2;	2	math	half the sphere: a direction and its opposite are one axis, the turn's sign measured
 driver-robot-kinematics-fit.adb	Walks (1, Sign_Way'Pos (Sign_Way'Last) + 1);	1	structure	the two ways from the first (an enumeration counts its positions from nought)
 driver-robot-kinematics-fit.adb	Weight (I) := 1.0;	1.0	math	a sighting that fits begins at full weight
 driver-robot-kinematics-fit.adb	Weights : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
@@ -2486,7 +2488,6 @@ driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	math	three coordinates
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	structure	the three components of a vector
 driver-robot-kinematics-fit.adb	for D in 1 .. 3 loop	3	structure	the three components of a vector
-driver-robot-kinematics-fit.adb	for D of Sphere (1 .. Directions / 2) loop	2	math	half the sphere: a direction and its opposite are one axis, the turn's sign measured
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	for Frame in 2 .. Frames loop	2	structure	the keyframes and joints after the first
 driver-robot-kinematics-fit.adb	for Half in 0 .. 2 loop	2	structure	the keyframes by halves: every one (0), the odd (1), the even (2)

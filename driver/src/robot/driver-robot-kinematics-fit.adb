@@ -4259,16 +4259,46 @@ package body Driver.Robot.Kinematics.Fit is
                      begin
                         --  The axis: the direction about which the widest keyframes are each most nearly a turn and a
                         --  shift across it, their turns free; then its scale, and its side at that scale.
-                        for D of Sphere (1 .. Directions / 2) loop
-                           declare
-                              Sc, Sd : Real;
+                        --  The directions in as many pieces as the workers take at once, each piece walked in order to
+                        --  its own first least, then the first piece's of the least of those: the walk's own result to
+                        --  the bit, whatever the pieces (a direction left without its median has fewer than half its
+                        --  residuals below the best before it, and is never the first of the least). One joint a task,
+                        --  each walking every direction, kept the workers idle two thirds of the search (table seed 1
+                        --  of the step 2 bench, 10-21: 7 of its first round's 10 s, six joints for ten workers).
+                        declare
+                           Pieces  : constant Positive := Driver.Workers.Size;
+                           Walked  : constant Positive := Directions / 2;
+                           Of_Piece : array (1 .. Pieces) of Best_Record;
+                           procedure Piece (P : Positive) is
+                              Wp   : Real_Access := new Real_Array (1 .. K);
+                              Rp   : Real_Access := new Real_Array (1 .. K);
+                              Fp   : Real_Access := new Real_Array (1 .. K);
+                              Mine : Best_Record;
                            begin
-                              Planar_About (J, F, D, Wt.all, Rs.all, Fs.all, Result.Score, Sc, Sd);
-                              if Sc /= 0.0 and then Sd < Result.Score then
-                                 Result := (Score => Sd, W => D, Phi => 0.0, Scale => Sc);
+                              for I in (P - 1) * Walked / Pieces + 1 .. P * Walked / Pieces loop
+                                 declare
+                                    Sc, Sd : Real;
+                                 begin
+                                    Planar_About (J, F, Sphere (I), Wp.all, Rp.all, Fp.all, Mine.Score, Sc, Sd);
+                                    if Sc /= 0.0 and then Sd < Mine.Score then
+                                       Mine := (Score => Sd, W => Sphere (I), Phi => 0.0, Scale => Sc);
+                                    end if;
+                                 end;
+                              end loop;
+                              Of_Piece (P) := Mine;
+                              Free (Wp);
+                              Free (Rp);
+                              Free (Fp);
+                           end Piece;
+                           procedure Every_Piece is new Driver.Parallel_For (Piece);
+                        begin
+                           Every_Piece (1, Pieces);
+                           for P in 1 .. Pieces loop
+                              if Of_Piece (P).Scale /= 0.0 and then Of_Piece (P).Score < Result.Score then
+                                 Result := Of_Piece (P);
                               end if;
-                           end;
-                        end loop;
+                           end loop;
+                        end;
                         if Result.Scale /= 0.0 then
                            declare
                               Ph, Md : Real;
