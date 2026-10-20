@@ -458,6 +458,11 @@ package body Driver.Robot.Kinematics.Fit is
       --  at once (Driver.Parallel_For), each with its own residual array.
       To_The_End : Boolean := False;
       --  Go on while a step moves the estimate by more than the unchanged fraction of its standard error.
+      with procedure Evaluate_Column (X : Real_Array; Column : Positive; R : in out Real_Array) is null;
+      Column_Aware : Boolean := False;
+      --  The Jacobian's column of a parameter from Evaluate_Column, given the residuals at the estimate it moves the
+      --  parameter from: it takes again only the residuals that parameter moves, the rest as given (Evaluate's, to
+      --  the bit).
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -490,7 +495,12 @@ package body Driver.Robot.Kinematics.Fit is
                Rk : Real_Access := new Real_Array (1 .. Residuals);
             begin
                Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
-               Evaluate (Xp, Rk.all);
+               if Column_Aware then
+                  Rk.all := R0.all;
+                  Evaluate_Column (Xp, K, Rk.all);
+               else
+                  Evaluate (Xp, Rk.all);
+               end if;
                for I in 1 .. Residuals loop
                   J (I, K) := (Rk (I) - R0 (I)) / H;
                end loop;
@@ -5299,39 +5309,58 @@ package body Driver.Robot.Kinematics.Fit is
                   return Out_J;
                end Joints_Of;
 
-               --  Every sighting's residual across and down with the joints of V in order C; a point the order puts
-               --  behind the eye, as far off as the picture is wide.
+               --  Keyframe F's sightings' residuals across and down with joints Jx in order C, into R; a point the
+               --  order puts behind the eye, as far off as the picture is wide.
+               procedure Frame_Residuals (Jx : Joint_Array; F : Positive; R : in out Real_Array) is
+                  Back : constant Rigid := Inverse (Eye_At (Jx, C, Changes_Of (F)));
+               begin
+                  for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                     declare
+                        I     : constant Positive := By_Frame (Q);
+                        U, Vv : Real;
+                        Ahead : Boolean;
+                     begin
+                        if Has_Track (I) then
+                           Project (X.L, Back * Track_Points (I), U, Vv, Ahead);
+                           R (R'First + 2 * I - 2) :=
+                             (if Ahead then U - Sight (Sight'First + I - 1).U else Real (Width));
+                           R (R'First + 2 * I - 1) :=
+                             (if Ahead then Vv - Sight (Sight'First + I - 1).V else Real (Width));
+                        end if;
+                     end;
+                  end loop;
+               end Frame_Residuals;
+
+               --  Every sighting's residual with the joints of V.
                procedure Evaluate (V : Real_Array; R : out Real_Array) is
                   Jx : constant Joint_Array := Joints_Of (V);
                begin
                   R := [others => 0.0];
                   for F in 1 .. Frames loop
                      if Count_Of (F) > 0 then
-                        declare
-                           Back : constant Rigid := Inverse (Eye_At (Jx, C, Changes_Of (F)));
-                        begin
-                           for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
-                              declare
-                                 I     : constant Positive := By_Frame (Q);
-                                 U, Vv : Real;
-                                 Ahead : Boolean;
-                              begin
-                                 if Has_Track (I) then
-                                    Project (X.L, Back * Track_Points (I), U, Vv, Ahead);
-                                    R (R'First + 2 * I - 2) :=
-                                      (if Ahead then U - Sight (Sight'First + I - 1).U else Real (Width));
-                                    R (R'First + 2 * I - 1) :=
-                                      (if Ahead then Vv - Sight (Sight'First + I - 1).V else Real (Width));
-                                 end if;
-                              end;
-                           end loop;
-                        end;
+                        Frame_Residuals (Jx, F, R);
                      end if;
                   end loop;
                end Evaluate;
 
+               --  A column moves one joint's terms alone, and a keyframe that does not turn that joint has the same
+               --  eye whatever its terms (its step is nought): only the keyframes that turn it are taken again. The
+               --  columns of every keyframe were most of the order search's time (the bench's table seed 1, 10-21: the
+               --  orders' own fits 3.9 to 5.1 s of the 6 to 7 s a round spent in stage 4).
+               procedure Evaluate_Column (V : Real_Array; Column : Positive; R : in out Real_Array) is
+                  Jx    : constant Joint_Array := Joints_Of (V);
+                  Moved : constant Positive := (Column - 1) / Per + 1;
+               begin
+                  for F in 1 .. Frames loop
+                     if Count_Of (F) > 0 and then Change (F, Moved) /= 0.0 then
+                        Frame_Residuals (Jx, F, R);
+                     end if;
+                  end loop;
+               end Evaluate_Column;
+
                procedure Solve is new Robust_Fit (Count, 2 * S, Driver.Conventions.Initial_Damping, Evaluate,
-                                                  At_Once => True, To_The_End => True);
+                                                  At_Once => True, To_The_End => True,
+                                                  Evaluate_Column => Evaluate_Column, Column_Aware => True);
                V0 : Real_Array (1 .. Count) := [others => 0.0];
                R0 : Real_Access := new Real_Array (1 .. 2 * S);
             begin
