@@ -51,6 +51,9 @@ package Driver.Alignment.Keyframes is
 
    function Has_Reference (C : Chain) return Boolean;
 
+   procedure Release (C : out Chain);
+   --  Lets the chain go: the pictures, the points and the keyframes aligned are no more.
+
    function Point_Count (C : Chain) return Natural;
    --  How many points are asked of every keyframe.
 

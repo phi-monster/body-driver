@@ -1207,14 +1207,34 @@ package body Driver.Robot.Boot is
                         declare
                            Per_Px : Real_Array (1 .. Size) := [others => 0.0];   --  px a unit in this eye's view
                            Half_Px : Real := 0.0;
+                           Diagonal : Real := 0.0;   --  the picture's, in pixels
+                           Moved_Now : Boolean := False;   --  the eye's picture moved over the step just taken
+                           Blind     : Natural := 0;       --  the steps in a row it did not
+                           --  The keyframes of the steps so far are aligned now, so that the points the arm shows next are chosen
+                           --  where it now stands (Kinematics.Seed_Views).
+                           procedure Align_Views is
+                           begin
+                              Driver.Robot.Kinematics.Align_New (M);
+                           end Align_Views;
+                           --  Whether the eye's picture moved at any beat of the step just taken.
+                           procedure Read_Moved is
+                           begin
+                              Moved_Now := False;
+                              for B in Report.Started .. M.Beats - 1 loop
+                                 if Lockin.Moved (M, Eye_Id (E), B) then
+                                    Moved_Now := True;
+                                 end if;
+                              end loop;
+                           end Read_Moved;
                            procedure Read_Shift is
                            begin
                               for C in 1 .. Size loop
-                                 Per_Px (C) := (if Lockin.Seen (M, Eye_Id (E), G, C)
-                                                then abs Lockin.Shift (M, Eye_Id (E), G, C) else 0.0);
+                                 Per_Px (C) := Driver.Robot.Kinematics.View_Shift (M, A, Eye_Id (E), C);
                               end loop;
                               Half_Px := Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (E)).Grid.Width,
                                                                               M.Eyes (Eye_Id (E)).Grid.Height));
+                              Diagonal := Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                (Real (M.Eyes (Eye_Id (E)).Grid.Width) ** 2 + Real (M.Eyes (Eye_Id (E)).Grid.Height) ** 2);
                            end Read_Shift;
                         begin
                            Driver.Beats.Within_A_Beat (Read_Shift'Access);
@@ -1223,16 +1243,22 @@ package body Driver.Robot.Boot is
                                  C    : constant Positive := Swept (K);
                                  Step : constant Real :=
                                    (if Per_Px (C) > 0.0 then Real'Max (Least (C), Half_Px / Per_Px (C)) else 0.0);
+                                 --  As many steps either way as it takes the arm to cross the picture's diagonal in
+                                 --  the eye's view at most: the arm goes on while the picture moves over a step and the
+                                 --  joint goes (below), not only as far as the sweep followed it. The sweep's range left the
+                                 --  arm in the eye's view for few points (the bench's table eyes placed 4 of 10 with it, 6
+                                 --  of 10 carried across the view with new points taken along the way).
                                  Count : constant Natural :=
-                                   (if Step > 0.0 then Natural (Real'Ceiling (Reached (C) / Step)) else 0);
+                                   (if Step > 0.0 then Natural (Real'Ceiling (Diagonal / (Step * Per_Px (C)))) else 0);
                               begin
                                  if Count > 0 then
                                     Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carries its hand through eye"
                                                      & E'Image & "'s view: c" & Driver.Log.Image (C) & " in"
-                                                     & Count'Image & " steps of " & Driver.Log.Image (Step, 3)
+                                                     & " steps at most of " & Driver.Log.Image (Step, 3)
                                                      & " units either way, " & Driver.Log.Image (Step * Per_Px (C), 2)
                                                      & " px each in its picture");
                                     for Sign of Real_Array'[1.0, -1.0] loop
+                                       Blind := 0;
                                        for I in 1 .. Count loop
                                           declare
                                              Target : Real_Array (1 .. Size) := Start_At;
@@ -1246,6 +1272,10 @@ package body Driver.Robot.Boot is
                                              Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                                              Steps_Taken := Steps_Taken + 1;
                                              exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                                             Driver.Beats.Within_A_Beat (Align_Views'Access);
+                                             Driver.Beats.Within_A_Beat (Read_Moved'Access);
+                                             Blind := (if Moved_Now then 0 else Blind + 1);
+                                             exit when Blind >= 2;
                                           end;
                                        end loop;
                                        Asked_Now := [others => False];

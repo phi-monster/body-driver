@@ -681,6 +681,11 @@ package body Driver.Alignment.Keyframes is
       end loop;
    end Begin_Reference;
 
+   procedure Release (C : out Chain) is
+   begin
+      C := (others => <>);
+   end Release;
+
    function Has_Reference (C : Chain) return Boolean is (Levels (C.Pictures) > 0);
 
    function Point_Count (C : Chain) return Natural is (Natural (C.Points.Length));

@@ -1051,9 +1051,9 @@ driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log na
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Step * Per_Px (C), 2)	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& "" & Driver.Log.Image (Step, 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Unswept.Length = 1 then ""	1	structure	one arm left to sweep: alone, not a lane
-driver-robot-boot.adb	& Count'Image & "" & Driver.Log.Image (Step, 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (100.0 * Plan.Narrowing, 2) & ""	100.0	format	a share printed as a percentage
 driver-robot-boot.adb	& Driver.Log.Image (100.0 * Plan.Narrowing, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Before, 5) & ""	5	format	digits printed in a log line or a message
@@ -1146,6 +1146,7 @@ driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Followed_Most (I) = 0.0 and then not Descending (I) and then Lost = 1	1	structure	the push's first level of the pass
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
+driver-robot-boot.adb	exit when Blind >= 2;	2	structure	a repeat is the least that tells an absence from a miss: the eye's picture not moving over two steps in a row is the arm gone from its view, over one it may be a step the test missed (as Agreeing asks two starts, and a way into the hand two pictures)
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
 driver-robot-boot.adb	exit when Count > 1 and then not Unplaced;	1	structure	after the first pose
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
@@ -3079,7 +3080,7 @@ driver-robot-kinematics.adb	Land ((1.0 + Step) * X, Zero3, Zero3, Up, F1);	1.0	m
 driver-robot-kinematics.adb	Land ((1.0 / Slope) * H, Zero3, Zero3, Where, Ok);	1.0	math	the line of sight meets a plane at depth one over its slope along the line
 driver-robot-kinematics.adb	Moved : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	a point's or a frame's three dimensions
 driver-robot-kinematics.adb	Moved : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	a point's or a frame's three dimensions
-driver-robot-kinematics.adb	Moves : Real_Array (1 .. Natural'Max (1, Queries));	1	structure	an array of at least one element
+driver-robot-kinematics.adb	Moves : Real_Array (1 .. Natural'Max (1, Points));	1	structure	an array of at least one element, so it is never empty
 driver-robot-kinematics.adb	N : constant Natural := Rs'Length (1) / 2;	2	structure	two rows a point
 driver-robot-kinematics.adb	Outputs : constant := 7;	7	structure	the placement's seven terms: its turn (three), its centre (three) and the log of its scale
 driver-robot-kinematics.adb	Period : constant Real := 2.0 * Ada.Numerics.Pi / abs F.C;	2.0	math	a turn of a joint's axis is two pi radians, which the fit's scale turns into a period of readings
@@ -3092,6 +3093,7 @@ driver-robot-kinematics.adb	Place_At : constant := Fit.Lens_Terms + 3;	3	structu
 driver-robot-kinematics.adb	Place_At : constant := Fit.Lens_Terms + 3;	3	structure	the place follows the turn's three terms
 driver-robot-kinematics.adb	Plane_1 : constant := 12;	12	structure	the inputs' layout: the two eyes' turns, centres and tables' planes, three numbers each
 driver-robot-kinematics.adb	Plane_2 : constant := 15;	15	structure	the inputs' layout: the two eyes' turns, centres and tables' planes, three numbers each
+driver-robot-kinematics.adb	Previous.Depth.Append (0.0);	0.0	structure	a segment opened since the fit has no depth yet: zero is a track no sighting of which was fitted
 driver-robot-kinematics.adb	R (1 .. 3) := T.Translation - Goal.Translation;	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);	1.0	math	the cross product over the two lengths: the sine of the angle between unit directions
 driver-robot-kinematics.adb	R (4 .. 6) := (1.0 / (Real'(abs Is_At) * Real'(abs Want))) * Driver.Numerics.Cross (Is_At, Want);	4	structure	three rows of position, three of turn
@@ -3111,6 +3113,7 @@ driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the f
 driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured yet
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	1.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	2.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
+driver-robot-kinematics.adb	Real (2 * Driver.Alignment.Half_Patch (M.Eyes (H).Grid.Width, M.Eyes (H).Grid.Height));	2	structure	a patch is twice its half: the distance within which a point covers a cell
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
@@ -3119,7 +3122,7 @@ driver-robot-kinematics.adb	Res_Sq : Real_Access := new Real_Array'(1 .. Natural
 driver-robot-kinematics.adb	Res_U : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Res_V : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Row_Frame : array (1 .. Rows) of Positive := [others => 1];	1	format	digits printed in a log line or a message
-driver-robot-kinematics.adb	Rows (I) := new Real_Matrix (1 .. 2 * Seen, 1 .. Eye_Terms);	2	structure	two rows a point
+driver-robot-kinematics.adb	Rows (I) := new Real_Matrix (1 .. Was + 2 * Seen, 1 .. Eye_Terms);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	3	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rows : constant Positive := (if Position_Only then 3 else 6);	6	structure	three rows of position, three of turn
 driver-robot-kinematics.adb	Rss_After := Driver.Memory.Resident_Kilobytes / 1024;	1024	format	kilobytes in a megabyte, for the log
@@ -3130,7 +3133,7 @@ driver-robot-kinematics.adb	Sd : Real_Array (1 .. Natural'Max (1, N));	1	structu
 driver-robot-kinematics.adb	Set.Sigma.Append (0.0);	0.0	format	no standard deviation stated: a keyframe the view has no picture of
 driver-robot-kinematics.adb	Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);	1	math	a central difference: one standard deviation either way
 driver-robot-kinematics.adb	Sigmas (I) := (if P < Natural (S.Sigma.Length) and then S.Sigma (P) > 0.0 then S.Sigma (P) else 1.0);	1.0	statistics	a pixel: the standard deviation an answer stating none weighs by, under the regression's own residual scale
-driver-robot-kinematics.adb	Spreads : Real_Array (1 .. Natural'Max (1, Queries));	1	structure	an array of at least one element
+driver-robot-kinematics.adb	Spreads : Real_Array (1 .. Natural'Max (1, Points));	1	structure	an array of at least one element, so it is never empty
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	1.0	numerics	the step of a central difference is the cube root of the machine epsilon: the one that balances its truncation against its rounding
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	3.0	numerics	the cube root
 driver-robot-kinematics.adb	Su := Su + (Real (X) + 0.5);	0.5	math	a pixel's centre
@@ -3167,8 +3170,7 @@ driver-robot-kinematics.adb	View_Of : Index_List (1 .. Natural'Max (1, Natural (
 driver-robot-kinematics.adb	Vv := Vv + Rs (2 * P, X) * Cov (X, Y) * Rs (2 * P, Y);	2	structure	two rows a point, across and down
 driver-robot-kinematics.adb	Vv := Vv + Rs (2 * P, X) * Cov (X, Y) * Rs (2 * P, Y);	2	structure	two rows a point, across and down
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the first arm is the world
-driver-robot-kinematics.adb	W.Track (I) := (U0 => V.Query_U (I - 1), V0 => V.Query_V (I - 1), Frame => 1);	1	structure	the arm's reference is the first keyframe: a view's points are chosen there
-driver-robot-kinematics.adb	Windows : Real_Array (1 .. Natural'Max (1, Queries));	1	structure	an array of at least one element
+driver-robot-kinematics.adb	Windows : Real_Array (1 .. Natural'Max (1, Points));	1	structure	an array of at least one element, so it is never empty
 driver-robot-kinematics.adb	World : constant Natural := Index_Of (M, 1);	1	structure	the first arm's reference frame is the world
 driver-robot-kinematics.adb	World : constant Natural := Index_Of (M, 1);	1	structure	the first arm, whose frame is the world
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	2	structure	a track's three coordinates in a flat list
@@ -3191,7 +3193,6 @@ driver-robot-kinematics.adb	else "" & Driver.Log.Image (Stated_By (Given.all), 1
 driver-robot-kinematics.adb	else Then_Radius - Now_Radius >= 1.0);	1.0	structure	a pixel, the grid the aligner's candidate places lie on: a window narrower by less than one holds the same candidates
 driver-robot-kinematics.adb	else [0.0, 0.0, 1.0 / X (3)]);	1.0	math	the plane across the line of sight at depth z has slope one over z along it
 driver-robot-kinematics.adb	elsif C'Length = 1 then Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left)	1	format	the last joint of the order, without a comma after it
-driver-robot-kinematics.adb	elsif Natural (R.Frames.Length) = 1 then	1	structure	a view's first picture is its reference
 driver-robot-kinematics.adb	exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	a turn per reading unit is three numbers
 driver-robot-kinematics.adb	for A in 1 .. 3 loop	3	structure	the axes of space: three
@@ -3232,6 +3233,7 @@ driver-robot-kinematics.adb	for Row in 1 .. 2 * Seen loop	2	structure	two rows a
 driver-robot-kinematics.adb	for Row in 1 .. 2 * Seen loop	2	structure	two rows a point
 driver-robot-kinematics.adb	for S in 1 .. 3 loop	3	structure	the three coordinates of a place
 driver-robot-kinematics.adb	function Sigma (T : Positive; Scale : Real := 1.0) return String is	1.0	math	a term in its own unit unless scaled
+driver-robot-kinematics.adb	function Taken (V : Hand_View; H : Eye_Id) return Boolean is (V.Eye = H and then V.Aligned >= 2);	2	structure	a view takes part in the fit from its second picture: one picture alone has no sighting, the sightings are the displacements from the reference
 driver-robot-kinematics.adb	if 2 * Moving > Floored then	2	math	most: more than half
 driver-robot-kinematics.adb	if At_Reference and then Natural (R.Frames.Length) > 1 then	1	structure	the twin is a frame after the first: there must be more than one
 driver-robot-kinematics.adb	if Current (M, R) and then R.Result.Fitted and then R.Aligned >= 2 and then Queries > 0 then	2	structure	a keyframe after the reference is the second or later
@@ -3255,8 +3257,12 @@ driver-robot-kinematics.adb	if Natural (R.Result.Slide_Turns.Length) = 3 * N the
 driver-robot-kinematics.adb	if Own (C) = 0 and then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
-driver-robot-kinematics.adb	if R.Views (Position).Eye = H and then R.Views (Position).Aligned >= 2 then	2	structure	a reference and one keyframe at least
+driver-robot-kinematics.adb	if Queries > 0 and then V.Aligned >= Natural'Max (2, From) and then not V.Spent then	2	structure	a segment's slopes are told from its second picture: one picture alone has no displacement from the reference
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
+driver-robot-kinematics.adb	if Seen = 0 and then Natural (R.Frames.Length) = 1 then	1	structure	the arm's reference is the first keyframe
+driver-robot-kinematics.adb	if V.Eye = H and then not V.Spent and then V.Aligned >= 1 and then Driver.Images.Width (V.Latest) > 0	1	structure	a segment is aligned from its reference on: at least its first picture
+driver-robot-kinematics.adb	if V.First = 1 then	1	structure	the first segment of a view opens at the arm's reference, its first keyframe
+driver-robot-kinematics.adb	if V.Lost >= 2 and then not V.Spent then	2	structure	a repeat is the least that tells an absence from a miss: a segment that found none of its points in two keyframes in a row follows nothing, one keyframe alone may be a bad picture (as the boot's Blind and Agreeing ask two)
 driver-robot-kinematics.adb	if V.Result.Placed and then V.Aligned >= 2 and then Queries > 0 then	2	structure	a reference and one keyframe at least
 driver-robot-kinematics.adb	if W.Has_Before and then not W.Taken and then Driver.Pixels.Frames (W.Gathering) >= 2	2	structure	a view is judged by two frames at least (Views.Gathered)
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
@@ -3604,6 +3610,7 @@ driver-robot.ads	Channel : Positive := 1;	1	structure	a stop record is a channel
 driver-robot.ads	Closer : Group_Id := 1;	1	structure	a record's default
 driver-robot.ads	Eye : Eye_Id := 1;	1	structure	a record's default
 driver-robot.ads	Eye : Eye_Id := 1;	1	structure	a record's default
+driver-robot.ads	First : Positive := 1;	1	structure	indexes start at one
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor
 driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is

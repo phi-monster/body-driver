@@ -5985,6 +5985,8 @@ package body Driver.Robot.Tests is
       Hand_Points   : Natural := 60;      --  the points on each arm's links the head tracks
       Seed          : Long_Long_Integer := 1;   --  the generator of the matches' errors starts here
       Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
+      Segments      : Positive := 1;      --  the head's view of each arm in this many segments, each opened at a keyframe
+                                          --  of its own with its own points (Hand_View.First)
    end record;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
@@ -6039,8 +6041,6 @@ package body Driver.Robot.Tests is
          Count  : constant Natural := Scene.Hand_Points;
          Rest   : array (1 .. Count) of Vec3;
          Link   : array (1 .. Count) of Positive;
-         View   : Hand_View;
-         Kept   : Natural := 0;
          Head_T : constant Rigid := Inverse (Scene.Head_Pose);
 
          --  Where the head sees point K at keyframe F of the arm.
@@ -6056,58 +6056,71 @@ package body Driver.Robot.Tests is
             Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
          end Seen;
 
-         Kept_At : array (1 .. Count) of Natural := [others => 0];
       begin
          --  The points: near the arm's eye, at scales of its size.
          for K in 1 .. Count loop
             Rest (K) := Sizes (A) * [0.1 + 0.15 * Gaussian (Rng), 0.2 + 0.15 * Gaussian (Rng), 0.25 + 0.15 * Gaussian (Rng)];
             Link (K) := 1 + K mod N;
          end loop;
-         View.Eye := 3;
-         for K in 1 .. Count loop
+         --  The head's view of the arm in Scene.Segments segments: segment S opens at the keyframe S - 1 shares of the
+         --  sweep on, with the points (every Segments-th of them) the head sees there, and follows them to the end.
+         for Segment in 1 .. Scene.Segments loop
             declare
-               U, V  : Real;
-               Shown : Boolean;
+               View    : Hand_View;
+               Kept    : Natural := 0;
+               Kept_At : array (1 .. Count) of Natural := [others => 0];
+               First   : constant Positive := 1 + (Segment - 1) * ((Frames - 1) / Scene.Segments);
             begin
-               Seen (K, 1, U, V, Shown);
-               if Shown then
-                  Kept := Kept + 1;
-                  Kept_At (Kept) := K;
-                  View.Query_U.Append (U);
-                  View.Query_V.Append (V);
-               end if;
-            end;
-         end loop;
-         for F in 1 .. Frames loop
-            View.Images.Append (Driver.Images.No_Image);
-         end loop;
-         for F in 2 .. Frames loop
-            declare
-               Set : Match_Set;
-            begin
-               Set.Frame := F;
-               Set.Followed := True;
-               Set.Stated := Scene.Head_Noise;
-               for I in 1 .. Kept loop
+               View.Eye := 3;
+               View.First := First;
+               for K in 1 .. Count loop
+                  if K mod Scene.Segments = Segment mod Scene.Segments then
+                     declare
+                        U, V  : Real;
+                        Shown : Boolean;
+                     begin
+                        Seen (K, First, U, V, Shown);
+                        if Shown then
+                           Kept := Kept + 1;
+                           Kept_At (Kept) := K;
+                           View.Query_U.Append (U);
+                           View.Query_V.Append (V);
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               for F in First .. Frames loop
+                  View.Images.Append (Driver.Images.No_Image);
+               end loop;
+               for F in First + 1 .. Frames loop
                   declare
-                     U, V  : Real;
-                     Shown : Boolean;
+                     Set : Match_Set;
                   begin
-                     Seen (Kept_At (I), F, U, V, Shown);
-                     Set.To_U.Append (U + Scene.Head_Noise * Gaussian (Rng));
-                     Set.To_V.Append (V + Scene.Head_Noise * Gaussian (Rng));
-                     Set.Back_U.Append (View.Query_U (I - 1));
-                     Set.Back_V.Append (View.Query_V (I - 1));
-                     Set.Sigma.Append (Scene.Head_Noise);
-                     Set.Freedom.Append (0);
-                     Set.Found.Append (Shown);
+                     Set.Frame := F;
+                     Set.Followed := True;
+                     Set.Stated := Scene.Head_Noise;
+                     for I in 1 .. Kept loop
+                        declare
+                           U, V  : Real;
+                           Shown : Boolean;
+                        begin
+                           Seen (Kept_At (I), F, U, V, Shown);
+                           Set.To_U.Append (U + Scene.Head_Noise * Gaussian (Rng));
+                           Set.To_V.Append (V + Scene.Head_Noise * Gaussian (Rng));
+                           Set.Back_U.Append (View.Query_U (I - 1));
+                           Set.Back_V.Append (View.Query_V (I - 1));
+                           Set.Sigma.Append (Scene.Head_Noise);
+                           Set.Freedom.Append (0);
+                           Set.Found.Append (Shown);
+                        end;
+                     end loop;
+                     View.Matches.Append (Set);
                   end;
                end loop;
-               View.Matches.Append (Set);
+               View.Aligned := Frames - First + 1;
+               Arms (A).Views.Append (View);
             end;
          end loop;
-         View.Aligned := Frames;
-         Arms (A).Views.Append (View);
       end Watch;
    begin
       for A in 1 .. 2 loop
@@ -6333,10 +6346,11 @@ package body Driver.Robot.Tests is
 
    --  The scene the head tests share: two arms with a table and boxes on it, and the head above and behind them with
    --  a lens of its own, tracking Hand_Points points on each arm's links and erring by Head_Noise pixels.
-   function Head_Rig (Hand_Points : Natural := 60; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1)
+   function Head_Rig
+     (Hand_Points : Natural := 60; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1; Segments : Positive := 1)
       return Rig_Scene is
      ((Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose, Head_Lens => Off_Centre_Head,
-       Hand_Points => Hand_Points, Head_Noise => Head_Noise, Seed => Seed, others => <>));
+       Hand_Points => Hand_Points, Head_Noise => Head_Noise, Seed => Seed, Segments => Segments, others => <>));
 
    --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
    --  with Off_Centre_Head.
@@ -6537,6 +6551,33 @@ package body Driver.Robot.Tests is
    --  out itself, and the head is unknown with a reason. The same scene with the answers off by 0.4 pixel (A16's
    --  matcher) is placed, within Z of its sigmas. And where answers off by 3 pixels place the head, it is within Z in
    --  its terms and in every line of sight: the covariance it states is not a claim the data do not carry.
+   --  The head's view of each arm is three segments, the later two opened at later keyframes (Hand_View.First) with
+   --  points of their own, the arm having carried more of itself into view: one fit of the head from all of them
+   --  places it within Z of its sigmas, as the one view of the arm's first picture does (robot.head.pose).
+   procedure Head_From_Segments is
+      M : Model;
+      Segments : Natural := 0;
+   begin
+      Build_Two_Arms (M, Head_Rig (Segments => 3));
+      for V of M.Kinematics (1).Views loop
+         if V.Eye = 3 then
+            Segments := Segments + 1;
+         end if;
+      end loop;
+      Check (Segments = 3, "the head's view of the arm is" & Segments'Image & " segments, not three");
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
+             "a head whose view of each arm is three segments is not placed: " & Driver.Robot.Kinematics.Fixed_Why (M, 3));
+      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
+         declare
+            Off : constant Real := Head_Off (M, 3);
+         begin
+            Driver.Log.Line (Driver.Log.Robot, "head test (three segments): " & Driver.Log.Image (Off, 2)
+                             & " sigmas off the truth");
+            Check (Off <= Driver.Conventions.Z, "the head seen in three segments is" & Real'Image (Off) & " sigmas off the truth");
+         end;
+      end if;
+   end Head_From_Segments;
+
    procedure Head_With_Noisy_Answers is
       Noisy, Fine : Model;
 
@@ -8819,6 +8860,9 @@ package body Driver.Robot.Tests is
                              & "the world within Z of its sigmas, or a line of sight through its pixels is off by more "
                              & "than its sigma, or a point along one does not land on its pixel",
                              Measure_The_Head'Access);
+      Driver.Tests.Register ("robot.head.segments",
+                             "a fixed eye whose view of each arm is three segments, opened at later keyframes with "
+                             & "points of their own, is not placed within Z of its sigmas", Head_From_Segments'Access);
       Driver.Tests.Register ("robot.head.few",
                              "a fixed eye is placed from five true answers, or says nothing of why not",
                              Head_Needs_Answers'Access);

@@ -820,6 +820,15 @@ private
    --  for the arm's own eye (Kinematics.Align_New), and the eye is fitted to the arm's motion they follow.
    type Hand_View is record
       Eye      : Eye_Id'Base := 0;
+      --  The arm's keyframe the view's reference picture is: its Images (I) are the arm's keyframe First + I - 1, its
+      --  query points chosen there, its matches' frames the arm's keyframes. An eye's view of an arm may be several
+      --  such segments, a new one where the arm moved into a part of the picture no point of the others follows.
+      First    : Positive := 1;
+      Latest   : Driver.Images.Image;       --  the picture of the newest keyframe aligned (Seed_Views chooses points in it)
+      Lost     : Natural := 0;              --  the keyframes in a row, from a picture, that found none of its points
+      Spent    : Boolean := False;          --  it follows nothing any more: its chain is let go, its pictures dropped
+      Per_Px   : Real_Vectors.Vector;       --  per channel: the median, over the points whose motion its keyframes tell, of
+                                            --  the pixels a unit of the channel moves one (Align_View); empty before any
       Images   : Image_Vectors.Vector;   --  per keyframe of the arm: the eye's picture then; none where it was not settled
                                          --  or where it is used up
       Query_U, Query_V : Real_Vectors.Vector;

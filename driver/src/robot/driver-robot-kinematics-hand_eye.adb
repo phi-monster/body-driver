@@ -1702,6 +1702,25 @@ package body Driver.Robot.Kinematics.Hand_Eye is
    Agreeing  : constant := 2;
    Finalists : constant := 2 * Agreeing;
 
+   --  The optimum From_S, From_W (the best of a race) as arm Arm's start: its lens unless the lens is given, its pose and
+   --  its tracks at the links and depths it has them.
+   procedure Take_Optimum
+     (P : Problem; Arm : Positive; Lens_Known : Boolean; From_S : State; From_W : Work; S : in out State; W : in out Work)
+   is
+   begin
+      if not Lens_Known then
+         S.L := From_S.L;
+      end if;
+      S.Pose (Arm) := From_S.Pose (Arm);
+      for T in 1 .. P.Tracks loop
+         if P.Track_Arm (T) = Arm then
+            W.Link (T) := From_W.Link (T);
+            W.Lz (T) := From_W.Lz (T);
+         end if;
+      end loop;
+      W.Model := From_W.Model;
+   end Take_Optimum;
+
    --  The start of arm Arm from the tracks in Start_Link (the link of each: 0 leaves it out), by the search over
    --  rotations (and focal lengths unless the lens is given). The candidates are ranked by what their best centre and
    --  depths leave; as many as there are rotations start a race. Each racer takes a step of its refinement (the arm's
@@ -1727,6 +1746,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       S             : in out State;
       W             : in out Work;
       Verdict       : out Search_Verdict;
+      Reached       : out Natural;   --  the finalists that ended at the best optimum, itself among them
       Best_S        : out State_Access;
       Best_W        : out Work_Access)
    is
@@ -1777,6 +1797,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Active (Arm) := True;
       Which := Terms_For (Active, not Lens_Known, False);
       Verdict := No_Start;
+      Reached := 0;
       Best_S := null;
       Best_W := null;
       if Lens_Known then
@@ -1997,18 +2018,9 @@ package body Driver.Robot.Kinematics.Hand_Eye is
                Verdict := Ambiguous;
             elsif Hits >= Agreeing then
                Verdict := Found_One;
-               if not Lens_Known then
-                  S.L := Racers (Ended (Best)).S.L;
-               end if;
-               S.Pose (Arm) := Racers (Ended (Best)).S.Pose (Arm);
-               for T in 1 .. P.Tracks loop
-                  if P.Track_Arm (T) = Arm then
-                     W.Link (T) := Racers (Ended (Best)).W.Link (T);
-                     W.Lz (T) := Racers (Ended (Best)).W.Lz (T);
-                  end if;
-               end loop;
-               W.Model := Racers (Ended (Best)).W.Model;
+               Take_Optimum (P, Arm, Lens_Known, Racers (Ended (Best)).S.all, Racers (Ended (Best)).W.all, S, W);
             end if;
+            Reached := Hits;
          end if;
       end;
       for C in 1 .. Count loop
@@ -2044,6 +2056,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
       Was_S       : State_Access;   --  the best optimum of the race before, its work and its verdict
       Was_W       : Work_Access;
       Was_Verdict : Search_Verdict := No_Start;
+      Was_Reached : Natural := 0;   --  and the finalists of that race that ended at it
       First       : Boolean := True;
    begin
       Active (Arm) := True;
@@ -2057,12 +2070,24 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Same   : Boolean := False;   --  the race found the best optimum of the race before
             Last   : constant Boolean := Rotations >= P.Sightings;
             Holds  : Boolean;
+            Reached : Natural;   --  the finalists of this race that ended at its best optimum
          begin
-            Search_At (P, Arm, Start_Link, Lens_Known, Width, Height, Rotations, Try_S, Try_W.all, Verdict, Now_S, Now_W);
+            Search_At (P, Arm, Start_Link, Lens_Known, Width, Height, Rotations, Try_S, Try_W.all, Verdict, Reached, Now_S,
+                       Now_W);
             if Now_S /= null and then Was_S /= null and then Was_W /= null then
                Same := Driver.Distributions.Chi_Square_Deviate
                          (Real'Max (Real'Model_Epsilon, Distance_Squared (P, Was_S.all, Was_W.all, Now_S.all, Which)),
                           Which'Length) <= Driver.Conventions.Z;
+            end if;
+            --  The best optimum of this race is the best of the race before, and the starts of the two that ended at it
+            --  are as many as the agreement asks for between them: the races' rotations are other ones (the K-th of N is
+            --  not the K-th of 2N), so a start of each is two starts that ended at one optimum, as two of one race are.
+            --  Neither race found another optimum that the sightings do not tell from it (Ambiguous).
+            if Same and then Verdict = Not_Reproduced and then Was_Verdict /= Ambiguous
+              and then Reached + Was_Reached >= Agreeing
+            then
+               Verdict := Found_One;
+               Take_Optimum (P, Arm, Lens_Known, Now_S.all, Now_W.all, Try_S, Try_W.all);
             end if;
             Holds := Last
               or else (not First
@@ -2080,6 +2105,7 @@ package body Driver.Robot.Kinematics.Hand_Eye is
             Was_S := Now_S;
             Was_W := Now_W;
             Was_Verdict := Verdict;
+            Was_Reached := Reached;
             First := False;
             exit when Holds;
             Rotations := Natural'Min (2 * Rotations, Natural'Max (Rotations + 1, P.Sightings));

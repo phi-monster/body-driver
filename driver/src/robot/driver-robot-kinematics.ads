@@ -346,6 +346,11 @@ private package Driver.Robot.Kinematics is
    --  How uncertain fixed eye E's terms in arm A's view are now: the geometric mean of their standard deviations (the
    --  lens's, then the pose's, each in its own unit); Real'Last while the view is not fitted.
 
+   function View_Shift (M : Model; A : Arm_Id; E : Eye_Id; Channel : Positive) return Real;
+   --  How many pixels a unit of arm A's channel moves the points of fixed eye E's view of the arm, as the keyframes told:
+   --  the largest, over the segments of the view, of the median over the points whose motion they tell; 0 where no
+   --  point's does (the sweep has not moved the channel in the eye's view).
+
    function Viewing_Eyes (M : Model; A : Arm_Id) return Count_Vectors.Vector;
    --  The fixed eyes that keep a view of arm A (Hand_View), fitted or not.
 
