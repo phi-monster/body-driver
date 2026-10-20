@@ -247,6 +247,11 @@ package body Driver.Robot.Body_File is
       for A in M.Graph.Arms.First_Index .. M.Graph.Arms.Last_Index loop
          Add (Separator (A = M.Graph.Arms.First_Index) & Int (Integer (M.Graph.Arms (A))));
       end loop;
+      Add ("], ""arm_eyes"": [");
+      for A in M.Graph.Arms.First_Index .. M.Graph.Arms.Last_Index loop
+         Add (Separator (A = M.Graph.Arms.First_Index)
+              & Int (if A <= M.Graph.Arm_Eye.Last_Index then Integer (M.Graph.Arm_Eye (A)) else 0));
+      end loop;
       Add ("], ""carrier"": " & Int (Integer (M.Graph.Carrier)) & ", ""mounts"": [");
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
@@ -321,7 +326,7 @@ package body Driver.Robot.Body_File is
                        & ", ""offered"": " & Int (F.Offered) & ", ""sigma_px"": " & Num (F.Sigma_Px)
                        & ", ""distorted"": " & Flag (F.Distorted)
                        & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
-                       & ", ""from"": " & Int (F.From) & "}");
+                       & ", ""from"": " & Int (F.From) & ", ""mine_from"": " & Int (F.Mine_From) & "}");
                   First := False;
                end if;
             end;
@@ -691,8 +696,14 @@ package body Driver.Robot.Body_File is
                   M.Groups (Group_Id (I)).Seen_At := Reals_Of (Field (Item (Gs, I), "seen_at"));
                end loop;
                M.Graph.Arms.Clear;
+               M.Graph.Arm_Eye.Clear;
                for I in 1 .. Size (As) loop
                   M.Graph.Arms.Append (Group_Id (Whole (Item (As, I))));
+                  --  The eye an arm of a split group is for; none in a body file of before the split (and for every arm
+                  --  of a whole group).
+                  M.Graph.Arm_Eye.Append
+                    (if Size (Field (N, "arm_eyes")) = Size (As) then Eye_Id'Base (Natural'Max (0, Whole (Item (Field (N, "arm_eyes"), I))))
+                     else 0);
                end loop;
                M.Graph.Carrier := Group_Id'Base (Natural'Max (0, Whole (N, "carrier")));
                M.Graph.Mounts.Clear;
@@ -827,6 +838,7 @@ package body Driver.Robot.Body_File is
                               F.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                               F.Judged := True;
                               F.From := Natural'Max (0, Whole (X, "from"));
+                              F.Mine_From := Natural'Max (0, Whole (X, "mine_from"));
                            end;
                         end if;
                      end;

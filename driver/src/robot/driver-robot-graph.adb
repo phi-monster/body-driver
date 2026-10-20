@@ -1,3 +1,4 @@
+with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Robot.Channels;
@@ -83,6 +84,76 @@ package body Driver.Robot.Graph is
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
 
+      type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
+
+      --  The eyes the arms of each group were for before this derivation: a group split into arms stays so while the lock-in
+      --  says nothing of its channels (a boot begun from a body file has not read its streams yet; an estimate whose
+      --  regression had too few rows has no column), and is split by what it says when it says something.
+      Remembered : array (M.Groups.First_Index .. M.Groups.Last_Index) of Eye_Flags :=
+        [others => [others => False]];
+
+      --  Whether the lock-in has told something of some channel of group G in some eye.
+      function Informed (G : Group_Id) return Boolean is
+      begin
+         for E in Gr.Channels.First_Index .. Gr.Channels.Last_Index loop
+            for Item of Gr.Channels (E) loop
+               if Item.Group = G and then Item.Effect.Verdict /= Unmeasured then
+                  return True;
+               end if;
+            end loop;
+         end loop;
+         return False;
+      end Informed;
+
+      --  The eyes that some channel of group G moves whole while another eye decidedly shows it no whole motion (a
+      --  patch, or nothing): a humanoid's neck moves the head's eye and not a wrist's, an arm its wrist's and not the
+      --  head's, and its torso moves both. Each such eye rides on an arm of the group of its own, whose joints are the
+      --  channels that move it. An eye that is undecided or not measured about a channel is no evidence against the
+      --  channel moving it: a group's channels that all move every eye but the one the lock-in is undecided about are
+      --  not told apart.
+      function Moved_Apart (G : Group_Id) return Eye_Flags is
+         Result : Eye_Flags := [others => False];
+         package Set_Lists is new Ada.Containers.Vectors (Positive, Eye_Flags);
+         Sets : Set_Lists.Vector;   --  the distinct sets of eyes that channels move apart from the rest
+      begin
+         for C in 1 .. M.Groups (G).Size loop
+            declare
+               Whole_In   : Eye_Flags := [others => False];
+               Any_Whole  : Boolean := False;
+               Any_Not    : Boolean := False;
+            begin
+               for E in Result'Range loop
+                  if E <= Gr.Channels.Last_Index then
+                     for Item of Gr.Channels (E) loop
+                        if Item.Group = G and then Item.Channel = C then
+                           case Item.Effect.Verdict is
+                              when Whole =>
+                                 Whole_In (E) := True;
+                                 Any_Whole := True;
+                              when Nothing | Patch =>
+                                 Any_Not := True;
+                              when Undecided | Unmeasured =>
+                                 null;
+                           end case;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+               if Any_Whole and then Any_Not then
+                  for E in Result'Range loop
+                     Result (E) := Result (E) or else Whole_In (E);
+                  end loop;
+                  if not Sets.Contains (Whole_In) then
+                     Sets.Append (Whole_In);
+                  end if;
+               end if;
+            end;
+         end loop;
+         --  Channels that all move the same eyes (an arm with two cameras) are one arm: the eyes are apart only where the
+         --  channels' sets of them differ.
+         return (if Natural (Sets.Length) >= 2 then Result else [others => False]);
+      end Moved_Apart;
+
       --  The eye last mounted on the group as an arm (Group_Stream.Rider) still rides on it while it shows the group
       --  a patch of its view or is undecided: a sweep's small pushes leave the far cells of a whole view unanswered,
       --  and the lock-in, regressing on every push of the stream, falls back from whole (robot.boot.patch, 10-17:
@@ -103,10 +174,18 @@ package body Driver.Robot.Graph is
          end if;
          Own (G) := M.Groups (G).Commandable and then M.Groups (G).Own_Push;
       end loop;
+      for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
+         if A <= Gr.Arm_Eye.Last_Index and then Gr.Arm_Eye (A) /= 0 and then Gr.Arms (A) in Remembered'Range
+           and then Gr.Arm_Eye (A) in Eye_Flags'Range
+         then
+            Remembered (Gr.Arms (A)) (Gr.Arm_Eye (A)) := True;
+         end if;
+      end loop;
       Gr.Roles.Clear;
       Gr.Arm_Of.Clear;
       Gr.Breach.Clear;
       Gr.Arms.Clear;
+      Gr.Arm_Eye.Clear;
       Gr.Mounts.Clear;
       Gr.Carrier := 0;
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -136,21 +215,40 @@ package body Driver.Robot.Graph is
          if Own (G) then
             declare
                Whole_Eyes : Natural := 0;
+               Apart      : constant Eye_Flags := (if Informed (G) then Moved_Apart (G) else Remembered (G));
+               Apart_Eyes : Natural := 0;
             begin
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
                   if Effect (M, G, E).Verdict = Whole then
                      Whole_Eyes := Whole_Eyes + 1;
                   end if;
+                  if Apart (E) then
+                     Apart_Eyes := Apart_Eyes + 1;
+                  end if;
                end loop;
+               --  Channels that move different eyes (two eyes at least that some channel moves and another decidedly does
+               --  not): an arm of the group for each such eye, however much of the view the group moves together.
+               if Apart_Eyes >= 2 then
+                  Gr.Roles.Replace_Element (G, Arm);
+                  for E in Apart'Range loop
+                     if Apart (E) then
+                        Gr.Arms.Append (G);
+                        Gr.Arm_Eye.Append (E);
+                        if Gr.Arm_Of (G) = 0 then
+                           Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
+                        end if;
+                     end if;
+                  end loop;
                --  Two eyes at least: with one, carrying it and carrying the
                --  body look the same.
-               if Whole_Eyes = Eyes and then Eyes >= 2 then
+               elsif Whole_Eyes = Eyes and then Eyes >= 2 then
                   if Gr.Carrier = 0 then
                      Gr.Carrier := G;
                      Gr.Roles.Replace_Element (G, Carrier);
                   end if;
                elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 or else Still_Ridden (G) then
                   Gr.Arms.Append (G);
+                  Gr.Arm_Eye.Append (0);
                   Gr.Roles.Replace_Element (G, Arm);
                   Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
                end if;
@@ -167,9 +265,15 @@ package body Driver.Robot.Graph is
             Best_Arm   : Arm_Id'Base := 0;
             Best_Share : Real := 0.0;
             Keyed      : Arm_Id'Base := 0;
+            Bound      : Arm_Id'Base := 0;   --  the arm of a split group that is for this eye
          begin
             for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
-               if Told_Eye (Gr.Arms (A)) = E then
+               if Gr.Arm_Eye (A) = E then
+                  Bound := A;
+               end if;
+            end loop;
+            for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
+               if Gr.Arm_Eye (A) = 0 and then Told_Eye (Gr.Arms (A)) = E then
                   Keyed := A;
                end if;
             end loop;
@@ -177,7 +281,7 @@ package body Driver.Robot.Graph is
                declare
                   F : constant Eye_Effect := Effect (M, Gr.Arms (A), E);
                begin
-                  if F.Verdict = Whole and then F.Fraction.Value > Best_Share then
+                  if Gr.Arm_Eye (A) = 0 and then F.Verdict = Whole and then F.Fraction.Value > Best_Share then
                      Best_Share := F.Fraction.Value;
                      Best_Arm := A;
                   end if;
@@ -185,12 +289,14 @@ package body Driver.Robot.Graph is
             end loop;
             if Keyed = 0 and then Best_Arm = 0 then
                for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
-                  if M.Groups (Gr.Arms (A)).Rider = E and then Still_Ridden (Gr.Arms (A)) then
+                  if Gr.Arm_Eye (A) = 0 and then M.Groups (Gr.Arms (A)).Rider = E and then Still_Ridden (Gr.Arms (A)) then
                      Best_Arm := A;
                   end if;
                end loop;
             end if;
-            if Keyed > 0 then
+            if Bound > 0 then
+               Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Bound));
+            elsif Keyed > 0 then
                Gr.Mounts.Replace_Element (E, (Kind => Arm_Carried, Arm => Keyed));
                M.Groups (Gr.Arms (Keyed)).Rider := E;
             elsif Best_Arm > 0 then

@@ -1050,20 +1050,22 @@ driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first ver
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
-driver-robot-boot.adb	& "" & Driver.Log.Image (Step * Per_Px (C), 2)	2	format	digits printed in a log line or a message
-driver-robot-boot.adb	& "" & Driver.Log.Image (Step, 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
-driver-robot-boot.adb	& (if Unswept.Length = 1 then ""	1	structure	one arm left to sweep: alone, not a lane
+driver-robot-boot.adb	& (if Unswept.Length = 1 then "" else "" & Unswept.Length'Image	1	structure	one arm left to sweep: nothing to say of the others
 driver-robot-boot.adb	& Driver.Log.Image (100.0 * Plan.Narrowing, 2) & ""	100.0	format	a share printed as a percentage
 driver-robot-boot.adb	& Driver.Log.Image (100.0 * Plan.Narrowing, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Before, 5) & ""	5	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Before, 5) & "" & Driver.Log.Image (After, 5));	5	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Before, 5) & "" & Driver.Log.Image (After, 5));	5	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (First * Per_Px (C), 2)	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (First, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Offset + Step, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Plan.Noise, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Plan.Worst, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Later), 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Step, 3) & "" & Sighted_Now'Image	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Plan_Text & "" & Driver.Log.Image (Half, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
@@ -1141,14 +1143,19 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	Step := 2.0 * Step;	2.0	structure	the step of the carrying doubles once the view has followed two in a row (the sweep's levels double)
+driver-robot-boot.adb	Step := Step / 2.0;	2.0	structure	the step of the carrying halves when the view did not follow it (the sweep's ladder halves a level not followed)
+driver-robot-boot.adb	Tried_Up : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	a channel has two ways, up and down, and a ladder state for each
+driver-robot-boot.adb	Up_From (I) := 2.0 * Offset (I);	2.0	structure	the ladder climbs by doubling the level (the sweep's levels double)
+driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0];	2	structure	a channel has two ways, up and down, and a ladder state for each
 driver-robot-boot.adb	and then Driver.Robot.Hand.Arm_Of (H, Driver.Robot.Hand.Hand_Id (Id)) = 1	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
 driver-robot-boot.adb	elsif Followed_Most (I) = 0.0 and then not Descending (I) and then Lost = 1	1	structure	the push's first level of the pass
 driver-robot-boot.adb	elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then	2.0	structure	the next level, twice this one, would move the view by more than half of it
-driver-robot-boot.adb	exit when Blind >= 2;	2	structure	a repeat is the least that tells an absence from a miss: the eye's picture not moving over two steps in a row is the arm gone from its view, over one it may be a step the test missed (as Agreeing asks two starts, and a way into the hand two pictures)
 driver-robot-boot.adb	exit when Cell_Motion (2.0 * Scale) > Half;	2.0	structure	the cell's next level, twice its shares
 driver-robot-boot.adb	exit when Count > 1 and then not Unplaced;	1	structure	after the first pose
+driver-robot-boot.adb	exit when Step / 2.0 < Least (C);	2.0	structure	the half of a step under the least turn a keyframe counts is no step: the way ends
 driver-robot-boot.adb	if M.Beats >= 2 * Rest_Beats then	2	structure	the rest is compared with itself at every doubling of its beats, as the estimates are scheduled
 driver-robot-boot.adb	if M.Kinematics (K).Arm = 1 and then M.Kinematics (K).Result.Fitted then	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	if N > 1 and then Fitted_Now and then not Told_Now then	1	structure	more than one joint: an order to tell
@@ -1158,8 +1165,9 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the pari
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	1	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
-driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then	2.0	structure	the ladder goes down by halving
-driver-robot-boot.adb	if Unswept.Length = 1 or else See_Each_Other then	1	structure	one arm left to sweep: alone, not a lane
+driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel)	2.0	structure	the ladder goes down by halving, to the least turn a keyframe counts
+driver-robot-boot.adb	if Run >= 2 and then 2.0 * Step < Lost then	2	structure	a repeat is the least that tells a rule from a chance: the step doubles after two in a row that the eye's view followed (as Agreeing asks two starts), and not up to a step it did not follow
+driver-robot-boot.adb	if Run >= 2 and then 2.0 * Step < Lost then	2.0	structure	the step doubles as the sweep's levels do
 driver-robot-boot.adb	if X.Eye = E and then X.Arm = 1 then	1	structure	the first arm, whose frame is the world
 driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
 driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
@@ -1210,7 +1218,9 @@ driver-robot-flow.adb	or else abs U > Real (Nx) / 2.0 or else abs V > Real (Ny) 
 driver-robot-flow.adb	or else abs U > Real (Nx) / 2.0 or else abs V > Real (Ny) / 2.0;	2.0	structure	a translation beyond half the cell has moved most of the template out of the window it is matched in
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 1);	1	structure	clause 1 of the porting contract (docs/body-protocol.md, 3): the reading does not follow the command
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of the porting contract (docs/body-protocol.md, 3): nothing any eye sees changes when it moves
-driver-robot-graph.adb	if Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
+driver-robot-graph.adb	elsif Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
+driver-robot-graph.adb	if Apart_Eyes >= 2 then	2	structure	two eyes that different channels move are two arms; one such eye is one
+driver-robot-graph.adb	return (if Natural (Sets.Length) >= 2 then Result else [others => False]);	2	structure	one set of channels makes one arm: two different sets tell one body from two
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
 driver-robot-hand-aims.adb	Next := 2.0 * Tilt;	2.0	numerics	a search for an unknown size grows geometrically, doubling
 driver-robot-hand-aims.adb	Next := Tilt / 2.0;	2.0	numerics	a search for the size an arm makes shrinks geometrically, halving
@@ -3242,7 +3252,7 @@ driver-robot-kinematics.adb	if Det > 1.0 then	1.0	math	a determinant above one: 
 driver-robot-kinematics.adb	if Driver.Pixels.Frames (W.Gathering) >= 2 then	2	structure	a view is judged by two frames at least (Views.Gathered)
 driver-robot-kinematics.adb	if Driver.Uncertain.Significant (Change (C), Noise (Noise'First + C - Change'First) * Sqrt (2.0)) then	2.0	statistics	the difference of two readings has the root of two times one's noise
 driver-robot-kinematics.adb	if Driver.Uncertain.Significant (Driver.Uncertain.Vector_Gate (Terms), Length, 1.0) then	1.0	statistics	the length is in sigmas already: the difference is whitened by the two covariances
-driver-robot-kinematics.adb	if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From and then not Moved_On then	2	structure	the evidence doubled, as the heavier estimates are due (Estimates_Due)
+driver-robot-kinematics.adb	if F.Judged and then not F.Known and then F.Mine_From > 0 and then Mine < 2 * F.Mine_From	2	structure	the eye's own evidence doubled, as the heavier estimates are due (Estimates_Due)
 driver-robot-kinematics.adb	if F.Link (Q) >= 1 and then F.Link (Q) <= Joints'Length and then F.Depth (Q) > 0.0 then	1	structure	a point rides on the first joint or a later one (0: on none)
 driver-robot-kinematics.adb	if F.Link (Q) >= 1 and then F.Link (Q) <= Joints'Length and then F.Depth (Q) > 0.0 then	1	structure	a point rides on the first joint or a later one (0: on none)
 driver-robot-kinematics.adb	if F.Track_Known (T) and then 3 * T + 2 < Natural (F.Tracks.Length)	2	structure	a track's three coordinates in a flat list
@@ -3260,7 +3270,6 @@ driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * H
 driver-robot-kinematics.adb	if Queries > 0 and then V.Aligned >= Natural'Max (2, From) and then not V.Spent then	2	structure	a segment's slopes are told from its second picture: one picture alone has no displacement from the reference
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
 driver-robot-kinematics.adb	if Seen = 0 and then Natural (R.Frames.Length) = 1 then	1	structure	the arm's reference is the first keyframe
-driver-robot-kinematics.adb	if V.Eye = H and then not V.Spent and then V.Aligned >= 1 and then Driver.Images.Width (V.Latest) > 0	1	structure	a segment is aligned from its reference on: at least its first picture
 driver-robot-kinematics.adb	if V.First = 1 then	1	structure	the first segment of a view opens at the arm's reference, its first keyframe
 driver-robot-kinematics.adb	if V.Lost >= 2 and then not V.Spent then	2	structure	a repeat is the least that tells an absence from a miss: a segment that found none of its points in two keyframes in a row follows nothing, one keyframe alone may be a bad picture (as the boot's Blind and Agreeing ask two)
 driver-robot-kinematics.adb	if V.Result.Placed and then V.Aligned >= 2 and then Queries > 0 then	2	structure	a reference and one keyframe at least
@@ -3347,6 +3356,9 @@ driver-robot-lockin.adb	if B >= Natural (S.Measured.Length) or else not S.Measur
 driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	1	format	the log shows the first cell's rows
 driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	2	format	the log shows the middle cell's rows
 driver-robot-lockin.adb	if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then	1	structure	at most one group pushed at a beat the regression explains
+driver-robot-lockin.adb	new Flag_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => False]];	1	structure	the first group of the kept ones: the grid's lower bound
+driver-robot-lockin.adb	new Natural_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0]];	1	structure	the first group of the kept ones: the grid's lower bound
+driver-robot-lockin.adb	new Real_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0.0]];	1	structure	the first group of the kept ones: the grid's lower bound
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: its linear term, twice Z squared
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: the discriminant is 2 Z ** 2 (2 Q - K) + 4 Z ** 4, twice Z squared times (2 Q - K)
 driver-robot-lockin.adb	return (Q - K + 2.0 * Z ** 2) + Z * Sqrt (2.0 * (2.0 * Q - K) + 4.0 * Z ** 2);	2.0	math	the root of (K + L - Q) ** 2 = Z ** 2 * 2 (K + 2 L) above Q - K: twice the critical value in 2 Q - K

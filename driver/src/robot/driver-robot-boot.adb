@@ -503,6 +503,14 @@ package body Driver.Robot.Boot is
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
+               --  A ladder that went down from a lost first level to the least turn and followed nothing on the way is tried
+               --  upward once, from twice that level (Up_From, where the descent began): the level was too small for the
+               --  matcher to tell from none, not too wide to follow. The drone's z slide, a first level of 53 micrometres
+               --  (the step the probe saw the eye move by: a zoom of 1E-4, a hundredth of a pixel at the edges), found 0 of
+               --  255 points, and the ladder went down to 27 and stopped, the joint with no keyframe of its own and the
+               --  drone never fitted.
+               Up_From    : array (1 .. 2 * Size) of Real := [others => 0.0];
+               Tried_Up   : array (1 .. 2 * Size) of Boolean := [others => False];
                --  Per push: the widest level the aligner followed, and the least it could not after one it did. The
                --  ladder halves the gap between them, a level a pass (Take climbs no level as wide as the second).
                Followed_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
@@ -971,7 +979,12 @@ package body Driver.Robot.Boot is
                                     --  jaws' points), and no level of it moves the view, however far.
                                     State (I) := Unseen;
                                  elsif Lost > 0 then
-                                    if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel) then
+                                    if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel)
+                                      and then not Tried_Up (I)
+                                    then
+                                       if Up_From (I) = 0.0 then
+                                          Up_From (I) := 2.0 * Offset (I);
+                                       end if;
                                        --  Not followed before any level of the joint was: the first level is sized
                                        --  by how far the view moves per unit of the joint, and that is wrong where
                                        --  the eye the arm is thought to carry is another's (an eye credited to the
@@ -1031,8 +1044,14 @@ package body Driver.Robot.Boot is
                                     State (I) := Widest;
                                  elsif Descending (I) then
                                     --  A ladder going down that reaches a level too small to count has no level the
-                                    --  aligner follows.
-                                    State (I) := Not_Followed;
+                                    --  aligner follows below its first: once, it is tried above it.
+                                    if Up_From (I) > 0.0 and then not Tried_Up (I) then
+                                       Tried_Up (I) := True;
+                                       Descending (I) := False;
+                                       Offset (I) := Up_From (I);
+                                    else
+                                       State (I) := Not_Followed;
+                                    end if;
                                  elsif Lost_Least (I) < Real'Last then
                                     --  A level halfway to one lost before, followed: halfway again, while half the gap
                                     --  is a step a keyframe counts. A halfway level that gave no keyframe (the joint did
@@ -1183,6 +1202,8 @@ package body Driver.Robot.Boot is
                   Unplaced : Count_Vectors.Vector;
                   Start_At : Real_Array (1 .. Size) := [others => 0.0];
                   Steps_Taken : Natural := 0;
+                  Fresh       : Boolean := True;   --  the body was estimated after the last step
+                  Known_Now   : Boolean := False;  --  the eye being carried through is placed
                   procedure Read_Eyes is
                      Placed  : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Showing_Eyes (M, A);
                      Viewing : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Viewing_Eyes (M, A);
@@ -1207,25 +1228,23 @@ package body Driver.Robot.Boot is
                         declare
                            Per_Px : Real_Array (1 .. Size) := [others => 0.0];   --  px a unit in this eye's view
                            Half_Px : Real := 0.0;
-                           Diagonal : Real := 0.0;   --  the picture's, in pixels
-                           Moved_Now : Boolean := False;   --  the eye's picture moved over the step just taken
-                           Blind     : Natural := 0;       --  the steps in a row it did not
+                           --  What the eye's view found of the arm moving at the keyframe just taken, the points a fit may
+                           --  rest on and the points answered from a window of any width (Kinematics.Newest_Sightings).
+                           Sighted_Now, Answered_Now : Natural := 0;
                            --  The keyframes of the steps so far are aligned now, so that the points the arm shows next are chosen
                            --  where it now stands (Kinematics.Seed_Views).
                            procedure Align_Views is
                            begin
                               Driver.Robot.Kinematics.Align_New (M);
                            end Align_Views;
-                           --  Whether the eye's picture moved at any beat of the step just taken.
-                           procedure Read_Moved is
+                           procedure Read_Sightings is
                            begin
-                              Moved_Now := False;
-                              for B in Report.Started .. M.Beats - 1 loop
-                                 if Lockin.Moved (M, Eye_Id (E), B) then
-                                    Moved_Now := True;
-                                 end if;
-                              end loop;
-                           end Read_Moved;
+                              Driver.Robot.Kinematics.Newest_Sightings (M, A, Eye_Id (E), Sighted_Now, Answered_Now);
+                           end Read_Sightings;
+                           procedure Judge_Again is
+                           begin
+                              Driver.Robot.Kinematics.Judge_Again (M, Eye_Id (E));
+                           end Judge_Again;
                            procedure Read_Shift is
                            begin
                               for C in 1 .. Size loop
@@ -1233,62 +1252,145 @@ package body Driver.Robot.Boot is
                               end loop;
                               Half_Px := Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (E)).Grid.Width,
                                                                               M.Eyes (Eye_Id (E)).Grid.Height));
-                              Diagonal := Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                (Real (M.Eyes (Eye_Id (E)).Grid.Width) ** 2 + Real (M.Eyes (Eye_Id (E)).Grid.Height) ** 2);
                            end Read_Shift;
                         begin
                            Driver.Beats.Within_A_Beat (Read_Shift'Access);
-                           for K in 1 .. N loop
-                              declare
-                                 C    : constant Positive := Swept (K);
-                                 Step : constant Real :=
-                                   (if Per_Px (C) > 0.0 then Real'Max (Least (C), Half_Px / Per_Px (C)) else 0.0);
-                                 --  As many steps either way as it takes the arm to cross the picture's diagonal in
-                                 --  the eye's view at most: the arm goes on while the picture moves over a step and the
-                                 --  joint goes (below), not only as far as the sweep followed it. The sweep's range left the
-                                 --  arm in the eye's view for few points (the bench's table eyes placed 4 of 10 with it, 6
-                                 --  of 10 carried across the view with new points taken along the way).
-                                 Count : constant Natural :=
-                                   (if Step > 0.0 then Natural (Real'Ceiling (Diagonal / (Step * Per_Px (C)))) else 0);
+                           Known_Now := False;
+                           --  A segment at the pose every run goes out from: the keyframe the arm stands at, its points the
+                           --  cells that follow the arm there.
+                           Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                           Driver.Beats.Within_A_Beat (Align_Views'Access);
+                           declare
+                              procedure Seed_Here is
                               begin
-                                 if Count > 0 then
+                                 Driver.Robot.Kinematics.Seed_Segment (M, A, Eye_Id (E));
+                              end Seed_Here;
+                           begin
+                              Driver.Beats.Within_A_Beat (Seed_Here'Access);
+                           end;
+                           --  The joints that move the eye's view most go first, each both ways; the carrying ends when the
+                           --  body estimated after a joint's run has the eye placed: a joint or two of the arm's far links
+                           --  carried across the picture place it, the rest would be beats spent.
+                           declare
+                              Order : array (1 .. N) of Positive := [for K in 1 .. N => K];
+                              Swap  : Positive;
+                              procedure Read_Known is
+                              begin
+                                 Known_Now := Driver.Robot.Kinematics.Fixed_Known (M, Eye_Id (E));
+                              end Read_Known;
+                           begin
+                           for I in 1 .. N - 1 loop
+                              for J in I + 1 .. N loop
+                                 if Per_Px (Swept (Order (J))) > Per_Px (Swept (Order (I))) then
+                                    Swap := Order (I);
+                                    Order (I) := Order (J);
+                                    Order (J) := Swap;
+                                 end if;
+                              end loop;
+                           end loop;
+                           for Position in 1 .. N loop
+                              declare
+                                 K    : constant Positive := Order (Position);
+                                 Before : constant Natural := Steps_Taken;
+                                 C    : constant Positive := Swept (K);
+                                 --  The first step of each way: the arm moves the eye's picture by half a patch by the speed of
+                                 --  its fast points (View_Shift), and no less than the least turn a keyframe counts.
+                                 First : constant Real :=
+                                   (if Per_Px (C) > 0.0 then Real'Max (Least (C), Half_Px / Per_Px (C)) else 0.0);
+                              begin
+                                 if First > 0.0 then
                                     Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carries its hand through eye"
-                                                     & E'Image & "'s view: c" & Driver.Log.Image (C) & " in"
-                                                     & " steps at most of " & Driver.Log.Image (Step, 3)
-                                                     & " units either way, " & Driver.Log.Image (Step * Per_Px (C), 2)
-                                                     & " px each in its picture");
+                                                     & E'Image & "'s view: c" & Driver.Log.Image (C) & " from steps of "
+                                                     & Driver.Log.Image (First, 3) & " units either way, "
+                                                     & Driver.Log.Image (First * Per_Px (C), 2)
+                                                     & " px each in its picture, halved when the view does not follow"
+                                                     & " one and doubled after two that it does");
                                     for Sign of Real_Array'[1.0, -1.0] loop
-                                       Blind := 0;
-                                       for I in 1 .. Count loop
-                                          declare
-                                             Target : Real_Array (1 .. Size) := Start_At;
-                                          begin
-                                             Target (C) := Start_At (C) + Sign * Real (I) * Step;
-                                             Asked_Now := [others => False];
-                                             Asked_Now (C) := True;
-                                             Driver.Beats.Within_A_Beat (Tell_Asking'Access);
-                                             Go_To (G, Target, Report, Land => True);
-                                             exit when not Report.At_Rest;
-                                             Driver.Robot.Motion.Hold_For_Keyframe (M, A);
-                                             Steps_Taken := Steps_Taken + 1;
-                                             exit when Report.Outcome /= Driver.Robot.Motion.Reached;
-                                             Driver.Beats.Within_A_Beat (Align_Views'Access);
-                                             Driver.Beats.Within_A_Beat (Read_Moved'Access);
-                                             Blind := (if Moved_Now then 0 else Blind + 1);
-                                             exit when Blind >= 2;
-                                          end;
-                                       end loop;
+                                       --  A step the eye's view follows (Newest_Sightings: a point that moved, found from
+                                       --  a narrow window) is kept and the next goes on from it; one it does not is halved
+                                       --  and goes on from the last that it did, until the arm is out of the view (no point
+                                       --  answered that moved) or the step is under the least that counts. The cold boot
+                                       --  r20 (10-20) stepped 8 px by the median of the points' speeds, the points moved
+                                       --  12 to 25 px, no keyframe was followed after the fifth, and the arm swung
+                                       --  through the whole of its range (3700 units) without a point in the picture.
+                                       declare
+                                          Step   : Real := First;
+                                          Offset : Real := 0.0;   --  the farthest keyframe followed, from where the run began
+                                          Run    : Natural := 0;  --  the steps in a row it followed
+                                          Lost   : Real := Real'Last;   --  the least step it did not follow: not doubled up to it again
+                                       begin
+                                          loop
+                                             --  No farther than the sweep turned the joint, which it did where the joint goes
+                                             --  and the arm's own eye follows: a joint that turns for ever would otherwise go
+                                             --  on while the arm stays in the view.
+                                             if Offset + Step > Reached (C) then
+                                                Step := Reached (C) - Offset;
+                                             end if;
+                                             exit when Step < Least (C);
+                                             declare
+                                                Target : Real_Array (1 .. Size) := Start_At;
+                                             begin
+                                                Target (C) := Start_At (C) + Sign * (Offset + Step);
+                                                Asked_Now := [others => False];
+                                                Asked_Now (C) := True;
+                                                Driver.Beats.Within_A_Beat (Tell_Asking'Access);
+                                                Go_To (G, Target, Report, Land => True);
+                                                exit when not Report.At_Rest;
+                                                Driver.Robot.Motion.Hold_For_Keyframe (M, A);
+                                                Steps_Taken := Steps_Taken + 1;
+                                                exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                                                Driver.Beats.Within_A_Beat (Align_Views'Access);
+                                                Driver.Beats.Within_A_Beat (Read_Sightings'Access);
+                                                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " eye" & E'Image
+                                                                 & "'s view of c" & Driver.Log.Image (C)
+                                                                 & (if Sign > 0.0 then " up " else " down ")
+                                                                 & Driver.Log.Image (Offset + Step, 3) & " units (a step of "
+                                                                 & Driver.Log.Image (Step, 3) & "): sighted" & Sighted_Now'Image
+                                                                 & " of" & Answered_Now'Image & " moving points answered");
+                                                exit when Answered_Now = 0;
+                                                --  Followed as a keyframe is (Set_Of): most of the answers came from narrow windows. The
+                                                --  slow points of the arm's near links were followed at steps the fast points of its far
+                                                --  ones were lost at, and the steps doubled to 824 units with one point of the eye's view
+                                                --  moving (u20, 10-20).
+                                                if Sighted_Now > Answered_Now - Sighted_Now then
+                                                   Offset := Offset + Step;
+                                                   Run := Run + 1;
+                                                   if Run >= 2 and then 2.0 * Step < Lost then
+                                                      Step := 2.0 * Step;
+                                                      Run := 0;
+                                                   end if;
+                                                else
+                                                   Run := 0;
+                                                   Lost := Real'Min (Lost, Step);
+                                                   exit when Step / 2.0 < Least (C);
+                                                   Step := Step / 2.0;
+                                                end if;
+                                             end;
+                                          end loop;
+                                       end;
                                        Asked_Now := [others => False];
                                        Driver.Beats.Within_A_Beat (Tell_Asking'Access);
                                        Go_To (G, Start_At, Report, Land => True);
                                     end loop;
                                  end if;
+                                 if Steps_Taken > Before then
+                                    --  The eye is judged on what this run gave it, whatever the evidence has grown by: the
+                                    --  carrying is what the evidence is for (the fit's gate waits for it to double).
+                                    Driver.Beats.Within_A_Beat (Judge_Again'Access);
+                                    Measure_The_Round;
+                                    Fresh := True;
+                                    Driver.Beats.Within_A_Beat (Read_Known'Access);
+                                 end if;
                               end;
+                              exit when Known_Now;
                            end loop;
+                           end;
                         end;
                      end loop;
                      if Steps_Taken > 0 then
-                        Measure_The_Round;
+                        if not Fresh then
+                           Measure_The_Round;
+                        end if;
                         Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " carried its hand through"
                                          & Unplaced.Length'Image & " fixed eyes' views in" & Steps_Taken'Image & " keyframes");
                      end if;
@@ -1556,10 +1658,8 @@ package body Driver.Robot.Boot is
       end Read_Body;
 
       --  Every arm of the current estimate is swept with the eye it carries,
-      --  every such arm at once (Driver.Beats.At_Once, an arm a lane: their
-      --  sweeps move their own groups, and each step waits for the whole body
-      --  to be still): the body is read again before each round of sweeps and
-      --  after the fit's estimate, since later evidence can change a role or a
+      --  one at a time (below): the body is read again before each round of
+      --  sweeps and after the fit's estimate, since later evidence can change a role or a
       --  mount (an eye can decide by a later estimate that it rides on a
       --  group). An arm is known by its group, since a new arm can renumber the
       --  others, and is swept again when it carries another eye than the one it
@@ -1579,13 +1679,6 @@ package body Driver.Robot.Boot is
          use type Driver.Observations.Camera_Id;
 
          function Same_Pair (A, B : Arm_Eye) return Boolean is (A.Group = B.Group and then A.Eye = B.Eye);
-
-         --  Some unswept arm's eye sees another unswept arm move (the lock-in's response of that eye to the other's
-         --  group is anything but nothing): their sweeps go one at a time, since a keyframe needs the eye's picture
-         --  still, and the other arm moving through it keeps it from ever being (R6's eighth start, 10-14: both arms
-         --  swept at once, each in the other's view, pass 2 to 4 of each gave no keyframe at all). In a white room
-         --  the other arm is most of what an eye has to go by, and it must stand still to be that.
-         See_Each_Other : Boolean := False;
 
          procedure Find_Unswept is
          begin
@@ -1609,22 +1702,7 @@ package body Driver.Robot.Boot is
                   end if;
                end;
             end loop;
-            See_Each_Other := False;
-            for P of Unswept loop
-               for Q of Unswept loop
-                  if P.Group /= Q.Group and then Response (M, Q.Group, P.Eye) not in Nothing | Unmeasured then
-                     See_Each_Other := True;
-                  end if;
-               end loop;
-            end loop;
          end Find_Unswept;
-
-         procedure Sweep_Lane (Lane : Positive) is
-         begin
-            Sweep (Unswept (Lane).Arm);
-         end Sweep_Lane;
-
-         procedure Sweep_At_Once is new Driver.Beats.At_Once (Sweep_Lane);
       begin
          loop
             Driver.Beats.Within_A_Beat (Find_Unswept'Access);
@@ -1632,18 +1710,19 @@ package body Driver.Robot.Boot is
                for P of Unswept loop
                   Driver.Log.Line (Driver.Log.Robot, "boot: sweeping arm" & P.Arm'Image & " (group" & P.Group'Image
                                    & ") with eye" & P.Eye'Image
-                                   & (if Unswept.Length = 1 then ""
-                                      elsif See_Each_Other then ", the" & Unswept.Length'Image
-                                           & " arms one at a time (an eye sees the other arm)"
-                                      else ", the" & Unswept.Length'Image & " arms at once"));
+                                   & (if Unswept.Length = 1 then "" else ", the" & Unswept.Length'Image
+                                      & " arms one at a time"));
                end loop;
-               if Unswept.Length = 1 or else See_Each_Other then
-                  for P of Unswept loop
-                     Sweep (P.Arm);
-                  end loop;
-               else
-                  Sweep_At_Once (Positive (Unswept.Length));
-               end if;
+               --  One at a time, always. A keyframe needs the eye's picture still, and an arm moving through it keeps it
+               --  from ever being. The arms swept at once, when the lock-in showed no eye the other's response, followed
+               --  keyframes in the first pass (one arm of each boot in the second) and none in the 4 to 8 passes after, in
+               --  all three table boots of 10-20 (t20, t21, t22: the pushes of hundreds of units entered the other's view,
+               --  which the recognition's small pushes had not), and R6's eighth start (10-14) before them; swept one at
+               --  a time the same seeds followed 28 to 30 keyframes in pass 2 (r20, r21). The recognition cannot tell what
+               --  an arm will show an eye at the widest turn it will make.
+               for P of Unswept loop
+                  Sweep (P.Arm);
+               end loop;
                for P of Unswept loop
                   Swept.Append (P);
                end loop;

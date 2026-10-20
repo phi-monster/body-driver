@@ -1,4 +1,6 @@
 with Ada.Containers;
+with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Clock;
@@ -80,7 +82,8 @@ package body Driver.Robot.Lockin is
      (Regression.Count_Significant (Showing + Silent, Showing + Silent, Half)
       and then not Regression.Count_Significant (Showing, Showing + Silent, Half));
 
-   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown is
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean; Quiet : Boolean := False)
+     return Shown is
       Z : constant Real := Driver.Conventions.Z;
 
       --  The variance of a cell's energy at the typical energy: Var ** 2 times that of its statistic.
@@ -124,10 +127,12 @@ package body Driver.Robot.Lockin is
             Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
             High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
          begin
+            if not Quiet then
             Driver.Log.Line (Driver.Log.Robot, "lock-in: the" & Pool'Length'Image & " cells too noisy to tell show together "
                              & Driver.Log.Image (Mean, 4) & " +- " & Driver.Log.Image (Sigma, 4) & " of the typical energy "
                              & Driver.Log.Image (Typical, 4) & " (their energies sum to " & Driver.Log.Image (Sum_Energy, 4)
                              & ", their variances to " & Driver.Log.Image (Sum_Variance, 4) & ";" & Far'Image & " far above)");
+            end if;
             return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
                     Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
          end;
@@ -166,7 +171,8 @@ package body Driver.Robot.Lockin is
       Noise      : Real_Vectors.Vector;
       Least, Most : out Natural;
       Disagree    : out Boolean;
-      Resting     : out Real)
+      Resting     : out Real;
+      Quiet       : Boolean := False)
    is
       Z        : constant Real := Driver.Conventions.Z;
       Tail     : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z);
@@ -259,7 +265,7 @@ package body Driver.Robot.Lockin is
             Disagree := Cells_Disagree (Able, Silent);
             if Too_Noisy > 0 then
                declare
-                  Show : constant Shown := Cells_Shown (Pool (1 .. Too_Noisy), Typical, Disagree);
+                  Show : constant Shown := Cells_Shown (Pool (1 .. Too_Noisy), Typical, Disagree, Quiet);
                begin
                   Least := Natural'Max (Count, Able + Show.Least);
                   Most := Natural'Max (Count, Able + Show.Most);
@@ -352,6 +358,8 @@ package body Driver.Robot.Lockin is
       end loop;
       M.Graph.Effects.Clear;
       M.Graph.Effects.Append (Eye_Effect'(others => <>), Ada.Containers.Count_Type (Groups * Eyes));
+      M.Graph.Channels.Clear;
+      M.Graph.Channels.Append (Channel_Effect_Vectors.Empty_Vector, Ada.Containers.Count_Type (Eyes));
       for S of M.Groups loop
          if S.Commandable then
             All_Columns := All_Columns + S.Size;
@@ -707,6 +715,13 @@ package body Driver.Robot.Lockin is
                           new Real_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0.0]];
                         Dof : Natural_Grid_Access :=
                           new Natural_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0]];
+                        --  The same for each column alone (the grids' second index is the column, not a group).
+                        Col_Responding : Flag_Grid_Access :=
+                          new Flag_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => False]];
+                        Col_Energy : Real_Grid_Access :=
+                          new Real_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0.0]];
+                        Col_Dof : Natural_Grid_Access :=
+                          new Natural_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0]];
                         Textured : Flags_Access := new Flags'[1 .. N => False];
                         --  Each cell's results, cell by cell: its noise, and for each regressor its gain, the gain's
                         --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
@@ -791,6 +806,23 @@ package body Driver.Robot.Lockin is
                                           Dof (Cell, G) := Ku + Kv;
                                        end;
                                     end if;
+                                 end;
+                              end loop;
+                              --  Each column alone: whether this cell's displacement follows that channel, and the
+                              --  energy and degrees of freedom of the test.
+                              for K in 1 .. Kept loop
+                                 declare
+                                    Su, Sv : Real;
+                                    Ku, Kv : Natural;
+                                    Col    : constant Group_Id := Group_Id (K);
+                                 begin
+                                    Regression.Test_Block (Fu, K + 1, K + 1, Su, Ku);
+                                    Regression.Test_Block (Fv, K + 1, K + 1, Sv, Kv);
+                                    Col_Responding (Cell, Col) :=
+                                      Ku + Kv > 0
+                                      and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv) > Driver.Conventions.Z;
+                                    Col_Energy (Cell, Col) := (Su - Real (Ku)) * Fu.Scale ** 2 + (Sv - Real (Kv)) * Fv.Scale ** 2;
+                                    Col_Dof (Cell, Col) := Ku + Kv;
                                  end;
                               end loop;
                               --  Each regressor's gain in this cell: its displacement per
@@ -1001,11 +1033,63 @@ package body Driver.Robot.Lockin is
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);
                               end;
                            end loop;
+                           --  And of each channel alone, as of a group (the same tests of the column's cells).
+                           for K in 1 .. Kept loop
+                              declare
+                                 Col    : constant Group_Id := Group_Id (K);
+                                 Count  : Natural := 0;
+                                 Effect : Eye_Effect;
+                              begin
+                                 if T > 0 then
+                                    for Cell in 1 .. N loop
+                                       if Textured (Cell) and then Col_Responding (Cell, Col) then
+                                          Count := Count + 1;
+                                       end if;
+                                    end loop;
+                                    declare
+                                       F           : constant Real := Real (Count) / Real (T);
+                                       Least, Most : Natural;
+                                       Disagree    : Boolean;
+                                       Resting     : Real;
+                                    begin
+                                       Cells_Showing (Col, Textured.all, Col_Responding.all, Col_Energy.all, Col_Dof.all, S.Noise,
+                                                      Least, Most, Disagree, Resting, Quiet => True);
+                                       Effect.Resting := Resting;
+                                       Effect.Responding := Count;
+                                       Effect.Textured := T;
+                                       Effect.Fraction :=
+                                         (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
+                                       Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Effect.Could_Be_Whole := Regression.Count_Significant (Most, T, Half);
+                                    end;
+                                 end if;
+                                 M.Graph.Channels (E).Append
+                                   (Channel_Effect'(Group => Cols (K).Group, Channel => Cols (K).Channel, Effect => Effect));
+                              end;
+                           end loop;
+                           declare
+                              Whole_List : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for Item of M.Graph.Channels (E) loop
+                                 if Item.Effect.Verdict = Whole then
+                                    Ada.Strings.Unbounded.Append
+                                      (Whole_List, " g" & Ada.Strings.Fixed.Trim (Item.Group'Image, Ada.Strings.Left) & "c"
+                                       & Ada.Strings.Fixed.Trim (Item.Channel'Image, Ada.Strings.Left));
+                                 end if;
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": of the" & Kept'Image
+                                               & " channels kept, the view moves whole with"
+                                               & (if Ada.Strings.Unbounded.Length (Whole_List) = 0 then " none"
+                                                  else Ada.Strings.Unbounded.To_String (Whole_List)));
+                           end;
                         end;
                         Free (X);
                         Free (Responding);
                         Free (Energy);
                         Free (Dof);
+                        Free (Col_Responding);
+                        Free (Col_Energy);
+                        Free (Col_Dof);
                         Free (Textured);
                         Free (Beta_U_Of);
                         Free (Beta_V_Of);

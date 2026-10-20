@@ -245,6 +245,7 @@ package body Driver.Robot.Motion is
                end;
             end if;
          end loop;
+         M.Stepping := True;
          Driver.Beats.Send (Sent);
          --  The push starts at the beat whose observation was taken under the
          --  new targets; it is over when the step tracker has seen it end.
@@ -304,6 +305,7 @@ package body Driver.Robot.Motion is
                exit when Finished;
             end;
          end loop;
+         M.Stepping := False;
       end;
    end One_Step;
 
@@ -413,6 +415,24 @@ package body Driver.Robot.Motion is
                      --  each error under a twentieth of a unit, where the matcher's steps were 0.04 to 0.28 units and
                      --  the lock-in's 0.001 to 0.009.
                      Arm : Arm_Id'Base := 0;
+                     --  The least turn of channel C that any arm of the group counts (Kinematics.Counted_Turn): a group several
+                     --  arms share (a humanoid's torso is the joints of every arm) lands a joint within none of their turns.
+                     function Least_Counted (C : Positive) return Real is
+                        Result : Real := 0.0;
+                     begin
+                        for Other in 1 .. Arm_Count (M) loop
+                           if Natural (Arm_Group (M, Arm_Id (Other))) = G then
+                              declare
+                                 T : constant Real := Kinematics.Counted_Turn (M, Arm_Id (Other), C);
+                              begin
+                                 if T > 0.0 and then (Result = 0.0 or else T < Result) then
+                                    Result := T;
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                        return Result;
+                     end Least_Counted;
                      --  A landing the body cannot tell from its target is where it was sent: its error as a change
                      --  of the readings is no motion by the body's one test (Channels.Visible), an eye seeing none
                      --  of it. Judged against the readings' noise alone, a simulator's arm that repeats its readings
@@ -455,7 +475,7 @@ package body Driver.Robot.Motion is
                            --  sent again two to four times each, 340 times in a boot whose sweep then held still
                            --  for no keyframe (R6's eighth start, 10-14).
                            Least : constant Real := Steps.Executed_Least (M, Group_Id (G), C);
-                           Counted : constant Real := (if Arm > 0 then Kinematics.Counted_Turn (M, Arm, C) else 0.0);
+                           Counted : constant Real := Least_Counted (C);
                         begin
                            if not Stopped and then Noise < Real'Last and then Noise > 0.0
                              and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))

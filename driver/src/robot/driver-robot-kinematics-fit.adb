@@ -572,9 +572,20 @@ package body Driver.Robot.Kinematics.Fit is
                            Moves := Moves or else Xn (Xn'First + P - 1) /= X (X'First + P - 1);
                         end loop;
                         if Moves then
-                           Evaluate (Xn, Rn.all);
                            declare
-                              C : constant Real := Cost (Rn.all);
+                              --  A step to a place the model cannot be evaluated at (a scale gone to infinity, an axis to
+                              --  nothing: a rotation vector of NaN raises in the norm) lowers nothing. The humanoid
+                              --  cold boot h3 (10-20) ended at beat 15560 on one such trial of an order's quick fit,
+                              --  "the estimates failed: ARGUMENT_ERROR", and the driver closed the connection.
+                              function Trial_Cost return Real is
+                              begin
+                                 Evaluate (Xn, Rn.all);
+                                 return Cost (Rn.all);
+                              exception
+                                 when Ada.Numerics.Argument_Error =>
+                                    return Real'Last;
+                              end Trial_Cost;
+                              C : constant Real := Trial_Cost;
                            begin
                               if C < Cost0 then
                                  --  To the end: a step that moves some combination of the parameters by more than

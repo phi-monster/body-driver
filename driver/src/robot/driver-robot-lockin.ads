@@ -47,7 +47,7 @@ private package Driver.Robot.Lockin is
    --  disagree that a picture moves whole: they are enough to say it (even all of them showing it would be a significant
    --  majority) and a significant majority of them do not show it. Too few of them to say anything do not disagree.
 
-   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean; Quiet : Boolean := False) return Shown
      with Pre  => Pool'Length > 0 and then Typical > 0.0 and then (for all C of Pool => C.Variance > 0.0),
           Post => Cells_Shown'Result.Least <= Cells_Shown'Result.Most and then Cells_Shown'Result.Most <= Pool'Length;
    --  Of cells whose noise is too much for them to tell a motion of the energy Typical, how many show a motion of that

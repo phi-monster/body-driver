@@ -440,6 +440,12 @@ package body Driver.Robot.Kinematics is
                for V in R.Views.First_Index .. R.Views.Last_Index loop
                   if R.Views (V).Eye = H then
                      Seen := V;
+                     --  Every segment holds the eye's latest picture, a spent one too: the view takes its points for a new
+                     --  segment from it (Seed_Views) when the arm comes back into the picture, none of the others live.
+                     if Driver.Images.Width (Picture) > 0 then
+                        R.Views (V).Latest := Picture;
+                        R.Views (V).Latest_Frame := Natural (R.Frames.Length);
+                     end if;
                      if not R.Views (V).Spent then
                         R.Views (V).Images.Append (Picture);
                         Ask (R.Views (V));
@@ -689,7 +695,13 @@ package body Driver.Robot.Kinematics is
                   --  the rounds aligned them for 21 to 115 s each (R5's fifth start, R6's second, 10-14), for a
                   --  measurement of the view's motion per unit that the sweep's first level, searched wide, makes
                   --  itself; nothing else asks the kinematics anything before the sweep.
-                  if R.Sweeping and then Held_Still (M, Arm, Beat)
+                  --  Not while a step is under way (Motion.One_Step): the readings of a joint that has begun to move are
+                  --  below the step an eye can see in the first beat or two of its push (the sweep's first level is that
+                  --  step), the picture is a lag behind them, and the arm held still by that test gave a keyframe whose
+                  --  reading was 62 % of the way and whose picture was the one at rest: the base arm of the cold boot b2
+                  --  (10-20), channel 2 turned 157 units, the keyframe at 98 showed no motion of the view, its pixels a
+                  --  unit were measured at 0.0001 and the joint was never fitted.
+                  if R.Sweeping and then not M.Stepping and then Held_Still (M, Arm, Beat)
                     and then E <= O.Images.Last_Index and then Driver.Observations.Has_Image (O, E)
                   then
                      declare
@@ -2467,13 +2479,56 @@ package body Driver.Robot.Kinematics is
    begin
       if K > 0 then
          for V of M.Kinematics (K).Views loop
-            if V.Eye = E and then Channel - 1 <= V.Per_Px.Last_Index then
-               Most := Real'Max (Most, V.Per_Px (Channel - 1));
+            if V.Eye = E and then Channel - 1 <= V.Edge_Px.Last_Index then
+               Most := Real'Max (Most, V.Edge_Px (Channel - 1));
             end if;
          end loop;
       end if;
       return Most;
    end View_Shift;
+
+   procedure Newest_Sightings (M : Model; A : Arm_Id; E : Eye_Id; Sighted, Answered : out Natural) is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      Sighted := 0;
+      Answered := 0;
+      if K = 0 then
+         return;
+      end if;
+      declare
+         R      : Arm_Evidence renames M.Kinematics (K);
+         Newest : constant Natural := Natural (R.Frames.Length);
+      begin
+         for V of R.Views loop
+            if V.Eye = E and then V.First < Newest then
+               for S of V.Matches loop
+                  if S.Frame = Newest then
+                     for I in S.Answered.First_Index .. S.Answered.Last_Index loop
+                        if S.Answered (I) and then I <= V.Query_U.Last_Index and then S.Sigma (I) > 0.0
+                          and then Driver.Uncertain.Significant
+                                     (Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                        ((S.To_U (I) - V.Query_U (I)) ** 2 + (S.To_V (I) - V.Query_V (I)) ** 2),
+                                      S.Sigma (I))
+                        then
+                           Answered := Answered + 1;
+                           if S.Found (I) then
+                              Sighted := Sighted + 1;
+                           end if;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+            end if;
+         end loop;
+      end;
+   end Newest_Sightings;
+
+   procedure Judge_Again (M : in out Model; E : Eye_Id) is
+   begin
+      if E in M.Fixed_Eyes.First_Index .. M.Fixed_Eyes.Last_Index then
+         M.Fixed_Eyes (E).Mine_From := 0;
+      end if;
+   end Judge_Again;
 
    function Viewing_Eyes (M : Model; A : Arm_Id) return Count_Vectors.Vector is
       Eyes : Count_Vectors.Vector;
@@ -3055,6 +3110,16 @@ package body Driver.Robot.Kinematics is
       for C in 1 .. N loop
          Noise (C) := Channels.Noise (M, R.Group, C);
          Shift (C) := Lockin.Shift (M, V.Eye, R.Group, C);
+         --  The lock-in's shift is the median of its cells, the arm's among them and the table's that stands still: a point of the
+         --  arm's far links moves ten times that or more. A point is asked within what the fast points of the view's earlier
+         --  segments moved (the upper edge of their speeds, Edge_Px): asked within the median's, a new segment found 30 to 45 percent
+         --  of its points at the next keyframe, and a track found at one keyframe after its reference is given no link
+         --  (Hand_Eye.Infer_Link needs two sightings at keyframes where the joint turned alone).
+         for Other of R.Views loop
+            if Other.Eye = V.Eye and then C - 1 <= Other.Edge_Px.Last_Index then
+               Shift (C) := Real'Max (Shift (C), Other.Edge_Px (C - 1));
+            end if;
+         end loop;
       end loop;
       if (for some X of Noise => X >= Real'Last) then
          return;
@@ -3154,6 +3219,7 @@ package body Driver.Robot.Kinematics is
             V.Aligned := I;
             if Driver.Images.Width (Picture) > 0 then
                V.Latest := Picture;
+               V.Latest_Frame := V.First + I - 1;
                V.Lost := (if (for some X of Set.Found => X) then 0 else V.Lost + 1);
             end if;
             --  A keyframe that refused nothing for its prediction needs its picture no more.
@@ -3174,6 +3240,7 @@ package body Driver.Robot.Kinematics is
          begin
             Measure_Points (Slopes, Misfit);
             V.Per_Px.Clear;
+            V.Edge_Px.Clear;
             for C in 1 .. N loop
                declare
                   Told  : Real_Array (1 .. Queries);
@@ -3198,6 +3265,10 @@ package body Driver.Robot.Kinematics is
                      end;
                   end loop;
                   V.Per_Px.Append (if Count = 0 then 0.0 else Driver.Stats.Median (Told (1 .. Count)));
+                  V.Edge_Px.Append
+                    (if Count = 0 then 0.0
+                     else Driver.Stats.Median (Told (1 .. Count))
+                          + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Told (1 .. Count)));
                end;
             end loop;
          end;
@@ -3205,7 +3276,6 @@ package body Driver.Robot.Kinematics is
       if V.Lost >= 2 and then not V.Spent then
          V.Spent := True;
          Keyframes.Release (V.Chain);
-         V.Latest := Driver.Images.No_Image;
          for K in V.Images.First_Index .. V.Images.Last_Index loop
             V.Images.Replace_Element (K, Driver.Images.No_Image);
          end loop;
@@ -3223,24 +3293,21 @@ package body Driver.Robot.Kinematics is
    --  as the first segment's is the first keyframe's, and the keyframes after it are aligned against it. The arm
    --  carried across the eye's view shows the eye parts of itself the first picture did not (the step 3 bench: a point
    --  for every patch the arm's links show, 6 of 10 table eyes placed where the first picture's points placed none).
-   procedure Seed_Views (M : Model; R : in out Arm_Evidence; H : Eye_Id) is
-      Newest : Natural := 0;   --  the newest arm keyframe a live segment of the eye was aligned at
-      Source : Natural := 0;   --  the segment that was
+   procedure Seed_Views (M : Model; R : in out Arm_Evidence; H : Eye_Id; Force : Boolean := False) is
+      Newest : constant Natural := Natural (R.Frames.Length);   --  the arm's newest keyframe
+      Source : Natural := 0;   --  a segment of the eye that holds its picture
    begin
+      --  Only at the arm's newest keyframe: a picture older than that is not where the arm now stands.
       for Position in R.Views.First_Index .. R.Views.Last_Index loop
          declare
             V : Hand_View renames R.Views (Position);
          begin
-            if V.Eye = H and then not V.Spent and then V.Aligned >= 1 and then Driver.Images.Width (V.Latest) > 0
-              and then V.First + V.Aligned - 1 > Newest
-            then
-               Newest := V.First + V.Aligned - 1;
+            if V.Eye = H and then V.Latest_Frame = Newest and then Driver.Images.Width (V.Latest) > 0 then
                Source := Position;
             end if;
          end;
       end loop;
-      --  Only at the arm's newest keyframe: a picture older than that is not where the arm now stands.
-      if Source = 0 or else Newest /= Natural (R.Frames.Length) then
+      if Source = 0 then
          return;
       end if;
       declare
@@ -3259,8 +3326,10 @@ package body Driver.Robot.Kinematics is
                declare
                   Covered : Boolean := False;
                begin
+                  --  Forced (the carrying of the arm through the eye's view begins): every cell that follows the arm, at the
+                  --  pose the arm starts every joint's run from, whatever the segments live follow.
                   for W of R.Views loop
-                     if W.Eye = H and then not W.Spent and then not W.Matches.Is_Empty
+                     if not Force and then W.Eye = H and then not W.Spent and then not W.Matches.Is_Empty
                        and then W.Matches (W.Matches.Last_Index).Frame = Newest
                      then
                         declare
@@ -3301,6 +3370,14 @@ package body Driver.Robot.Kinematics is
          end if;
       end;
    end Seed_Views;
+
+   procedure Seed_Segment (M : in out Model; A : Arm_Id; E : Eye_Id) is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K > 0 then
+         Seed_Views (M, M.Kinematics (K), E, Force => True);
+      end if;
+   end Seed_Segment;
 
    procedure Align_New (M : in out Model) is
    begin
@@ -4319,6 +4396,7 @@ package body Driver.Robot.Kinematics is
       World    : constant Natural := Index_Of (M, 1);
       Count    : Natural := 0;
       Evidence : Natural := 0;
+      Mine     : Natural := 0;   --  of it, what the eye's own views add: the arm's matches are most of it
       Kin_Of   : Index_List (1 .. Natural'Max (1, Natural (M.Kinematics.Length))) := [others => 0];
       View_Of  : Index_List (1 .. Natural'Max (1, Natural (M.Kinematics.Length))) := [others => 0];
    begin
@@ -4339,6 +4417,7 @@ package body Driver.Robot.Kinematics is
                         Evidence := Evidence + R.Result.Matches;
                      end if;
                      Evidence := Evidence + R.Views (Position).Aligned + R.Views (Position).Revision;
+                     Mine := Mine + R.Views (Position).Aligned + R.Views (Position).Revision;
                   end if;
                end loop;
             end if;
@@ -4370,7 +4449,13 @@ package body Driver.Robot.Kinematics is
          --  estimates are (Estimates_Due): the search over its turns and lenses ran at every estimate, 22 to 31 s each
          --  on s41 (servo seed 6 of the fake robot, 10-17; 2 eyes, 26 and 7 tracks), and found nothing each time; at the
          --  rounds of one estimate whose keyframes were aligned again it ran again, 53 to 213 s a round, 610 s in all.
-         if F.Judged and then not F.Known and then F.From > 0 and then Evidence < 2 * F.From and then not Moved_On then
+         --  The evidence that doubles is the eye's own, the keyframes its views followed: the arm's matches, thousands
+         --  from the sweep's first pass, were most of the sum. The cold boot r20 (10-20) carried the arm's hand through
+         --  the eye's view for 28 keyframes of one joint and the eye was not fitted ("the fixed eyes in 0.0 s") until
+         --  beat 9886, 2800 beats after the carrying began, when the arm's matches had nearly doubled.
+         if F.Judged and then not F.Known and then F.Mine_From > 0 and then Mine < 2 * F.Mine_From
+           and then not Moved_On
+         then
             return;
          end if;
       end;
@@ -4480,7 +4565,8 @@ package body Driver.Robot.Kinematics is
             function Index (T : Positive) return Positive is
               (if T <= Fit.Lens_Terms then T else Own + T - Fit.Lens_Terms);
          begin
-            F := (Judged => True, From => Evidence, Lens => Lens, Used => Report.Used, Offered => Report.Offered,
+            F := (Judged => True, From => Evidence, Mine_From => Mine, Lens => Lens, Used => Report.Used,
+                  Offered => Report.Offered,
                   Sigma_Px => Report.Sigma_Px, Distorted => Report.Distorted, Why => Report.Why, others => <>);
             if World > 0 then
                F.Arm := M.Kinematics (World).Arm;

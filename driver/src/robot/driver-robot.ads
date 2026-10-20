@@ -629,10 +629,23 @@ private
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);
    --  Indexed (G - 1) * Eyes + E.
 
+   --  What one channel's push does to one eye: the effect of a group, for one of its channels alone (Driver.Robot.Lockin).
+   --  A group whose channels move different eyes (a humanoid's torso moves every eye, its neck the head's, an arm its
+   --  wrist's) is told apart by these.
+   type Channel_Effect is record
+      Group   : Group_Id;
+      Channel : Positive;
+      Effect  : Eye_Effect;
+   end record;
+
+   package Channel_Effect_Vectors is new Ada.Containers.Vectors (Positive, Channel_Effect);
+   package Eye_Channels_Vectors is new Ada.Containers.Vectors (Eye_Id, Channel_Effect_Vectors.Vector, Channel_Effect_Vectors."=");
+
    package Role_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Role);
    package Arm_Number_Vectors is new Ada.Containers.Vectors (Group_Id, Arm_Id'Base);
    package Clause_Vectors is new Ada.Containers.Vectors (Group_Id, Natural);
    package Arm_Group_Vectors is new Ada.Containers.Vectors (Arm_Id, Group_Id, Driver.Observations."=");
+   package Arm_Eye_Vectors is new Ada.Containers.Vectors (Arm_Id, Eye_Id'Base, Driver.Observations."=");
    package Mount_Vectors is new Ada.Containers.Vectors (Eye_Id, Mount);
    package Lag_Vectors is new Ada.Containers.Vectors (Eye_Id, Integer);
    package Eye_Flag_Vectors is new Ada.Containers.Vectors (Eye_Id, Boolean);
@@ -641,10 +654,13 @@ private
    --  eye, and what follows from that (Driver.Robot.Graph).
    type Body_Graph is record
       Effects : Effect_Vectors.Vector;
+      Channels : Eye_Channels_Vectors.Vector;   --  per eye, the effect of each channel the lock-in kept
       Roles   : Role_Vectors.Vector;
       Arm_Of  : Arm_Number_Vectors.Vector;   --  an Arm's own number, a Closer's arm, else 0
       Breach  : Clause_Vectors.Vector;
       Arms    : Arm_Group_Vectors.Vector;
+      Arm_Eye : Arm_Eye_Vectors.Vector;   --  per arm: the eye it is for when its group's channels move different eyes
+                                          --  (an arm of the group for each), else 0: the arm of a whole group
       Mounts  : Mount_Vectors.Vector;
       Carrier : Group_Id'Base := 0;
    end record;
@@ -777,6 +793,7 @@ private
       --  that the eye saw, aligned (and aligned again).
       Judged       : Boolean := False;
       From         : Natural := 0;
+      Mine_From    : Natural := 0;   --  and the part of it the eye's own views are: their keyframes aligned (and again)
       From_Flicks  : Natural := 0;   --  the closer flicks it was measured by (Kinematics.Fit_Beacon)
       --  What the points tracked on the arms measured of it (Kinematics.Fit_Hand) before the flicks' measurement was
       --  joined to it, kept as of that fit (Points_From, its From): a fit kept for its evidence is joined afresh, once.
@@ -824,9 +841,12 @@ private
       --  query points chosen there, its matches' frames the arm's keyframes. An eye's view of an arm may be several
       --  such segments, a new one where the arm moved into a part of the picture no point of the others follows.
       First    : Positive := 1;
-      Latest   : Driver.Images.Image;       --  the picture of the newest keyframe aligned (Seed_Views chooses points in it)
+      Latest   : Driver.Images.Image;       --  the eye's picture at the arm's newest keyframe (Seed_Views chooses points in it)
+      Latest_Frame : Natural := 0;          --  and that keyframe: every segment of the eye holds it, spent or not
       Lost     : Natural := 0;              --  the keyframes in a row, from a picture, that found none of its points
       Spent    : Boolean := False;          --  it follows nothing any more: its chain is let go, its pictures dropped
+      Edge_Px  : Real_Vectors.Vector;       --  per channel: the same over the points' pixels a unit moves them, at the upper edge of the
+                                            --  speeds (their median and Z of their robust scatter): how far the fast points move
       Per_Px   : Real_Vectors.Vector;       --  per channel: the median, over the points whose motion its keyframes tell, of
                                             --  the pixels a unit of the channel moves one (Align_View); empty before any
       Images   : Image_Vectors.Vector;   --  per keyframe of the arm: the eye's picture then; none where it was not settled
@@ -955,6 +975,7 @@ private
 
    type Model is tagged limited record
       Beats          : Natural := 0;               --  observations seen
+      Stepping       : Boolean := False;           --  a step is under way (Motion.One_Step): no keyframe is taken in it
       Groups         : Group_Stream_Vectors.Vector;
       Eyes           : Eye_Stream_Vectors.Vector;
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order

@@ -346,10 +346,27 @@ private package Driver.Robot.Kinematics is
    --  How uncertain fixed eye E's terms in arm A's view are now: the geometric mean of their standard deviations (the
    --  lens's, then the pose's, each in its own unit); Real'Last while the view is not fitted.
 
+   procedure Seed_Segment (M : in out Model; A : Arm_Id; E : Eye_Id);
+   --  A segment of fixed eye E's view of arm A from the picture at the arm's newest keyframe, a point for every cell that
+   --  follows the arm there, whatever the segments live follow: the boot's carrying of the hand through the eye's view begins
+   --  with one, at the pose every joint's run goes out from, so that each step of a run turns that joint alone from the
+   --  keyframe the segment's points were chosen at (Hand_Eye.Infer_Link needs two sightings so).
+
    function View_Shift (M : Model; A : Arm_Id; E : Eye_Id; Channel : Positive) return Real;
    --  How many pixels a unit of arm A's channel moves the points of fixed eye E's view of the arm, as the keyframes told:
    --  the largest, over the segments of the view, of the median over the points whose motion they tell; 0 where no
    --  point's does (the sweep has not moved the channel in the eye's view).
+
+   procedure Newest_Sightings (M : Model; A : Arm_Id; E : Eye_Id; Sighted, Answered : out Natural);
+   --  What fixed eye E's view of arm A found at the arm's newest keyframe, over the segments aligned to it (not the ones
+   --  opened at it), of the points that moved from where the segment's reference put them by more than the aligner's own
+   --  uncertainty of the answer: Answered, from a window of any width, and Sighted, the ones a fit may rest on (from a
+   --  narrow window, the keyframe followed). The points that stand are no sight of the arm moving.
+
+   procedure Judge_Again (M : in out Model; E : Eye_Id);
+   --  The next estimate fits fixed eye E again, whatever its evidence has grown by: it is not fitted again until that has
+   --  doubled (Fit_Hand), and the carrying of an arm's hand through its view, which is what the evidence is for, ends a
+   --  joint's run with the eye's own views grown by a part of it.
 
    function Viewing_Eyes (M : Model; A : Arm_Id) return Count_Vectors.Vector;
    --  The fixed eyes that keep a view of arm A (Hand_View), fitted or not.
