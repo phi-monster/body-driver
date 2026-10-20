@@ -90,18 +90,36 @@ package body Driver.Robot.Flows is
       return N;
    end Prime;
 
-   --  The flow's fit stored as the fixed eye's place (Fixed_Fit) in the frame of its Slot-th arm: its lens (one focal
-   --  length both ways, the principal point, no distortion), its camera in that arm's frame, and the covariance of the
-   --  twelve terms the fixed eye's users read (the logarithms of the two focal lengths, the principal point, the two
-   --  distortion terms, the turn about the camera's own axes, the centre) from the flow's terms, the distortion held;
-   --  its spread the noise of its sightings (the flow measures no sighting of its own: the place it leaves a point in
-   --  the picture uncertain by stands in).
-   procedure Store (M : in out Model; E : Eye_Id; Arm : Arm_Id; Slot : Positive; Result : Flow.Report) is
-      Terms : constant := KFit.Lens_Terms + 6;
-      Arm_0 : constant Natural := 3 + 6 * (Slot - 1);
-      From  : constant array (1 .. Terms) of Natural :=
-        [1, 1, 2, 3, 0, 0, Arm_0 + 1, Arm_0 + 2, Arm_0 + 3, Arm_0 + 4, Arm_0 + 5, Arm_0 + 6];
+   type Arm_Id_Array is array (Positive range <>) of Arm_Id;
+
+   --  The flow's fit stored as the fixed eye's place (Fixed_Fit): its lens (one focal length both ways, the principal
+   --  point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the
+   --  covariance of the lens's six terms as an arm's fit has them (the logarithms of the two focal lengths, the
+   --  principal point, the two distortion terms, held) and of every arm's turn about the camera's own axes and centre;
+   --  the world arm's pose (the first arm's) and its twelve terms' covariance as the fixed eye's users read them, the eye
+   --  known only when it saw that arm. Its spread the place it leaves the arms' points in its picture uncertain by.
+   procedure Store (M : in out Model; E : Eye_Id; Arms : Arm_Id_Array; Result : Flow.Report) is
+      Slots : constant Natural := Arms'Length;
+      Terms : constant Natural := KFit.Lens_Terms + 6 * Slots;
+      Flow_Lens : constant Natural := Flow.Terms_For (Slots) - 6 * Slots;   --  the flow's own lens terms
+      --  The flow's term behind each of the stored ones (nought: held, its rows and columns nought): both focal
+      --  lengths' logarithms its one, the principal point its, then the arms' six each in the same order.
+      function From (P : Positive) return Natural is
+        (if P <= KFit.Lens_Terms then (case P is when 1 | 2 => 1, when 3 => 2, when 4 => 3, when others => 0)
+         else Flow_Lens + (P - KFit.Lens_Terms));
+      function Joint_At (P, Q : Positive) return Real is
+        (if From (P) > 0 and then From (Q) > 0 then Result.Covariance (From (P), From (Q)) else 0.0);
+      --  The world arm's place among the arms (nought: the eye did not see it).
+      World : Natural := 0;
+      --  A term of the world arm's twelve among the stored ones.
+      function Own (P : Positive) return Positive is
+        (if P <= KFit.Lens_Terms then P else P + 6 * (World - 1));
    begin
+      for S in Arms'Range loop
+         if Arms (S) = 1 then
+            World := S - Arms'First + 1;
+         end if;
+      end loop;
       while M.Fixed_Eyes.Last_Index < E loop
          M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
       end loop;
@@ -109,15 +127,27 @@ package body Driver.Robot.Flows is
          F : Fixed_Fit renames M.Fixed_Eyes (E);
       begin
          F := (others => <>);
-         F.Known := True;
-         F.Arm := Arm;
          F.Lens := (Fx => Result.Lens.Fx, Fy => Result.Lens.Fy, Cx => Result.Lens.Cx, Cy => Result.Lens.Cy,
                     K1 | K2 => 0.0);
-         F.Pose := Result.Poses (Slot);
+         if World > 0 then
+            F.Known := True;
+            F.Arm := 1;
+            F.Pose := Result.Poses (World);
+            for P in 1 .. KFit.Lens_Terms + 6 loop
+               for Q in 1 .. KFit.Lens_Terms + 6 loop
+                  F.Covariance.Append (Joint_At (Own (P), Own (Q)));
+               end loop;
+            end loop;
+         else
+            F.Why := Ada.Strings.Unbounded.To_Unbounded_String ("it did not see the first arm, the world's");
+         end if;
+         for S in 1 .. Slots loop
+            F.Arms.Append (Natural (Arms (Arms'First + S - 1)));
+            F.Poses.Append (Result.Poses (S));
+         end loop;
          for P in 1 .. Terms loop
             for Q in 1 .. Terms loop
-               F.Covariance.Append
-                 (if From (P) > 0 and then From (Q) > 0 then Result.Covariance (From (P), From (Q)) else 0.0);
+               F.Joint.Append (Joint_At (P, Q));
             end loop;
          end loop;
          F.Used := Result.Used;
@@ -189,8 +219,9 @@ package body Driver.Robot.Flows is
             end;
          end loop;
          for E in 1 .. Eye_Count (M) loop
+            --  An eye judged before (a body file's) is not captured again, told or not.
             if Eye_Mount (M, Eye_Id (E)).Kind = World_Fixed
-              and then not Driver.Robot.Kinematics.Fixed_Known (M, Eye_Id (E))
+              and then (Eye_Id (E) > M.Fixed_Eyes.Last_Index or else not M.Fixed_Eyes (Eye_Id (E)).Judged)
               and then (for some A of Arms => Driver.Robot.Kinematics.Sees (M, Eye_Id (E), A.Group))
             then
                Eyes.Append (E);
@@ -216,6 +247,7 @@ package body Driver.Robot.Flows is
          Waited   : Natural;
          Last_Spread : Real_Array (1 .. Count_E) := [others => Real'Last];
          Last_Why    : array (1 .. Count_E) of Ada.Strings.Unbounded.Unbounded_String;
+         Told        : array (1 .. Count_E) of Boolean := [others => False];   --  the flow told the eye's place
          Settled     : Boolean := False;   --  every eye placed or a doubling of the poses left none surer
 
          function Eye_Of (K : Positive) return Eye_Id is (Eye_Id (Eyes (K - 1)));
@@ -432,7 +464,7 @@ package body Driver.Robot.Flows is
             More : Boolean := False;
          begin
             for E in 1 .. Count_E loop
-               if not Driver.Robot.Kinematics.Fixed_Known (M, Eye_Of (E)) then
+               if not Told (E) then
                   declare
                      Used : Natural := 0;
                      Which : array (1 .. Count_A) of Natural := [others => 0];
@@ -501,7 +533,8 @@ package body Driver.Robot.Flows is
                                             & (if Result.Determined then ""
                                                else ": " & Ada.Strings.Unbounded.To_String (Result.Why)));
                            if Result.Determined then
-                              Store (M, Eye_Of (E), Arms (Which (1)).Arm, 1, Result);
+                              Store (M, Eye_Of (E), [for U in 1 .. Used => Arms (Which (U)).Arm], Result);
+                              Told (E) := True;
                            else
                               Last_Why (E) := Result.Why;
                               if Result.Spread < Last_Spread (E) then
@@ -535,7 +568,7 @@ package body Driver.Robot.Flows is
             loop
                for A in 1 .. Count_A loop
                   if (for some E in 1 .. Count_E => Sees_It (E, A)
-                                                      and then not Driver.Robot.Kinematics.Fixed_Known (M, Eye_Of (E)))
+                                                      and then not Told (E))
                   then
                      Capture_Arm (A, Wanted);
                   end if;
@@ -546,7 +579,7 @@ package body Driver.Robot.Flows is
             end loop;
          end;
          for E in 1 .. Count_E loop
-            if not Driver.Robot.Kinematics.Fixed_Known (M, Eye_Of (E)) then
+            if not Told (E) then
                Not_Placed (M, Eye_Of (E), Ada.Strings.Unbounded.To_String (Last_Why (E)));
             end if;
             for A in 1 .. Count_A loop

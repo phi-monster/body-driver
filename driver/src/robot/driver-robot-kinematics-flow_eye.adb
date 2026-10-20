@@ -952,8 +952,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    ---------------------------------------------------------------------------
    --  The search
 
-   --  The starts that must end at one optimum for it to be found, and the finalists of a race: twice them (as the
-   --  points' search has them, Hand_Eye).
+   --  The starts that must end at one optimum for it to be found (one could be chance, two are a reproduction), and
+   --  the finalists of a race: twice them, so that two may agree and two disagree.
    Agreeing  : constant := 2;
    Finalists : constant := 2 * Agreeing;
 
@@ -1024,10 +1024,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                <= Driver.Conventions.Z);
 
    --  One race over Rotations turns of the spiral (Driver.Numerics.Spiral_Rotation) at the focal lengths of the scan:
-   --  the lengths from the half width seen at a right angle's half, half an octave apart, as the arm's own fit and the
-   --  points' search start theirs (Hand_Eye.Scan_Focals), widened by a length on the side whose end scores best until a
-   --  length inside scores at least as well as both ends (no field of view is assumed); every candidate's centre and
-   --  depths by Solve_Centre. The best-ranked candidates, as many as there are turns, start the race: each takes a step
+   --  the lengths from the half width seen at a right angle's half, half an octave apart, as the arm's own fit starts
+   --  its, widened by a length on the side whose end scores best until a length inside scores at least as well as both
+   --  ends (no field of view is assumed); every candidate's centre and depths by Solve_Centre. The best-ranked candidates, as many as there are turns, start the race: each takes a step
    --  of its refinement over the sample, the worse half drops out, the rest take twice as many, until the finalists are
    --  left; they run to their ends. Found_One when two of them ended at the best optimum and none ended at another that
    --  the pixels do not tell from it (Ambiguous); Reached: the finalists that ended at the best optimum.
@@ -1037,8 +1036,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    is
       Half_Octave : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (2.0) / 2.0;
       Start_Ln    : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Real (Width) / 2.0);
-      --  The steps the scan may take either way: as far as the points' search goes, a logarithm of half what a real
-      --  holds (Hand_Eye.Scan_Focals).
+      --  The steps the scan may take either way: as far as a real's logarithm reaches, in half octaves.
       Reach  : constant Positive :=
         Positive (Real'Floor (Ada.Numerics.Long_Elementary_Functions.Log (Real'Last) / 2.0 / Half_Octave));
       type Cost_Column is array (1 .. Rotations) of Real;
@@ -1308,7 +1306,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  doubling changes nothing: the best optimum of the race is the one of the race before (Same_Optimum) and so is its
    --  verdict, or the race finds that optimum with two of its starts ending at it (Found_One). The spiral covers the
    --  turns twice as finely each time, and an optimum whose basin no start of the coarser race fell in shows when one
-   --  of the finer race does (as the points' search, Hand_Eye.Search). The count stops doubling at the sampled pixels'
+   --  of the finer race does. The count stops doubling at the sampled pixels'
    --  number: a start for every pixel sampled is as fine as the sample can tell starts apart.
    procedure Search
      (P : Problem; L : Layout; Sample : Flag_Array; Arm_Spread, Pixel_Spread : Real; Middle : Vec3; Width : Positive;

@@ -130,6 +130,18 @@ package body Driver.Robot.Body_File is
       & Num (R (2, 1)) & ", " & Num (R (2, 2)) & ", " & Num (R (2, 3)) & ", "
       & Num (R (3, 1)) & ", " & Num (R (3, 2)) & ", " & Num (R (3, 3)) & "]");
 
+   --  Poses as a list of their rotations and centres.
+   function Poses (V : Rigid_Vectors.Vector) return String is
+      T : Unbounded_String := To_Unbounded_String ("[");
+   begin
+      for I in V.First_Index .. V.Last_Index loop
+         Append (T, (if I > V.First_Index then ", " else "") & "{""rotation"": " & Nine (V (I).Rotation)
+                 & ", ""centre"": " & Three (V (I).Translation) & "}");
+      end loop;
+      Append (T, "]");
+      return To_String (T);
+   end Poses;
+
    function Text (M : Model) return String is
       T : Unbounded_String;
 
@@ -324,9 +336,9 @@ package body Driver.Robot.Body_File is
                        & ", ""rotation"": " & Nine (F.Pose.Rotation) & ", ""centre"": " & Three (F.Pose.Translation)
                        & ", ""covariance"": " & Reals (F.Covariance) & ", ""used"": " & Int (F.Used)
                        & ", ""offered"": " & Int (F.Offered) & ", ""sigma_px"": " & Num (F.Sigma_Px)
-                       & ", ""distorted"": " & Flag (F.Distorted)
-                       & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
-                       & ", ""from"": " & Int (F.From) & ", ""mine_from"": " & Int (F.Mine_From) & "}");
+                       & ", ""arms"": " & Counts (F.Arms) & ", ""poses"": " & Poses (F.Poses)
+                       & ", ""joint"": " & Reals (F.Joint)
+                       & ", ""why"": " & Driver.Json.Quote (To_String (F.Why)) & "}");
                   First := False;
                end if;
             end;
@@ -834,11 +846,18 @@ package body Driver.Robot.Body_File is
                               F.Used := Natural'Max (0, Whole (X, "used"));
                               F.Offered := Natural'Max (0, Whole (X, "offered"));
                               F.Sigma_Px := Value (Field (X, "sigma_px"));
-                              F.Distorted := Truth (X, "distorted");
                               F.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                               F.Judged := True;
-                              F.From := Natural'Max (0, Whole (X, "from"));
-                              F.Mine_From := Natural'Max (0, Whole (X, "mine_from"));
+                              F.Arms := Counts_Of (Field (X, "arms"));
+                              F.Joint := Reals_Of (Field (X, "joint"));
+                              declare
+                                 Ps : constant Node := Field (X, "poses");
+                              begin
+                                 for P in 1 .. Size (Ps) loop
+                                    F.Poses.Append (Driver.Numerics.Rigid'(Rotation    => Nine_Of (Field (Item (Ps, P), "rotation")),
+                                                                          Translation => Three_Of (Field (Item (Ps, P), "centre"))));
+                                 end loop;
+                              end;
                            end;
                         end if;
                      end;

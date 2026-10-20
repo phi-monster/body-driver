@@ -2473,7 +2473,7 @@ package body Driver.Alignment.Keyframes is
       --  every point found agrees. Asked from the view's common motion, which their few points never told, and kept
       --  by a field fitted to them, the views of s38's and s39's fixed eyes (servo seeds 6 and 7 of the fake robot,
       --  10-17; 7 to 26 points a keyframe) found 0 of 143, 0 of 308 and 0 of 242 points, s38's second eye 0 of 147,
-      --  and no fixed eye was placed (Kinematics.Hand_Eye: no point of the arm whose motion an eye explains).
+      --  and no fixed eye was placed (no point of the arm whose motion an eye explains).
       if C.Own_Points then
          declare
             Only : constant Flag_Array (1 .. Count) :=
