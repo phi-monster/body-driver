@@ -97,12 +97,6 @@ package Driver.Robot.Motion is
    --  Holds the body for one beat and brings the estimates up to date between the beat and the hold
    --  (Estimate_Now): a round of the sweep is measured before the next round is moved.
 
-   procedure Hold_For_Flick (M : in out Model; A : Arm_Id);
-   --  Holds, beat after beat, until every eye fixed in the world that sees arm A has two still views of its picture at the
-   --  closer's reading (Kinematics.Flick_Watched_Still): a closer moved before has no view before it to be set against,
-   --  and a flick is the change between two views each of two (k20, 10-20: the closer moved a beat or two after the arm
-   --  stopped and 73 poses gave no flick).
-
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id);
    --  Holds the body still until the arm's still twin of its reference has
    --  its match answered or refused (Kinematics.Twin_Answered), so the

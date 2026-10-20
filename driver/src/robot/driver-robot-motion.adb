@@ -774,29 +774,6 @@ package body Driver.Robot.Motion is
       end loop;
    end Hold_For_Keyframe;
 
-   procedure Hold_For_Flick (M : in out Model; A : Arm_Id) is
-      B      : Driver.Clock.Beat;
-      Done   : Boolean;
-      Cause  : Ada.Strings.Unbounded.Unbounded_String;
-      Detail : Ada.Strings.Unbounded.Unbounded_String;
-      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
-   begin
-      loop
-         Driver.Beats.Next (B);
-         Done := Kinematics.Flick_Watched_Still (M, A);
-         if not Done then
-            Kinematics.Flick_Blocked_By (M, A, Cause, Detail);
-            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
-               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
-               Driver.Log.Line (Driver.Log.Robot, "motion: the flick of arm" & A'Image & "'s closer waits for the eyes' views:"
-                                & Ada.Strings.Unbounded.To_String (Detail) & Ada.Strings.Unbounded.To_String (Cause));
-            end if;
-         end if;
-         Driver.Beats.Send (Driver.Commands.Hold);
-         exit when Done;
-      end loop;
-   end Hold_For_Flick;
-
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id) is
       B      : Driver.Clock.Beat;
       Done   : Boolean;

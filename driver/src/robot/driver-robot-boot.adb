@@ -16,7 +16,6 @@ with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Channels;
-with Driver.Robot.Flicks;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
@@ -1225,18 +1224,11 @@ package body Driver.Robot.Boot is
                      Placed  : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Showing_Eyes (M, A);
                      Viewing : constant Count_Vectors.Vector := Driver.Robot.Kinematics.Viewing_Eyes (M, A);
                      Last    : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
-                     --  An arm with a closer has the fixed eyes that see it placed by the closer's flicks after the
-                     --  sweeps (Driver.Robot.Flicks), which tell a lens and a place from a third of the beats that the
-                     --  carrying took, and the carrying found none of them in the cold boots of 10-20 (c20, c21: every
-                     --  joint carried both ways, thousands of beats, 10 to 12 tracks seen twice or more).
-                     Flicked : constant Boolean :=
-                       (for some H in 1 .. Group_Count (M) => Closer_Arm (M, Group_Id (H)) = A);
                   begin
                      Unplaced.Clear;
                      for E of Viewing loop
                         if not Placed.Contains (E)
                           and then Eye_Mount (M, Eye_Id (E)).Kind /= Arm_Carried
-                          and then not Flicked
                         then
                            Unplaced.Append (E);
                         end if;
@@ -2094,12 +2086,6 @@ package body Driver.Robot.Boot is
             Keep ("sweeping the arms");
          end if;
       end;
-      --  The eyes fixed in the world are placed by the first arm's closer, and then each other arm is put into the world by
-      --  its own (Driver.Robot.Flicks): the arm goes through poses that run to its joints' ends, and at each the closer
-      --  goes to its other end and back while the arm holds still, until what its flicks place is placed.
-      for A in 1 .. Arm_Count (M) loop
-         Driver.Robot.Flicks.Place (M, Arm_Id (A));
-      end loop;
       Driver.Robot.Hand.Measure (H, M);
       declare
          procedure Store is

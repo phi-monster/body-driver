@@ -261,8 +261,6 @@ package body Driver.Robot is
          while Kinematics.Realign (M) loop
             Kinematics.Refit (M, Again => True);
          end loop;
-      else
-         Kinematics.Refit_Eyes (M);
       end if;
       Took ("kinematics");
       M.Graph_Evidence := M.Beats;
@@ -352,7 +350,6 @@ package body Driver.Robot is
       Channels.Append (M, O, Sent);
       Steps.Track (M, M.Beats);
       Observe_Eyes (M, O);
-      Kinematics.Watch_Flicks (M, O);
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Observe (M, O);
       end if;

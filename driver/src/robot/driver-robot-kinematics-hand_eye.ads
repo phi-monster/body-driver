@@ -131,11 +131,8 @@ package Driver.Robot.Kinematics.Hand_Eye is
       --  covariance's principal directions and both ways: Z where the cost is quadratic over it
    end record;
 
-   --  What a measurement of a fixed eye must tell for the eye to count as placed, by whatever it was measured: the
-   --  points tracked on the arms (Fit_Eye) or the flicks of a closer (Beacon.Fit_Eye). One rule, so that two
-   --  measurements do not place an eye by two standards: the flicks placed an eye at 58 by 20 px (the truth's 153 by
-   --  153) with its principal point outside the picture, "determined" by 14 flicks of 13 terms and a positive
-   --  definite matrix (e14, 10-19), where the points' rule would have called it undetermined.
+   --  What a measurement of a fixed eye must tell for the eye to count as placed: the points tracked on the arms
+   --  (Fit_Eye).
    --  The lens (Judge_Lens): both focal lengths significant against their own sigmas at the freedom the measurement
    --  has (Student's t), the principal point located in the picture to within half of it at Z sigmas. Cov holds the
    --  covariance of the logarithms of Fx and Fy, Cx and Cy in its first four terms, Freedom the measurement's degrees

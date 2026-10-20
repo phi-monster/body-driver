@@ -794,16 +794,6 @@ private
       Judged       : Boolean := False;
       From         : Natural := 0;
       Mine_From    : Natural := 0;   --  and the part of it the eye's own views are: their keyframes aligned (and again)
-      From_Flicks  : Natural := 0;   --  the closer flicks it was measured by (Kinematics.Fit_Beacon)
-      --  What the points tracked on the arms measured of it (Kinematics.Fit_Hand) before the flicks' measurement was
-      --  joined to it, kept as of that fit (Points_From, its From): a fit kept for its evidence is joined afresh, once.
-      Points_Saved      : Boolean := False;
-      Points_From       : Natural := 0;
-      Points_Known      : Boolean := False;
-      Points_Lens       : Lens_Fit;
-      Points_Pose       : Driver.Numerics.Rigid := Driver.Numerics.Identity;
-      Points_Covariance : Real_Vectors.Vector;
-      Points_Why        : Ada.Strings.Unbounded.Unbounded_String;
    end record;
 
    package Fixed_Fit_Vectors is new Ada.Containers.Vectors (Eye_Id, Fixed_Fit);
@@ -937,46 +927,6 @@ private
 
    package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);
 
-   --  An arm's closer seen to move by an eye fixed in the world while the arm held still (Kinematics.Watch_Flicks):
-   --  the arm's readings, and where the eye's picture changed between its still views at the closer's two readings,
-   --  the centre of the changed pixels with how far that centre is uncertain (their spread over the root of their
-   --  count). The closer's parts move the same way in the tool's frame wherever the arm holds it, so the centres are
-   --  where one point of the tool's frame shows: the eye's beacon (Kinematics.Beacon).
-   type Flick is record
-      Arm      : Arm_Id := 1;
-      Eye      : Eye_Id := 1;
-      Readings : Real_Vectors.Vector;
-      U, V     : Real := 0.0;
-      Sigma    : Real := 0.0;
-      Count    : Natural := 0;
-      Beat     : Natural := 0;
-   end record;
-
-   package Flick_Vectors is new Ada.Containers.Vectors (Positive, Flick);
-
-   --  What one eye fixed in the world holds of one arm's closer while it watches for a flick: its still view at the
-   --  closer's last reading (Before) and the one gathering now, the readings each was taken at, and whether a flick
-   --  was already taken at the arm's readings (one a pose: two flicks there share every error of the pose).
-   type Flick_Watch is record
-      Arm           : Arm_Id := 1;
-      Eye           : Eye_Id := 1;
-      Closer        : Group_Id := 1;
-      Arm_At        : Real_Vectors.Vector;
-      Rest_At       : Real_Vectors.Vector;   --  every other group's readings, in group order, where the arm was
-      Closer_At     : Real_Vectors.Vector;
-      Gathering     : Driver.Pixels.View;
-      Before        : Driver.Pixels.View;
-      Before_Closer : Real_Vectors.Vector;
-      Has_Before    : Boolean := False;
-      Taken         : Boolean := False;
-      --  Since the log last said what the watch met, for a watch that sees no flick to say why: the beats it began
-      --  again because the arm or the rest of the body moved, those the eye's picture was not settled, and those
-      --  something else moved.
-      Resets, Unsettled, Moving : Natural := 0;
-   end record;
-
-   package Flick_Watch_Vectors is new Ada.Containers.Vectors (Positive, Flick_Watch);
-
    type Model is tagged limited record
       Beats          : Natural := 0;               --  observations seen
       Stepping       : Boolean := False;           --  a step is under way (Motion.One_Step): no keyframe is taken in it
@@ -997,8 +947,6 @@ private
       Lag_Evidence   : Natural := 0;               --  the beats the eyes' lags were last measured from (Recompute)
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
       Fixed_Eyes     : Fixed_Fit_Vectors.Vector;     --  per eye: what is measured of it when it is fixed in the world
-      Flicks         : Flick_Vectors.Vector;         --  every closer flick a fixed eye saw (Kinematics.Watch_Flicks)
-      Flick_Watches  : Flick_Watch_Vectors.Vector;   --  per arm's closer and fixed eye, what is watched for the next
       Is_Booted      : Boolean := False;
       Apart          : Boolean := False;   --  the heavier estimates are computed apart (Compute_Apart)
       Due            : Boolean := False;   --  computed apart: they are due

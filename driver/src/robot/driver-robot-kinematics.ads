@@ -16,12 +16,6 @@
 
 private package Driver.Robot.Kinematics is
 
-   procedure Watch_Flicks (M : in out Model; O : Observation);
-   --  One beat of the watch for a closer's flicks in the eyes fixed in the world, before Observe. Apart from it: the
-   --  arms' fits may be reloaded from a body file, and then Observe takes no keyframe, but the eyes fixed in the world
-   --  a reloaded body has not placed are placed by these flicks, so the watch goes on (a boot from a body file saw
-   --  no flick of 73 poses, k20, 10-20, for the watch was inside Observe).
-
    procedure Observe (M : in out Model; O : Observation);
    --  One beat, after the readings and the eyes were taken in.
 
@@ -116,15 +110,6 @@ private package Driver.Robot.Kinematics is
    --  5.7e-6, four rounds and 1100 beats to turns of 0.0013 units, every fit
    --  of them undetermined: "at most 2.7e-4 rad by that scale").
 
-   function Flick_Watched_Still (M : Model; A : Arm_Id) return Boolean;
-   --  Every eye fixed in the world that sees arm A has gathered two still views of its picture at the closer's reading
-   --  (the watch Watch_Flicks keeps): the closer can move now and the eye will have a view to set the next against, or
-   --  has just moved and the eye has the two views after it. True when no such eye is there.
-
-   procedure Flick_Blocked_By (M : Model; A : Arm_Id; Cause, Detail : out Ada.Strings.Unbounded.Unbounded_String);
-   --  Why Flick_Watched_Still is False, for a wait that says what it waits for: which eye has no watch, whose picture is
-   --  not settled, what moves; Cause changes only when that does, Detail adds the watch's counters.
-
    function Sees (M : Model; E : Eye_Id; G : Group_Id) return Boolean;
    --  Eye E's view shows group G move, as the lock-in measured it (a patch of the picture or the whole).
 
@@ -171,12 +156,6 @@ private package Driver.Robot.Kinematics is
    --  Again: the keyframes were just aligned again from the fits of this
    --  estimate, and an arm fitted in it is fitted again from that fit (Fit's
    --  From: its last stage alone).
-
-   procedure Refit_Eyes (M : in out Model);
-   --  The fixed eyes fitted to the closer's flicks (Watch_Flicks) when the arms' kinematics are not fitted but read
-   --  from the body file (Stored_Kinematics): Refit does not run then, and the flicks the boot makes in the
-   --  restart are the only evidence a fixed eye has. A fixed eye the file stores stays as stored, the flicks join
-   --  it as they join the points' measurement (Fit_Beacon); the arms' placements stay as stored too.
 
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
    --  The arm's eye at those readings, in the frame of its eye at the
