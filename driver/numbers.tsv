@@ -1994,6 +1994,7 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rep.All_Median_Px, 3) &
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rp.Cost_Judged - Report.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rt.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sd, 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Single_F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Visible (Visible'First + C - 1), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
@@ -2009,9 +2010,11 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.I
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Multi_M, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & "")	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & (if Adequate then "" else "")	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -2031,6 +2034,7 @@ driver-robot-kinematics-fit.adb	(Depth > 0.0 and then Sigma < Real'Last and then
 driver-robot-kinematics-fit.adb	(Driver.Conventions.Z * Sqrt (Tilt_1 + Tilt_2) < Ada.Numerics.Pi / 2.0	2.0	math	a quarter turn: half of pi
 driver-robot-kinematics-fit.adb	(Judge (Au, Av, Bu, Bv, 0).Smaller and then Judge (Au, Av, Bu, Bv, 1).Smaller	1	structure	the keyframes by halves: every one (0), the odd (1), the even (2)
 driver-robot-kinematics-fit.adb	(Said, "" & C'Image & "" & Driver.Log.Image (Change (B, C), 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	(Said, "" & Driver.Log.Image (Multi_F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));	2.0	math	the mean of the two components' variances
 driver-robot-kinematics-fit.adb	(Step.Cost_Judged - Report.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0);	2.0	statistics	a likelihood ratio at Z: twice the cost difference against Z squared
 driver-robot-kinematics-fit.adb	(W => (1.0 / Rate) * Omega, P => (1.0 / Rate ** 2) * Cross (Omega, V), C => Rate,	1.0	math	a turn from its rotation: the unit axis is the rotation over its rate, the axis point the rotation across the travel over the rate squared
@@ -2312,6 +2316,7 @@ driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + 5 * N;	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := First_Of (N) + (if Slides (N) then 0 else 1);	1	structure	the last joint's unknowns after its first: none for a slide, one more for a turn
+driver-robot-kinematics-fit.adb	Refine_All (1, Kept_At);	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Residuals (K + 2) := (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Residuals := new Real_Array (1 .. Natural'Max (1, 2 * Multi_Sightings));	1	structure	at least one element, for an array that may hold none
 driver-robot-kinematics-fit.adb	Residuals := new Real_Array (1 .. Natural'Max (1, 2 * Multi_Sightings));	2	structure	two residuals a sighting, across and down

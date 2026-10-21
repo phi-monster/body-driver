@@ -873,6 +873,117 @@ procedure Driver.Robot.Step2_Bench is
                               end;
                            end;
                         end loop;
+                        --  BENCH_SEG_STUDY (the truth's): the earlier joint turned far, by Theta radians, a new
+                        --  reference taken there of the points its eye sees, and the later swept from it by the turn
+                        --  that moves the view 32 px: the two orders' places of those points, the true joints in each,
+                        --  a median so far apart; and the true order's against where the points truly land (the
+                        --  model's own check).
+                        if Ada.Environment_Variables.Exists ("BENCH_SEG_STUDY") then
+                           for Which in 1 .. 2 loop
+                           declare
+                              Off : constant Positive := (if Which = 1 then E else La);
+                              Sw  : constant Positive := (if Which = 1 then La else E);
+                           begin
+                           for Theta of Real_Array'[0.1, 0.25, 0.5, 1.0] loop
+                              for Sign of Real_Array'[1.0, -1.0] loop
+                                 declare
+                                    Ch_O, Ch_K : Real_Array (1 .. N) := [others => 0.0];
+                                    Q_O, Q_K   : Real_Array := Q0;
+                                    Sweep_By      : constant Real :=
+                                      32.0 * abs Factor (Sw) / Real'Max (Slopes (Order_D (Sw)), Real'Model_Small);
+                                    Seg_Pts    : Vec_Vectors.Vector;
+                                    D_Swap, D_True : Row_Vectors.Vector;
+                                    C_Cam      : FW.Camera renames W.Cameras (Cam);
+                                    Cam_O, Cam_K : Rigid;
+                                 begin
+                                    Ch_O (Off) := Sign * Theta / True_J (Off).C;
+                                    Ch_K := Ch_O;
+                                    Ch_K (Sw) := Sweep_By;
+                                    for C in 1 .. N loop
+                                       Q_O (Order_D (C)) := Q0 (Order_D (C)) + Ch_O (C) / Factor (C);
+                                       Q_K (Order_D (C)) := Q0 (Order_D (C)) + Ch_K (C) / Factor (C);
+                                    end loop;
+                                    if (for all J in 1 .. N => Within (J, Q_O (J)) and then Within (J, Q_K (J))) then
+                                       Pose_At (W, Path, Q_K);
+                                       Cam_K := W.Cameras (Cam).Pose;
+                                       Pose_At (W, Path, Q_O);
+                                       Cam_O := W.Cameras (Cam).Pose;
+                                       for R in 0 .. (C_Cam.Height - 1) / Grid loop
+                                          for K in 0 .. (C_Cam.Width - 1) / Grid loop
+                                             declare
+                                                U   : constant Real := Real (K * Grid) + Real (Grid) / 2.0;
+                                                V   : constant Real := Real (R * Grid) + Real (Grid) / 2.0;
+                                                Dc  : constant Vec3 :=
+                                                  [(U - C_Cam.Cx) / C_Cam.Fx, (V - C_Cam.Cy) / C_Cam.Fy, 1.0];
+                                                Dw  : constant Vec3 :=
+                                                  Cam_O.Rotation
+                                                  * ((1.0 / EF.Sqrt (Dc (1) ** 2 + Dc (2) ** 2 + 1.0)) * Dc);
+                                                Hit : Real;
+                                                Ok  : Boolean;
+                                             begin
+                                                Cast (W, Cam_O.Translation, Dw, Hit, Ok);
+                                                if Ok and then Hit < Real'Last then
+                                                   Seg_Pts.Append (Cam_O.Translation + Hit * Dw);
+                                                end if;
+                                             end;
+                                          end loop;
+                                       end loop;
+                                       Pose_At (W, Path, Q0);
+                                       declare
+                                          T_Rel_1 : constant Rigid :=
+                                            Inverse (Fit.Eye_At (True_J, Truth, Ch_O))
+                                            * Fit.Eye_At (True_J, Truth, Ch_K);
+                                          T_Rel_2 : constant Rigid :=
+                                            Inverse (Fit.Eye_At (True_J, Swapped, Ch_O))
+                                            * Fit.Eye_At (True_J, Swapped, Ch_K);
+                                       begin
+                                          for P of Seg_Pts loop
+                                             declare
+                                                Po : constant Vec3 := Inverse (Cam_O) * P;
+                                                P1 : constant Vec3 := Inverse (T_Rel_1) * Po;
+                                                P2 : constant Vec3 := Inverse (T_Rel_2) * Po;
+                                                Pt : constant Vec3 := Inverse (Cam_K) * P;
+                                             begin
+                                                if P1 (3) > 0.0 and then P2 (3) > 0.0 and then Pt (3) > 0.0 then
+                                                   D_Swap.Append
+                                                     (EF.Sqrt
+                                                        ((C_Cam.Fx * (P1 (1) / P1 (3) - P2 (1) / P2 (3))) ** 2
+                                                         + (C_Cam.Fy * (P1 (2) / P1 (3) - P2 (2) / P2 (3))) ** 2));
+                                                   D_True.Append
+                                                     (EF.Sqrt
+                                                        ((C_Cam.Fx * (P1 (1) / P1 (3) - Pt (1) / Pt (3))) ** 2
+                                                         + (C_Cam.Fy * (P1 (2) / P1 (3) - Pt (2) / Pt (3))) ** 2));
+                                                end if;
+                                             end;
+                                          end loop;
+                                       end;
+                                       declare
+                                          A : Real_Array (1 .. Natural (D_Swap.Length));
+                                          B : Real_Array (1 .. Natural (D_True.Length));
+                                       begin
+                                          for I in A'Range loop
+                                             A (I) := D_Swap (I);
+                                             B (I) := D_True (I);
+                                          end loop;
+                                          Put_Line
+                                            ("      segment: c" & Off'Image & " turned" & Real'Image (Sign * Theta)
+                                             & " rad, c" & Sw'Image & " swept" & Sweep_By'Image & ":"
+                                             & A'Length'Image & " points, the orders' places a median"
+                                             & Real'Image (if A'Length = 0 then 0.0 else Driver.Stats.Median (A))
+                                             & " px apart, the true order's from the truth"
+                                             & Real'Image (if B'Length = 0 then 0.0
+                                                          else Driver.Stats.Median (B)));
+                                       end;
+                                    else
+                                       Put_Line ("      segment: c" & Off'Image & " turned" & Real'Image (Sign * Theta)
+                                                 & " rad: out of its range");
+                                    end if;
+                                 end;
+                              end loop;
+                           end loop;
+                           end;
+                           end loop;
+                        end if;
                      end;
                   end loop;
                   --  Every order scored as the fit's stage 4 scores it (its joints, lens and tracks' depths, the

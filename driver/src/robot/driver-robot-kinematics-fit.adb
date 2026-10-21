@@ -5664,13 +5664,16 @@ package body Driver.Robot.Kinematics.Fit is
 
             --  Whether A's places of the sightings (Au, Av) tell it from B's (Bu, Bv) as the better, over the keyframes
             --  of Half (0 every one, 1 the odd, 2 the even): only a keyframe where the two put the sightings apart, by
-            --  the median, more than Z of A's residuals' scatter tells one order from the other (elsewhere both
-            --  predict what was seen alike, and its sign is the noise's); over those, B's median residual larger than
-            --  A's by more than Z of how much A's keyframe medians vary from one keyframe to the next, times the root
-            --  of their count. A keyframe neither explains (its median no larger than A's keyframes' typical one by Z
-            --  of their spread) is aside: an aligner's answers on another place of the picture (u11, 10-19, eight
-            --  keyframes of 268 more wrong than right). One whose points A puts behind the eye tells against A; one
-            --  where only B does, for it.
+            --  the median, more than Z errors of the mean of its sightings (A's residuals' scatter over the root
+            --  of their count) tells one order from the other (elsewhere both predict what was seen alike, and its sign
+            --  is the noise's; by Z of one sighting's scatter each point had to tell them apart alone, and the bench's
+            --  30 arms, 10-21, left 12 untold, the true order the best every time, the two orders 3 to 10 px apart at
+            --  the turns asked and no keyframe apart; by the mean's error 2, none told wrong); over those, B's median
+            --  residual larger than A's by more than Z of how much A's keyframe medians vary from one keyframe to the
+            --  next, times the root of their count. A keyframe neither explains (its median no larger than A's
+            --  keyframes' typical one by Z of their spread) is aside: an aligner's answers on another place of the
+            --  picture (u11, 10-19, eight keyframes of 268 more wrong than right). One whose points A puts behind the
+            --  eye tells against A; one where only B does, for it.
             --  What the test found, for the log to say why an order is not told.
             type Judgement is record
                Smaller : Boolean := False;
@@ -5756,7 +5759,7 @@ package body Driver.Robot.Kinematics.Fit is
                                  else Sqrt ((Au (I) - Bu (I)) ** 2 + (Av (I) - Bv (I)) ** 2));
                            end;
                         end loop;
-                        if Driver.Stats.Median (Apart) > Z * Noise then
+                        if Driver.Stats.Median (Apart) > Z * Noise / Sqrt (Real (Count_Of (F))) then
                            declare
                               X : constant Real := Driver.Stats.Median (Sizes (Au, Av, F));
                               Y : constant Real := Driver.Stats.Median (Sizes (Bu, Bv, F));
@@ -6088,6 +6091,12 @@ package body Driver.Robot.Kinematics.Fit is
                Tells    : array (1 .. N, 1 .. N) of Natural := [others => [others => 0]];
                Turn_I, Turn_J : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
                Power_Of : array (1 .. N, 1 .. N) of Real := [others => [others => 0.0]];
+               --  Per order weighed and untold, the move that tells it most and how much.
+               Move_Of  : array (1 .. Neighbours) of Move;
+               Pow_Of   : Real_Array (1 .. Neighbours) := [others => 0.0];
+               --  And how many keyframes put it and the order kept apart (Judge over every keyframe): an order no
+               --  keyframe tells from the order kept waits for the turns that would.
+               Telling_Of : array (1 .. Neighbours) of Natural := [others => 0];
             begin
                for X of Sight loop
                   Tracks := Natural'Max (Tracks, X.Track);
@@ -6181,12 +6190,9 @@ package body Driver.Robot.Kinematics.Fit is
                         if Best_Pow > Driver.Conventions.Z then
                            Untold_Of (K) := True;
                            Untold_Here := Untold_Here + 1;
-                           Tells (Best_Mv.I, Best_Mv.J) := Tells (Best_Mv.I, Best_Mv.J) + 1;
-                           if Best_Pow > Power_Of (Best_Mv.I, Best_Mv.J) then
-                              Power_Of (Best_Mv.I, Best_Mv.J) := Best_Pow;
-                              Turn_I (Best_Mv.I, Best_Mv.J) := Best_Mv.Si * Best_Mv.Share * Reach (Best_Mv.I);
-                              Turn_J (Best_Mv.I, Best_Mv.J) := Best_Mv.Sj * Best_Mv.Share * Reach (Best_Mv.J);
-                           end if;
+                           Move_Of (K) := Best_Mv;
+                           Pow_Of (K) := Best_Pow;
+                           Telling_Of (K) := Judge (Hu.all, Hv.all, Cu.all, Cv.all, 0).Telling;
                            Ada.Strings.Unbounded.Append
                              (Said, " [" & Image (Close (K)) & ", not told on "
                                     & Why_Not_Told (Hu.all, Hv.all, Cu.all, Cv.all)
@@ -6198,6 +6204,105 @@ package body Driver.Robot.Kinematics.Fit is
                            Same_Arm := Same_Arm + 1;
                            Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
                                                          & " followed tells it by Z)");
+                        end if;
+                     end;
+                  end if;
+               end loop;
+               --  Weighed again with every term refined in each order, its depths too (Refine_Tracks on every
+               --  sighting), where the fits from the joints of the keyframes of one joint each (Quick_Fit: those
+               --  keyframes' depths held) leave an order untold that some keyframe puts apart from the order kept, or
+               --  the order kept explaining the keyframes of several joints worse than those of one: those depths held,
+               --  the true order left its keyframes of several joints at 0.44 px where its true joints leave them 0.27
+               --  (the bench's s1_2 and s10_1, 10-21), not adequate and its alternative untold round after round.
+               --  Only where the refinements could tell the order this round: every untold order put apart from the
+               --  order kept by some keyframe (one that none puts apart waits for its turns whatever they find); the
+               --  order kept alone when it is not adequate. Refining every untold order some keyframe put apart took
+               --  a nine-joint arm's first round past a minute, its turns not yet taken (the bench's humanoid s2_1,
+               --  10-21).
+               if (Untold_Here > 0
+                   and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0))
+                 or else not Adequate
+               then
+                  declare
+                     Kept_At : constant Positive := Closes + 1;   --  Here's place among the refined
+                     Resolvable : constant Boolean :=
+                       Untold_Here > 0
+                       and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0);
+                     Refined : Fit_Table_Access := new Fit_Table (1 .. Kept_At);
+                     procedure Refine_One (K : Positive) is
+                     begin
+                        if K = Kept_At or else (Resolvable and then Untold_Of (K)) then
+                           declare
+                              X   : constant Order_Fit := (if K = Kept_At then Here else Close_Fit (K));
+                              Jx  : Joint_Array := X.Joints;
+                              Lx  : Lens := X.L;
+                              Rep : Fit_Report;
+                           begin
+                              Refine_Tracks (Changes, Sight, Jx, X.Order, Lx, Rep, Focal_Within, Spread => False);
+                              Refined (K) := (Order => X.Order, Joints => Jx, L => Lx, Report => Rep);
+                           end;
+                        end if;
+                     end Refine_One;
+                     procedure Refine_All is new Driver.Parallel_For (Refine_One);
+                     Fu, Fv : Real_Access := new Real_Array (1 .. S);
+                     Su, Sv : Real_Access := new Real_Array (1 .. S);
+                     Single_F, Multi_F : Real;
+                     Adequate_F : Boolean;
+                     --  An order the refinements tell as the better one: the search goes on from it (its own fit
+                     --  from the joints of one joint's keyframes had not shown it).
+                     Beaten_By  : Natural := 0;
+                  begin
+                     Refine_All (1, Kept_At);
+                     for K in 1 .. Closes loop
+                        Fits_Made := Fits_Made + Boolean'Pos (Resolvable and then Untold_Of (K));
+                     end loop;
+                     Fits_Made := Fits_Made + 1;
+                     Adequacy (Refined (Kept_At), Single_F, Multi_F, Adequate_F);
+                     Predict (Refined (Kept_At), Here.Order, Fu.all, Fv.all);
+                     for K in 1 .. Closes loop
+                        if Resolvable and then Untold_Of (K) then
+                           Predict (Refined (K), Close (K), Su.all, Sv.all);
+                           if Told_Over (Fu.all, Fv.all, Su.all, Sv.all) then
+                              Untold_Of (K) := False;
+                              Untold_Here := Untold_Here - 1;
+                              Ada.Strings.Unbounded.Append
+                                (Said, " (" & Image (Close (K)) & ": told with every term refined)");
+                           elsif Beaten_By = 0 and then Told_Over (Su.all, Sv.all, Fu.all, Fv.all) then
+                              Beaten_By := K;
+                              Ada.Strings.Unbounded.Append
+                                (Said, " (" & Image (Close (K)) & ": the better with every term refined, kept)");
+                           end if;
+                        end if;
+                     end loop;
+                     Ada.Strings.Unbounded.Append
+                       (Said, " (every term refined: the keyframes of several joints " & Driver.Log.Image (Multi_F, 3)
+                              & " px against " & Driver.Log.Image (Single_F, 3)
+                              & (if Adequate_F then "" else ", NOT as well") & ")");
+                     Adequate := Adequate_F;
+                     Single_M := Single_F;
+                     Multi_M := Multi_F;
+                     if Beaten_By > 0 then
+                        Here := Refined (Beaten_By);
+                        Adequate := False;
+                     end if;
+                     Free (Fu);
+                     Free (Fv);
+                     Free (Su);
+                     Free (Sv);
+                     Free (Refined);
+                  end;
+               end if;
+               --  The moves of the orders still untold.
+               for K in 1 .. Closes loop
+                  if Untold_Of (K) then
+                     declare
+                        Mv : Move renames Move_Of (K);
+                     begin
+                        Tells (Mv.I, Mv.J) := Tells (Mv.I, Mv.J) + 1;
+                        if Pow_Of (K) > Power_Of (Mv.I, Mv.J) then
+                           Power_Of (Mv.I, Mv.J) := Pow_Of (K);
+                           Turn_I (Mv.I, Mv.J) := Mv.Si * Mv.Share * Reach (Mv.I);
+                           Turn_J (Mv.I, Mv.J) := Mv.Sj * Mv.Share * Reach (Mv.J);
                         end if;
                      end;
                   end if;
@@ -6237,7 +6342,9 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
                                 & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
                                 & Same_Arm'Image & " the same arm"
-                                & (if Adequate then "" else "; it explains the keyframes of several joints worse")
+                                & (if Adequate then "" else "; it explains the keyframes of several joints worse ("
+                                   & Driver.Log.Image (Multi_M, 3) & " px against "
+                                   & Driver.Log.Image (Single_M, 3) & ")")
                                 & "; passes" & Passes'Image & "," & Fits_Made'Image & " fits"
                                 & Ada.Strings.Unbounded.To_String (Said));
                Free (Hu);
