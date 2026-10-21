@@ -294,49 +294,6 @@ package body Driver.Robot.Kinematics.Fit is
      (Driver.Conventions.Z * Sqrt (Tilt_1 + Tilt_2) < Ada.Numerics.Pi / 2.0
       and then Driver.Uncertain.Significant (C, Sqrt (Scale_Variance)));
 
-   --  Whether a lens's aspect and distortion (the logarithm of Fy over Fx, K1, K2) are significant together by the
-   --  fit's covariance (R.Covariance, which holds how the sightings' errors depend on each other): a chi square on
-   --  the three as rare as Z. Not when the covariance is not the fit's of N joints.
-   function Extras_Significant (L : Lens; R : Fit_Report; N : Natural) return Boolean is
-      Reduced : constant Natural := Terms (N);
-   begin
-      if Natural (R.Covariance.Length) /= Reduced * Reduced then
-         return False;
-      end if;
-      declare
-         function V (P, Q : Positive) return Real is
-           (R.Covariance (R.Covariance.First_Index + (P - 1) * Reduced + Q - 1));
-         X  : constant Real_Vector (1 .. 3) := [Ln (L.Fy / L.Fx), L.K1, L.K2];
-         C  : Driver.Numerics.Arrays.Real_Matrix (1 .. 3, 1 .. 3);
-         Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. 3, 1 .. 3);
-         Pd : Boolean;
-      begin
-         --  The aspect's logarithm is the second focal length's less the first's.
-         C (1, 1) := V (1, 1) + V (2, 2) - 2.0 * V (1, 2);
-         C (1, 2) := V (2, 5) - V (1, 5);
-         C (1, 3) := V (2, 6) - V (1, 6);
-         C (2, 2) := V (5, 5);
-         C (2, 3) := V (5, 6);
-         C (3, 3) := V (6, 6);
-         C (2, 1) := C (1, 2);
-         C (3, 1) := C (1, 3);
-         C (3, 2) := C (2, 3);
-         Driver.Numerics.Dense.Cholesky (C, Lf, Pd);
-         if not Pd then
-            return False;
-         end if;
-         declare
-            Y   : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, X);
-            Chi : Real := 0.0;
-         begin
-            for I in X'Range loop
-               Chi := Chi + X (I) * Y (I);
-            end loop;
-            return Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, X'Length) > Driver.Conventions.Z;
-         end;
-      end;
-   end Extras_Significant;
-
    function Median_Error (Median : Real; Count : Positive) return Real is
       Q     : constant Real := Upper_Quartile;
       Sigma : constant Real := Median / Q;
@@ -2760,12 +2717,13 @@ package body Driver.Robot.Kinematics.Fit is
 
          --  Stage 5: the tracks.
          Enter (5);
-         --  The lens's aspect and distortion are kept only when the fit with them is determined and they are
-         --  significant together by its covariance (Extras_Significant: which holds how the sightings' errors depend on
-         --  each other); the pinhole otherwise, refined from the same start. Judged by the sightings' residuals
-         --  instead, the median over every sighting kept the pinhole for the desktop arm's wide barrel lens, its centre
-         --  33 px off, and a likelihood ratio of their robust costs counts every sighting's error as its own, the
-         --  errors a keyframe's points share and a point's in every keyframe as evidence (10-20).
+         --  The lens's aspect and distortion are kept whenever the fit with them is determined; the pinhole (square
+         --  pixels, no distortion) only where the sightings do not tell them, refined from the same start. A held
+         --  aspect is in no covariance: kept only where significant together with the distortion by the fit's
+         --  covariance, the pinhole held the bench's arm 1:2 (its eye's aspect 0.9973) square in four draws of six,
+         --  its joints' tilts and units 19 to 44 chi squares over 18 off the truth against their covariance (12 to 24
+         --  kept), and a drone's eye's focal length 2.7 of its sigmas off at a sigma of 0.21 px (1.0 of 13.9 kept)
+         --  (10-21).
          --  One axis of turn (a drone's, a wheeled base's carrying its eye over the floor) tells
          --  the focal length, the distortion and the turn's scale only along a valley, and the pixels' aspect not at all
          --  where the eye looks level: free, they left the bench's drones and mast eyes undetermined, 5 of 6 and 2 of 3,
@@ -2776,7 +2734,7 @@ package body Driver.Robot.Kinematics.Fit is
             Report_P : Fit_Report := Report;
          begin
             Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
-            if not (Report.Determined and then Extras_Significant (L, Report, N)) then
+            if not Report.Determined then
                --  The pinhole nearest the lens with them, refined from its joints: begun from the stage before, a
                --  wheeled base's head (bench seed 1, 10-20) went from 166 px to 25 (the truth 171) in 18 passes while
                --  the lens with them stayed at 166, and was fitted there.

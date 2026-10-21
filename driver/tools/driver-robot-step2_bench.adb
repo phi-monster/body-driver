@@ -819,7 +819,9 @@ procedure Driver.Robot.Step2_Bench is
                   Put_Line ("    fit lens: focal" & Prev_L.Fx'Image & Prev_L.Fy'Image & " for" & W.Cameras (Cam).Fx'Image
                             & W.Cameras (Cam).Fy'Image & ", aspect" & Real'Image (Prev_L.Fy / Prev_L.Fx) & " for"
                             & Real'Image (W.Cameras (Cam).Fy / W.Cameras (Cam).Fx) & ", distortion" & Prev_L.K1'Image
-                            & Prev_L.K2'Image & (if Prev.Pinhole then ", a pinhole" else ", the extras fitted"));
+                            & Prev_L.K2'Image & (if Prev.Pinhole then ", a pinhole" else ", the extras fitted")
+                            & "; its focal length" & Real'Image ((Prev_L.Fx - W.Cameras (Cam).Fx) / Prev.Focal_Sigma)
+                            & " sigmas off (sigma" & Prev.Focal_Sigma'Image & " px)");
                   --  The fit's joints against the true ones, as far as the fit's free scale lets them be set beside
                   --  each other: each axis's angle off the true one, and its unit over the true unit (by the sign of
                   --  the axis's).
