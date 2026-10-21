@@ -7024,7 +7024,21 @@ package body Driver.Robot.Kinematics.Fit is
                Free (Cu);
                Free (Cv);
             end;
+            --  The order gone on from, fitted in itself as every order the passes weigh is (Quick_Fit from the joints of
+            --  one joint's keyframes): its refinement against the quick fits of its neighbours told every one of them
+            --  worse, the exam's arm 11 (robot.order.exam, 10-22) no order untold and its wrong order kept.
             if Again then
+               declare
+                  Gone_On : constant Chain_Order (1 .. N) := Here.Order;
+               begin
+                  --  Gone on from once: the passes may move from it by the cheap score and the verdict come back to
+                  --  it, the two taking turns (the exam's arm 11 between two orders, 10-22).
+                  for P of Gone_On loop
+                     Judged_From.Append (P);
+                  end loop;
+                  Quick_Fit (Gone_On, Unordered, Here);
+               end;
+               Fits_Made := Fits_Made + 1;
                goto Search_Again;
             end if;
             Order := Here.Order;
