@@ -26,6 +26,7 @@ package body Driver.Robot.Flows is
 
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Flow.Luma_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Flow.Pose_View, Flow.Pose_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Flow.Pixel_Flags, Flow.Pixel_Flags_Access);
 
    --  One pose as an eye saw it: the arm's readings and every joint's turn either way (chain places, from the
    --  reference), the noise of a difference of two still means, the still picture and the turned ones (luma).
@@ -46,6 +47,8 @@ package body Driver.Robot.Flows is
    type Real_Access is access Real_Array;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
+   package Wrist_Vectors is new Ada.Containers.Vectors (Positive, Flow.Wrist_Picture, Flow."=");
+
    --  A fitted arm the fixed eyes watch: its group, its channels along its chain from the base, per channel its
    --  reference reading and the range its readings were seen over, its joints as its fit has them along the chain and
    --  the relative standard deviation of each one's unit (none when the fit states no covariance), the turn each way
@@ -60,6 +63,11 @@ package body Driver.Robot.Flows is
       Unit_Sigma : Real_Access;
       Steps  : Real_Access;
       Taken  : Natural := 0;
+      --  The arm's own eye, its fit's place among the model's, and that eye's pictures at the arm's poses with where
+      --  it stood in the arm's reference frame (Flow_Eye.Refine_By_Scene: the world it saw places the fixed eyes).
+      Eye     : Eye_Id'Base := 0;
+      Fitting : Natural := 0;
+      Wrists  : Wrist_Vectors.Vector;
    end record;
 
    package Arm_Info_Vectors is new Ada.Containers.Vectors (Positive, Arm_Info);
@@ -200,6 +208,8 @@ package body Driver.Robot.Flows is
                      Info : Arm_Info;
                   begin
                      Info.Arm := M.Kinematics (K).Arm;
+                     Info.Eye := Driver.Robot.Kinematics.Eye_Of (M, Info.Arm);
+                     Info.Fitting := K;
                      Info.Group := G;
                      Info.N := Size;
                      Info.Chain := R.Chain;
@@ -254,6 +264,10 @@ package body Driver.Robot.Flows is
             Free (A.Joints);
             Free (A.Unit_Sigma);
             Free (A.Steps);
+            for W of A.Wrists loop
+               Free (W.Luma);
+               Free (W.World);
+            end loop;
          end loop;
          return;
       end if;
@@ -287,13 +301,14 @@ package body Driver.Robot.Flows is
                Driver.Robot.Motion.Step (M, C, Report, Land => True);
             end Go_To;
 
-            --  The body still and every eye that sees the arm with two frames or more since its picture last changed:
-            --  every eye's view (those that do not see the arm too, unused).
+            --  The body still and every eye that sees the arm, and the arm's own, with two frames or more since its
+            --  picture last changed: every fixed eye's view (those that do not see the arm too, unused).
             procedure Take (Views : out View_Vectors.Vector) is
             begin
                Driver.Robot.Motion.Settle (M, Waited);
                while (for some K in 1 .. Count_E =>
                         Sees_It (K, A) and then Driver.Pixels.Frames (M.Eyes (Eye_Of (K)).Settled) < 2)
+                 or else (Info.Eye > 0 and then Driver.Pixels.Frames (M.Eyes (Info.Eye).Settled) < 2)
                loop
                   Driver.Robot.Motion.Hold (M, 1);
                end loop;
@@ -424,6 +439,35 @@ package body Driver.Robot.Flows is
                   Take (Still);
                end if;
                Readings := Readings_Now;
+               --  The arm's own eye's picture at the pose, and where that eye stands in the arm's reference frame.
+               if Info.Eye > 0 then
+                  declare
+                     V        : constant Driver.Pixels.View := M.Eyes (Info.Eye).Settled;
+                     Last     : constant Natural := M.Beats - 1;
+                     Absolute : Real_Array (1 .. N);
+                  begin
+                     for C in 1 .. N loop
+                        Absolute (C) := Driver.Robot.Channels.Reading (M, Info.Group, Last, C);
+                     end loop;
+                     declare
+                        W    : constant Positive := Driver.Pixels.Width (V);
+                        H    : constant Positive := Driver.Pixels.Height (V);
+                        Mask : constant Flow.Pixel_Flags_Access := new Flow.Pixel_Flags (1 .. W * H);
+                     begin
+                        for Y in 0 .. H - 1 loop
+                           for X in 0 .. W - 1 loop
+                              Mask (Y * W + X + 1) :=
+                                Driver.Robot.Kinematics.Sees_World (M, Info.Arm, Real (X) + 0.5, Real (Y) + 0.5);
+                           end loop;
+                        end loop;
+                        Info.Wrists.Append
+                          (Flow.Wrist_Picture'(Luma   => Means_Of (V), Width => W, Height => H,
+                                               Eye    =>
+                                                 Driver.Robot.Kinematics.Eye_In_Reference (M, Info.Arm, Absolute),
+                                               World  => Mask));
+                     end;
+                  end;
+               end if;
                for J in 1 .. N loop
                   declare
                      C       : constant Positive := Channel (J);
@@ -587,6 +631,37 @@ package body Driver.Robot.Flows is
                               end;
                            end loop;
                            Flow.Fit_Eye (In_Arms, Width, Height, Result);
+                           --  Placed again by the world the arms' own eyes saw at their poses (their tables' points
+                           --  in this eye's picture at the first arm's first pose).
+                           declare
+                              type Pictures_Access is access Flow.Wrist_Picture_Array;
+                              procedure Free is new Ada.Unchecked_Deallocation
+                                (Flow.Wrist_Picture_Array, Pictures_Access);
+                              Pictures : array (1 .. Used) of Pictures_Access;
+                              Worlds   : Flow.Arm_World_Array (1 .. Used);
+                           begin
+                              for U in 1 .. Used loop
+                                 declare
+                                    Info : Arm_Info renames Arms (Which (U));
+                                    R    : Arm_Fit renames M.Kinematics (Info.Fitting).Result;
+                                 begin
+                                    Pictures (U) := new Flow.Wrist_Picture_Array (1 .. Natural (Info.Wrists.Length));
+                                    for P in Pictures (U)'Range loop
+                                       Pictures (U) (P) := Info.Wrists (P);
+                                    end loop;
+                                    Worlds (U) :=
+                                      (Pictures => Pictures (U).all'Unchecked_Access,
+                                       Lens     => (Fx => R.Lens.Fx, Fy => R.Lens.Fy, Cx => R.Lens.Cx, Cy => R.Lens.Cy,
+                                                    K1 => R.Lens.K1, K2 => R.Lens.K2),
+                                       Table    => R.Table);
+                                 end;
+                              end loop;
+                              Flow.Refine_By_Scene
+                                (In_Arms, Worlds, Captures (E, Which (1)) (1).Still.all, Width, Height, Result);
+                              for U in 1 .. Used loop
+                                 Free (Pictures (U));
+                              end loop;
+                           end;
                            Driver.Log.Line (Driver.Log.Robot, "flows: fixed eye" & Natural'Image (Eyes (E - 1))
                                             & " from" & Natural'Image (Used) & " arms: "
                                             & (if Result.Determined then "told" else "untold") & ", focal "
@@ -668,6 +743,10 @@ package body Driver.Robot.Flows is
          Free (A.Joints);
          Free (A.Unit_Sigma);
          Free (A.Steps);
+         for W of A.Wrists loop
+            Free (W.Luma);
+            Free (W.World);
+         end loop;
       end loop;
    end Place;
 

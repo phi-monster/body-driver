@@ -5,12 +5,16 @@ with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Numerics.Float_Random;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Numerics.Long_Real_Arrays;
 with Ada.Streams.Stream_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
+with Driver.Alignment;
+with Driver.Conventions;
 with Driver.Log;
+with Driver.Parallel_For;
 with Driver.Numerics;
 with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Fit;
@@ -185,6 +189,7 @@ begin
             All_Still   : Flow.Luma_Array (1 .. Poses);
             All_Minus, All_Plus : Luma_Matrix;
             All_Readings, All_Steps : Reading_Matrix;
+            Hand_U, Hand_V : Real_Array (1 .. Poses) := [others => -1.0];
          begin
             Set.Joints := new Fit.Joint_Array (1 .. N);
             Set.Views := new Flow.Pose_Array (1 .. Poses);
@@ -246,11 +251,67 @@ begin
                         end;
                      end if;
                   else
+                     --  FLOW_SPREAD = K (BENCH): each pose after the rest the one of K draws whose hand (the arm's last
+                     --  link) the true eye sees farthest from where it saw the hand at the poses before, the hand in
+                     --  the picture (a study of how far the eye's terms come apart with the arm shown all over the
+                     --  picture, the truth choosing); one draw as without it.
+                     declare
+                        Draws : constant Positive := Positive (Setting ("FLOW_SPREAD", 1.0));
+                        Cam   : FW.Camera renames W.Cameras (Eye);
+                        Far_Best : Real := -1.0;
+                        Best  : Real_Array (1 .. N) := [others => 0.0];
+                        Q     : Real_Array (1 .. N);
+                     begin
+                        for D in 1 .. (if V = 1 then 1 else Draws) loop
+                           for J in 1 .. N loop
+                              declare
+                                 L : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                              begin
+                                 Q (J) := (if V = 1 then 0.0 else (2.0 * Uniform - 1.0) * Swing / L.Unit);
+                                 L.Q := Rest (J) + Q (J);
+                              end;
+                           end loop;
+                           FW.Forward (W);
+                           declare
+                              Hand : constant Vec3 := W.Links (Links (Links.Last_Index)).Pose.Translation;
+                              Xc   : constant Vec3 :=
+                                Transposed_Times
+                                  (Cam.Pose.Rotation, Driver.Numerics.Minus (Hand, Cam.Pose.Translation));
+                              U, Vv : Real := -1.0;
+                              Far  : Real := 0.0;
+                           begin
+                              if Xc (3) > 0.0 then
+                                 U := Cam.Cx + Cam.Fx * Xc (1) / Xc (3);
+                                 Vv := Cam.Cy + Cam.Fy * Xc (2) / Xc (3);
+                              end if;
+                              if U >= 0.0 and then U < Real (Width) and then Vv >= 0.0 and then Vv < Real (Height)
+                              then
+                                 Far := Real'Last;
+                                 for Before in 1 .. V - 1 loop
+                                    Far := Real'Min (Far, EF.Sqrt ((U - Hand_U (Before)) ** 2
+                                                                   + (Vv - Hand_V (Before)) ** 2));
+                                 end loop;
+                              end if;
+                              if Draws = 1 or else Far > Far_Best then
+                                 Far_Best := Far;
+                                 Best := Q;
+                                 Hand_U (V) := U;
+                                 Hand_V (V) := Vv;
+                              end if;
+                           end;
+                        end loop;
+                        if Draws > 1 then
+                           Put_Line ("arm" & Number'Image & " pose" & V'Image & ": the hand at ("
+                                     & Image (Hand_U (V), 1) & ", " & Image (Hand_V (V), 1) & "), "
+                                     & Image (Far_Best, 1)
+                                     & " px from the poses before");
+                        end if;
+                        Readings := Best;
+                     end;
                      for J in 1 .. N loop
                         declare
                            L : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
                         begin
-                           Readings (J) := (if V = 1 then 0.0 else (2.0 * Uniform - 1.0) * Swing / L.Unit);
                            L.Q := Rest (J) + Readings (J);
                            Steps (J) := Turn / L.Unit;
                         end;
@@ -416,6 +477,318 @@ begin
                       & ": scatter ") & Image (Scatter, 3) & ", in front" & In_Front'Image & ", "
                       & Image (Real (Ada.Calendar.Clock - Began), 1) & " s");
          end loop;
+         --  FLOW_PROFILE (BENCH): the direction the table's points leave the eye open along (its pixels' places
+         --  unchanged to first order: the least singular vector of their places' Jacobian in the focal length's
+         --  logarithm, the principal point, the turn about the camera's axes and the centre), and the flows' scatter
+         --  of every arm along it through the true eye, by the focal length's change: where the arms' own motion puts
+         --  the eye along the one direction the table cannot tell.
+         --  FLOW_PROFILE_UNIT = K (a study): every joint's unit scaled by 1 + K before the profile: how far a share of
+         --  every rate moves the flows' least along the direction.
+         if Ada.Environment_Variables.Exists ("FLOW_PROFILE_UNIT") then
+            for K in Sets'Range loop
+               for J in Sets (K).Joints'Range loop
+                  Sets (K).Joints (J).C := Sets (K).Joints (J).C
+                    * (1.0 + Real'Value (Ada.Environment_Variables.Value ("FLOW_PROFILE_UNIT")));
+               end loop;
+            end loop;
+         end if;
+         if Ada.Environment_Variables.Exists ("FLOW_PROFILE") then
+            declare
+               package LA renames Ada.Numerics.Long_Real_Arrays;
+               package Pt_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+               Table_Pts : Pt_Vectors.Vector;
+               Step_Px   : constant Positive := 8;
+               function Moved_Pose (Z : LA.Real_Vector) return Rigid is
+                 ((Rotation    => Times (Truth.Rotation, Driver.Numerics.Exp (Vec3'[Z (4), Z (5), Z (6)])),
+                   Translation => [Truth.Translation (1) + Z (7), Truth.Translation (2) + Z (8),
+                                   Truth.Translation (3) + Z (9)]));
+               function Moved_Lens (Z : LA.Real_Vector) return Fit.Lens is
+                 ((Fx => Cam.Fx * EF.Exp (Z (1)), Fy => Cam.Fy * EF.Exp (Z (1)), Cx => Cam.Cx + Z (2),
+                   Cy => Cam.Cy + Z (3), K1 | K2 => 0.0));
+               procedure Places (Z : LA.Real_Vector; Into : out LA.Real_Vector) is
+                  P : constant Rigid := Moved_Pose (Z);
+                  L : constant Fit.Lens := Moved_Lens (Z);
+                  K : Natural := Into'First - 1;
+               begin
+                  for X of Table_Pts loop
+                     declare
+                        Xc : constant Vec3 := Transposed_Times (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+                     begin
+                        Into (K + 1) := L.Cx + L.Fx * Xc (1) / Xc (3);
+                        Into (K + 2) := L.Cy + L.Fy * Xc (2) / Xc (3);
+                        K := K + 2;
+                     end;
+                  end loop;
+               end Places;
+            begin
+               --  The table's points the true eye sees, on a grid.
+               for Gy in 0 .. Height / Step_Px - 1 loop
+                  for Gx in 0 .. Width / Step_Px - 1 loop
+                     declare
+                        Solid : Natural;
+                        Along : Real;
+                        U  : constant Real := Real (Gx * Step_Px) + 0.5;
+                        V  : constant Real := Real (Gy * Step_Px) + 0.5;
+                        Px : constant Real := (U - Cam.Cx) / Cam.Fx;
+                        Py : constant Real := (V - Cam.Cy) / Cam.Fy;
+                        Pn : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
+                     begin
+                        Fake_Render.Nearest (W, Cam, U, V, Solid, Along);
+                        if Solid > 0 and then To_String (W.Solids (Solid).Name) = "table" then
+                           Table_Pts.Append (Driver.Numerics.Plus
+                                               (Truth.Translation,
+                                                Driver.Numerics.Scaled
+                                                  (Along, Times (Truth.Rotation, Vec3'[Px / Pn, Py / Pn, 1.0 / Pn]))));
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+               declare
+                  M    : constant Positive := 2 * Natural (Table_Pts.Length);
+                  Jac  : LA.Real_Matrix (1 .. M, 1 .. 9);
+                  Zero : constant LA.Real_Vector (1 .. 9) := [others => 0.0];
+                  Eps  : constant Real := EF."**" (Real'Model_Epsilon, 1.0 / 3.0);
+                  Scale : constant LA.Real_Vector (1 .. 9) := [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+               begin
+                  for T in 1 .. 9 loop
+                     declare
+                        Up, Down : LA.Real_Vector (1 .. 9) := Zero;
+                        Pu, Pd   : LA.Real_Vector (1 .. M);
+                     begin
+                        Up (T) := Eps;
+                        Down (T) := -Eps;
+                        Places (Up, Pu);
+                        Places (Down, Pd);
+                        for I in 1 .. M loop
+                           Jac (I, T) := (Pu (I) - Pd (I)) / (2.0 * Eps) * Scale (T);
+                        end loop;
+                     end;
+                  end loop;
+                  declare
+                     Normal  : constant LA.Real_Matrix := LA.Transpose (Jac) * Jac;
+                     Values  : LA.Real_Vector (1 .. 9);
+                     Vectors : LA.Real_Matrix (1 .. 9, 1 .. 9);
+                     Least   : Positive := 1;
+                     --  Per arm, the class of every pixel two joints or more move (Flow's layout, pose after pose):
+                     --  1 its centre on the arm away from an edge, 2 on the arm at an edge (a neighbour a pixel and a
+                     --  half away sees another solid), 3 beside the arm.
+                     type Class_Access is access Fit.Count_Array;
+                     Classes : array (Sets'Range) of Class_Access;
+                  begin
+                     LA.Eigensystem (Normal, Values, Vectors);
+                     for K in Sets'Range loop
+                        declare
+                           Group : Natural := 0;
+                           Count : Natural := 0;
+                        begin
+                           for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+                              if To_String (W.Groups (G).Name) = "arm" & Trim (Sets (K).Number) & "_joints" then
+                                 Group := G;
+                              end if;
+                           end loop;
+                           for V of Sets (K).Views.all loop
+                              for I in 1 .. V.Pixels loop
+                                 Count := Count + Boolean'Pos (V.Link (I) >= 2);
+                              end loop;
+                           end loop;
+                           Classes (K) := new Fit.Count_Array (1 .. Natural'Max (1, Count));
+                           declare
+                              Links : FW.Index_Vectors.Vector renames W.Groups (Group).Joints;
+                              N     : constant Natural := Natural (Links.Length);
+                              Rest  : Real_Array (1 .. N);
+                              Q     : Natural := 0;
+                              function Carries (L : Natural) return Boolean is
+                                 Here : Natural := L;
+                              begin
+                                 while Here /= 0 loop
+                                    if Here = Links (Links.First_Index) then
+                                       return True;
+                                    end if;
+                                    Here := W.Links (Here).Parent;
+                                 end loop;
+                                 return False;
+                              end Carries;
+                              function Link_At (U, V : Real) return Natural is
+                                 Solid : Natural;
+                                 Along : Real;
+                              begin
+                                 Fake_Render.Nearest (W, Cam, U, V, Solid, Along);
+                                 return (if Solid = 0 then 0 else W.Solids (Solid).Link);
+                              end Link_At;
+                           begin
+                              for J in 1 .. N loop
+                                 Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
+                              end loop;
+                              for V of Sets (K).Views.all loop
+                                 for J in 1 .. N loop
+                                    W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J) + V.Readings (J);
+                                 end loop;
+                                 FW.Forward (W);
+                                 for I in 1 .. V.Pixels loop
+                                    if V.Link (I) >= 2 then
+                                       Q := Q + 1;
+                                       declare
+                                          L    : constant Natural := Link_At (V.U (I), V.V (I));
+                                          Edge : Boolean := False;
+                                       begin
+                                          for D of Real_Array'[1.5, -1.5] loop
+                                             Edge := Edge or else Link_At (V.U (I) + D, V.V (I)) /= L
+                                               or else Link_At (V.U (I), V.V (I) + D) /= L;
+                                          end loop;
+                                          Classes (K) (Q) := (if L /= 0 and then Carries (L) then (if Edge then 2 else 1)
+                                                              else 3);
+                                       end;
+                                    end if;
+                                 end loop;
+                              end loop;
+                              for J in 1 .. N loop
+                                 W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
+                              end loop;
+                              FW.Forward (W);
+                           end;
+                        end;
+                     end loop;
+                     for I in 2 .. 9 loop
+                        if Values (I) < Values (Least) then
+                           Least := I;
+                        end if;
+                     end loop;
+                     declare
+                        Dir : LA.Real_Vector (1 .. 9);
+                     begin
+                        for I in 1 .. 9 loop
+                           Dir (I) := Vectors (I, Least) / Vectors (1, Least);
+                        end loop;
+                        Put_Line ("profile: the table's" & Table_Pts.Length'Image & " points leave open, per unit of"
+                                  & " the focal length's logarithm: principal point" & Real'Image (Dir (2))
+                                  & Real'Image (Dir (3)) & " px, turn" & Real'Image (Dir (4)) & Real'Image (Dir (5))
+                                  & Real'Image (Dir (6)) & ", centre" & Real'Image (Dir (7)) & Real'Image (Dir (8))
+                                  & Real'Image (Dir (9)) & "; eigenvalues least" & Real'Image (Values (Least)));
+                        for Step in -12 .. 12 loop
+                           declare
+                              E  : constant Real := Real (Step) * 0.005;
+                              Z  : LA.Real_Vector (1 .. 9);
+                              Pz : LA.Real_Vector (1 .. M);
+                              P0 : LA.Real_Vector (1 .. M);
+                              Worst : Real := 0.0;
+                              Line  : Unbounded_String;
+                              Total : Real := 0.0;
+                              Sc    : Real;
+                              Fr    : Natural;
+                           begin
+                              for I in 1 .. 9 loop
+                                 Z (I) := E * Dir (I);
+                              end loop;
+                              Places (Z, Pz);
+                              Places (Zero, P0);
+                              for I in 1 .. M loop
+                                 Worst := Real'Max (Worst, abs (Pz (I) - P0 (I)));
+                              end loop;
+                              for K in Sets'Range loop
+                                 Flow.Judge_At (Sets (K).Views.all, Sets (K).Joints.all, Width, Height, Moved_Pose (Z),
+                                                Moved_Lens (Z), Sc, Fr);
+                                 Total := Total + Sc ** 2;
+                                 Append (Line, " arm" & Sets (K).Number'Image & " " & Image (Sc, 3) & " (" & Trim (Fr)
+                                         & ")");
+                              end loop;
+                              Put_Line ("profile: focal " & Image (100.0 * E, 1) & " %: table points move at most "
+                                        & Image (Worst, 3) & " px; flow scatter" & To_String (Line) & ", sum of squares "
+                                        & Image (Total, 2));
+                              declare
+                                 Sums  : Real_Array (1 .. 3) := [others => 0.0];
+                                 Frees : array (1 .. 3) of Natural := [others => 0];
+                                 Text  : Unbounded_String;
+                              begin
+                                 for K in Sets'Range loop
+                                    declare
+                                       R   : constant Real_Array :=
+                                         Flow.Residuals_At (Sets (K).Views.all, Sets (K).Joints.all, Width, Height,
+                                                            Moved_Pose (Z), Moved_Lens (Z), 0.0);
+                                       Row : Natural := R'First - 1;
+                                       Q   : Natural := 0;
+                                    begin
+                                       for V of Sets (K).Views.all loop
+                                          for I in 1 .. V.Pixels loop
+                                             if V.Link (I) >= 2 then
+                                                Q := Q + 1;
+                                                declare
+                                                   C : constant Positive := Classes (K) (Q);
+                                                   Any : Boolean := False;
+                                                begin
+                                                   for J in 1 .. V.Link (I) loop
+                                                      Sums (C) := Sums (C) + R (Row + J) ** 2;
+                                                      Any := Any or else R (Row + J) /= 0.0;
+                                                   end loop;
+                                                   if Any then
+                                                      Frees (C) := Frees (C) + V.Link (I) - 1;
+                                                   end if;
+                                                end;
+                                                Row := Row + V.Link (I);
+                                             end if;
+                                          end loop;
+                                       end loop;
+                                    end;
+                                 end loop;
+                                 for C in 1 .. 3 loop
+                                    Append (Text, " " & (case C is when 1 => "inside", when 2 => "edge",
+                                                         when others => "beside") & " "
+                                            & Image (Sums (C), 1) & " /" & Frees (C)'Image);
+                                 end loop;
+                                 Put_Line ("profile classes: focal " & Image (100.0 * E, 1) & " %:" & To_String (Text));
+                              end;
+                           end;
+                        end loop;
+                     end;
+                  end;
+               end;
+            end;
+         end if;
+         --  FLOW_SWAP = "I,J" (BENCH): the truth's scatter with joints I and J of every arm's chain swapped in order
+         --  (their axes and points as at rest, their readings and rates with them; the pixels a joint between them
+         --  moves alone are left out as before): how far the eye's flows tell apart two joints' order that the arm's
+         --  own eye does not (step 2's untold pairs, crossing axes near the base).
+         if Ada.Environment_Variables.Exists ("FLOW_SWAP") then
+            declare
+               Text : constant String := Ada.Environment_Variables.Value ("FLOW_SWAP");
+               Cut  : constant Natural := Ada.Strings.Fixed.Index (Text, ",");
+               I    : constant Positive := Positive'Value (Text (Text'First .. Cut - 1));
+               J    : constant Positive := Positive'Value (Text (Cut + 1 .. Text'Last));
+               procedure Swap_All (K : Positive) is
+                  T : constant Fit.Joint := Sets (K).Joints (I);
+               begin
+                  Sets (K).Joints (I) := Sets (K).Joints (J);
+                  Sets (K).Joints (J) := T;
+                  for V of Sets (K).Views.all loop
+                     declare
+                        R : constant Real := V.Readings (I);
+                     begin
+                        V.Readings (I) := V.Readings (J);
+                        V.Readings (J) := R;
+                     end;
+                     for P in 1 .. V.Pixels loop
+                        declare
+                           R : constant Real := V.Rate (P, I);
+                           S : constant Real := V.Sigma (P, I);
+                        begin
+                           V.Rate (P, I) := V.Rate (P, J);
+                           V.Sigma (P, I) := V.Sigma (P, J);
+                           V.Rate (P, J) := R;
+                           V.Sigma (P, J) := S;
+                        end;
+                     end loop;
+                  end loop;
+               end Swap_All;
+            begin
+               for K in Sets'Range loop
+                  Swap_All (K);
+                  Flow.Judge_At (Sets (K).Views.all, Sets (K).Joints.all, Width, Height, Truth, True_Lens, Scatter,
+                                 In_Front);
+                  Put_Line ("at the truth, arm" & Sets (K).Number'Image & ", joints" & I'Image & " and" & J'Image
+                            & " swapped: scatter " & Image (Scatter, 3) & ", in front" & In_Front'Image);
+                  Swap_All (K);
+               end loop;
+            end;
+         end if;
          --  FLOW_TRUTH_FLOW = K (BENCH): arm K's measured rates against the truth's at every kept pixel: the surface
          --  the pixel's centre sees (Fake_Render.Nearest), its motion as each joint turns it (nought on a surface no
          --  joint of the arm moves), through the true lens into the picture and through the pixel's gradient into a
@@ -929,6 +1302,960 @@ begin
                     & Image (Seconds, 1) & " s" & (if Result.Determined then "" else "; " & To_String (Result.Why)));
             Put_Line (To_String (Line));
          end;
+         --  FLOW_REFINE (BENCH): the eye placed again by the driver's own Flow.Refine_By_Scene from the world the arms'
+         --  wrist eyes see at their sets' poses (and FLOW_SCENE_EXTRA more, drawn as the sets' are), with their frames,
+         --  their lenses and the table as step 2 would hand them (the truth's), and set against the truth as the flow's
+         --  fit was, with the arms' joints in the picture (the refined eye's places against the true eye's).
+         if Ada.Environment_Variables.Exists ("FLOW_REFINE") then
+            declare
+               Extra  : constant Natural := Natural (Setting ("FLOW_SCENE_EXTRA", 0.0));
+               Cam    : FW.Camera renames W.Cameras (Eye);
+               Fixed  : Flow.Luma_Access := Picture;
+               type Pictures_Access is access Flow.Wrist_Picture_Array;
+               Pictures : array (Sets'Range) of Pictures_Access;
+               Worlds   : Flow.Arm_World_Array (Sets'Range);
+               Joints_True : Real_Vectors.Vector;   --  every set's joints at its poses, u and v by turns, in the truth
+               Refined  : Flow.Report := Result;
+               Began_R  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+               --  FLOW_WRISTS (BENCH) names a file of the wrist pictures and their world masks: read when it exists,
+               --  written when it does not (the renders were most of a refinement's run, minutes a seed).
+               package WIO renames Ada.Streams.Stream_IO;
+               Wrists_Name : constant String :=
+                 (if Ada.Environment_Variables.Exists ("FLOW_WRISTS") then Ada.Environment_Variables.Value ("FLOW_WRISTS")
+                  else "");
+               Wrists_Read : constant Boolean := Wrists_Name /= "" and then Ada.Directories.Exists (Wrists_Name);
+               Wrists_File : WIO.File_Type;
+            begin
+               if Wrists_Read then
+                  WIO.Open (Wrists_File, WIO.In_File, Wrists_Name);
+               elsif Wrists_Name /= "" then
+                  WIO.Create (Wrists_File, WIO.Out_File, Wrists_Name);
+               end if;
+               for K in Sets'Range loop
+                  declare
+                     Group : Natural := 0;
+                     Wrist : Natural := 0;
+                  begin
+                     for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+                        if To_String (W.Groups (G).Name) = "arm" & Trim (Sets (K).Number) & "_joints" then
+                           Group := G;
+                        end if;
+                     end loop;
+                     for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
+                        if W.Cameras (C).Link /= 0 and then W.Cameras (C).Arm = Sets (K).Number then
+                           Wrist := C;
+                        end if;
+                     end loop;
+                     declare
+                        Links : FW.Index_Vectors.Vector renames W.Groups (Group).Joints;
+                        N     : constant Natural := Natural (Links.Length);
+                        Rest  : Real_Array (1 .. N);
+                        Draws : Ada.Numerics.Float_Random.Generator;
+                        Given : constant Natural := Sets (K).Views'Length;
+                     begin
+                        Ada.Numerics.Float_Random.Reset (Draws, Seed + K);
+                        Pictures (K) := new Flow.Wrist_Picture_Array (1 .. Given + Extra);
+                        for J in 1 .. N loop
+                           Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
+                        end loop;
+                        for V in 1 .. Given + Extra loop
+                           for J in 1 .. N loop
+                              declare
+                                 L : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                              begin
+                                 L.Q := Rest (J)
+                                   + (if V <= Given
+                                      then Sets (K).Views (Sets (K).Views'First + V - 1).Readings (J)
+                                      else (2.0 * Real (Ada.Numerics.Float_Random.Random (Draws)) - 1.0)
+                                             * Swing / L.Unit);
+                              end;
+                           end loop;
+                           FW.Forward (W);
+                           if V <= Given then
+                              for J in 1 .. N loop
+                                 declare
+                                    X  : constant Vec3 := W.Links (Links (Links.First_Index + J - 1)).Pose.Translation;
+                                    Xc : constant Vec3 :=
+                                      Transposed_Times (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
+                                 begin
+                                    if Xc (3) > 0.0 then
+                                       Joints_True.Append (Cam.Cx + Cam.Fx * Xc (1) / Xc (3));
+                                       Joints_True.Append (Cam.Cy + Cam.Fy * Xc (2) / Xc (3));
+                                    end if;
+                                 end;
+                              end loop;
+                           end if;
+                           declare
+                              C    : aliased constant FW.Camera := W.Cameras (Wrist);
+                              Rgb  : Rgb_Access := new Real_Array (1 .. 3 * C.Width * C.Height);
+                              Luma : constant Flow.Luma_Access := new Real_Array (1 .. C.Width * C.Height);
+                           begin
+                              if Wrists_Read then
+                                 Real_Array'Read (WIO.Stream (Wrists_File), Luma.all);
+                              else
+                                 Fake_Render.Render (W, C, Rgb.all);
+                                 for P in Luma'Range loop
+                                    Luma (P) := 0.299 * Rgb (Rgb'First + 3 * (P - 1))
+                                      + 0.587 * Rgb (Rgb'First + 3 * (P - 1) + 1)
+                                      + 0.114 * Rgb (Rgb'First + 3 * (P - 1) + 2);
+                                 end loop;
+                                 if Wrists_Name /= "" then
+                                    Real_Array'Write (WIO.Stream (Wrists_File), Luma.all);
+                                 end if;
+                              end if;
+                              Free (Rgb);
+                              declare
+                                 --  The world's pixels by the truth (step 2's lock-in tells them in the boot): the ray
+                                 --  through the pixel meets a solid of the world first, not the arm's own.
+                                 Mask : constant Flow.Pixel_Flags_Access :=
+                                   new Flow.Pixel_Flags (1 .. C.Width * C.Height);
+                              begin
+                                 if Wrists_Read then
+                                    Flow.Pixel_Flags'Read (WIO.Stream (Wrists_File), Mask.all);
+                                 else
+                                 for Y in 0 .. C.Height - 1 loop
+                                    for X in 0 .. C.Width - 1 loop
+                                       declare
+                                          Solid : Natural;
+                                          Along : Real;
+                                       begin
+                                          Fake_Render.Nearest (W, C, Real (X) + 0.5, Real (Y) + 0.5, Solid, Along);
+                                          Mask (Y * C.Width + X + 1) := Solid > 0 and then W.Solids (Solid).Link = 0
+                                            and then (not Ada.Environment_Variables.Exists ("FLOW_TABLE_ONLY")
+                                                      or else To_String (W.Solids (Solid).Name) = "table");
+                                       end;
+                                    end loop;
+                                 end loop;
+                                    if Wrists_Name /= "" then
+                                       Flow.Pixel_Flags'Write (WIO.Stream (Wrists_File), Mask.all);
+                                    end if;
+                                 end if;
+                                 Pictures (K) (V) :=
+                                   (Luma => Luma, Width => C.Width, Height => C.Height, Eye => C.Pose, World => Mask);
+                              end;
+                           end;
+                        end loop;
+                        for J in 1 .. N loop
+                           W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
+                        end loop;
+                        FW.Forward (W);
+                        Worlds (K) :=
+                          (Pictures => Pictures (K).all'Unchecked_Access,
+                           Lens     => (Fx => W.Cameras (Wrist).Fx, Fy => W.Cameras (Wrist).Fy,
+                                        Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy, K1 | K2 => 0.0),
+                           Table    => (Centre => [0.0, 0.0, W.Table_Z], Normal => [0.0, 0.0, 1.0],
+                                        Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+                                        Offset_Sigma => 0.0, others => <>));
+                     end;
+                  end;
+               end loop;
+               if Wrists_Name /= "" then
+                  WIO.Close (Wrists_File);
+               end if;
+               --  FLOW_REFINE_FROM_TRUTH (a study): the refinement started at the true eye; FLOW_REFINE_NO_PRIOR: the flow's
+               --  covariance made a million times its terms' units, its estimate no evidence.
+               if Ada.Environment_Variables.Exists ("FLOW_REFINE_FROM_TRUTH") then
+                  Refined.Lens := (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
+                  for K in Sets'Range loop
+                     Refined.Poses (K) := Truth;
+                  end loop;
+               end if;
+               if Ada.Environment_Variables.Exists ("FLOW_REFINE_NO_PRIOR") then
+                  for A in Refined.Covariance'Range (1) loop
+                     for B in Refined.Covariance'Range (2) loop
+                        Refined.Covariance (A, B) := (if A = B then 1.0E6 else 0.0);
+                     end loop;
+                  end loop;
+               end if;
+               --  FLOW_TRUE_ASPECT (a study): the refinement given the true eye's aspect (its two focal lengths' ratio).
+               if Ada.Environment_Variables.Exists ("FLOW_TRUE_ASPECT") then
+                  Refined.Lens.Fy := Refined.Lens.Fx * Cam.Fy / Cam.Fx;
+               end if;
+               Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Refined);
+               declare
+                  Worst : Real := 0.0;
+                  I     : Natural := Joints_True.First_Index;
+                  Line  : Unbounded_String;
+               begin
+                  --  The refined eye's places of the joints against the true eye's (both arms' sets in order).
+                  for K in Sets'Range loop
+                     declare
+                        Group : Natural := 0;
+                     begin
+                        for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+                           if To_String (W.Groups (G).Name) = "arm" & Trim (Sets (K).Number) & "_joints" then
+                              Group := G;
+                           end if;
+                        end loop;
+                        declare
+                           Links : FW.Index_Vectors.Vector renames W.Groups (Group).Joints;
+                           N     : constant Natural := Natural (Links.Length);
+                           Rest  : Real_Array (1 .. N);
+                           P     : constant Rigid := Refined.Poses (K);
+                        begin
+                           for J in 1 .. N loop
+                              Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
+                           end loop;
+                           for V in Sets (K).Views'Range loop
+                              for J in 1 .. N loop
+                                 W.Links (Links (Links.First_Index + J - 1)).Q :=
+                                   Rest (J) + Sets (K).Views (V).Readings (J);
+                              end loop;
+                              FW.Forward (W);
+                              for J in 1 .. N loop
+                                 declare
+                                    X  : constant Vec3 := W.Links (Links (Links.First_Index + J - 1)).Pose.Translation;
+                                    Xt : constant Vec3 :=
+                                      Transposed_Times (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
+                                    Xc : constant Vec3 :=
+                                      Transposed_Times (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+                                 begin
+                                    if Xt (3) > 0.0 then
+                                       if Xc (3) > 0.0 and then I + 1 <= Joints_True.Last_Index
+                                         and then Joints_True (I) in 0.0 .. Real (Width)
+                                         and then Joints_True (I + 1) in 0.0 .. Real (Height)
+                                       then
+                                          Worst := Real'Max
+                                            (Worst, EF.Sqrt ((Refined.Lens.Cx + Refined.Lens.Fx * Xc (1) / Xc (3)
+                                                              - Joints_True (I)) ** 2
+                                                             + (Refined.Lens.Cy + Refined.Lens.Fy * Xc (2) / Xc (3)
+                                                                - Joints_True (I + 1)) ** 2));
+                                       end if;
+                                       I := I + 2;
+                                    end if;
+                                 end;
+                              end loop;
+                           end loop;
+                           for J in 1 .. N loop
+                              W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
+                           end loop;
+                           FW.Forward (W);
+                        end;
+                     end;
+                  end loop;
+                  Line := To_Unbounded_String
+                    ("refined seed" & Seed'Image & ": " & (if Refined.Determined then "TOLD" else "untold")
+                     & ", focal " & Image (Refined.Lens.Fx, 1) & " ("
+                     & Image (100.0 * (Refined.Lens.Fx / Cam.Fx - 1.0), 2)
+                     & " %), principal point (" & Image (Refined.Lens.Cx, 1) & ", "
+                     & Image (Refined.Lens.Cy, 1) & ") of ("
+                     & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & ")");
+                  --  The table as each arm's refined eye sees it against the true eye: its normal's angle and its
+                  --  distance from the eye (a plane's points tell these; they leave what is along the table and about its
+                  --  normal).
+                  for K in Sets'Range loop
+                     declare
+                        N_W  : constant Vec3 := [0.0, 0.0, 1.0];
+                        On_W : constant Vec3 := [0.0, 0.0, W.Table_Z];
+                        P    : constant Rigid := Refined.Poses (K);
+                        Nf   : constant Vec3 := Transposed_Times (P.Rotation, N_W);
+                        Nt   : constant Vec3 := Transposed_Times (Truth.Rotation, N_W);
+                        Df   : constant Real := Dot (N_W, Driver.Numerics.Minus (On_W, P.Translation));
+                        Dt   : constant Real := Dot (N_W, Driver.Numerics.Minus (On_W, Truth.Translation));
+                        --  the eye's centre moved along the table and its turn about the table's normal
+                        Shift : constant Vec3 := Driver.Numerics.Minus (P.Translation, Truth.Translation);
+                        Along : constant Real :=
+                          EF.Sqrt (Real'Max (0.0, Dot (Shift, Shift) - Dot (Shift, N_W) ** 2));
+                     begin
+                        Put_Line ("refined arm" & Sets (K).Number'Image & ": the table's normal off by "
+                                  & Image (180.0 / Ada.Numerics.Pi * EF.Arccos (Real'Min (1.0, Dot (Nf, Nt))), 2)
+                                  & " deg, its distance off by " & Image (1000.0 * (Df - Dt), 1)
+                                  & " mm; the centre along the"
+                                  & " table " & Image (1000.0 * Along, 1) & " mm");
+                     end;
+                  end loop;
+                  --  Points over the table at heights of nought, 5, 10 and 30 cm (a grid 2 cm apart over the part of the
+                  --  table the true eye sees): how far each arm's refined eye puts them from the true eye's places, at most.
+                  for K in Sets'Range loop
+                     declare
+                        P      : constant Rigid := Refined.Poses (K);
+                        Line_H : Unbounded_String;
+                     begin
+                        for H of Real_Array'[0.0, 0.05, 0.1, 0.3] loop
+                           declare
+                              Worst : Real := 0.0;
+                              Seen  : Natural := 0;
+                           begin
+                              for I in -50 .. 50 loop
+                                 for J in -50 .. 50 loop
+                                    declare
+                                       X  : constant Vec3 := [0.02 * Real (I), 0.02 * Real (J), W.Table_Z + H];
+                                       Xt : constant Vec3 := Transposed_Times
+                                         (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
+                                       Xc : constant Vec3 := Transposed_Times
+                                         (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+                                    begin
+                                       if Xt (3) > 0.0 and then Xc (3) > 0.0 then
+                                          declare
+                                             Tu : constant Real := Cam.Cx + Cam.Fx * Xt (1) / Xt (3);
+                                             Tv : constant Real := Cam.Cy + Cam.Fy * Xt (2) / Xt (3);
+                                             Fu : constant Real := Refined.Lens.Cx + Refined.Lens.Fx * Xc (1) / Xc (3);
+                                             Fv : constant Real := Refined.Lens.Cy + Refined.Lens.Fy * Xc (2) / Xc (3);
+                                          begin
+                                             if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
+                                                Seen := Seen + 1;
+                                                Worst := Real'Max (Worst, EF.Sqrt ((Fu - Tu) ** 2 + (Fv - Tv) ** 2));
+                                             end if;
+                                          end;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end loop;
+                              Append (Line_H, " at" & Natural'Image (Natural (100.0 * H)) & " cm " & Image (Worst, 2) & " px");
+                           end;
+                        end loop;
+                        Put_Line ("refined arm" & Sets (K).Number'Image & ": the table's points at most" & To_String (Line_H));
+                     end;
+                  end loop;
+                  for K in Sets'Range loop
+                     Append (Line, "; arm" & Sets (K).Number'Image & " centre off by "
+                             & Image (1000.0 * abs Minus (Refined.Poses (K).Translation, Truth.Translation), 1)
+                             & " mm, turn off by "
+                             & Image (180.0 / Ada.Numerics.Pi
+                                      * Driver.Numerics.Angle (Times (Transposed (Truth.Rotation),
+                                                                      Refined.Poses (K).Rotation)), 2) & " deg");
+                  end loop;
+                  Append (Line, "; the arms' joints at most " & Image (Worst, 2)
+                          & " px from the true eye's places, spread "
+                          & Image (Refined.Spread, 2) & " px, "
+                          & Image (Real (Ada.Calendar.Clock - Began_R), 1) & " s"
+                          & (if Refined.Determined then "" else "; " & To_String (Refined.Why)));
+                  Put_Line (To_String (Line));
+               end;
+               for K in Sets'Range loop
+                  for V in Pictures (K)'Range loop
+                     declare
+                        L : Flow.Luma_Access := Pictures (K) (V).Luma;
+                     begin
+                        Free (L);
+                     end;
+                  end loop;
+               end loop;
+               Free (Fixed);
+            end;
+         end if;
+         --  FLOW_SCENE = S (BENCH): the eye placed again from the world the arms' own eyes saw, as step 2 measures it
+         --  (where the points of the table and of what stands on it lie, and how they look from the wrist): each arm's
+         --  wrist eye at each pose of its set; a grid of its picture's points (a patch apart) that lie on the world's
+         --  solids, each predicted into the fixed eye by the arms' fit (Result: the place, and the warp the solid makes
+         --  there, from the next pixels' points), within S px either way, and aligned across the scales
+         --  (Driver.Alignment.Align_At_Scale); then the eye's lens and pose fitted to the places found narrowly
+         --  (Gauss-Newton on a central-difference Jacobian, the places off by more than Z robust sigmas left out until
+         --  none is), twice, each from where the last left the eye. Against the truth: how many were found, how far
+         --  their places lie from the true eye's, and the eye.
+         if Ada.Environment_Variables.Exists ("FLOW_SCENE") then
+            declare
+               Window    : Real := Setting ("FLOW_SCENE", 8.0);
+               --  FLOW_SCENE_EXTRA = E: E more poses of each arm for its wrist eye to see the world from, drawn as
+               --  the sets' are, the same every round.
+               Extra     : constant Natural := Natural (Setting ("FLOW_SCENE_EXTRA", 0.0));
+               Cam       : FW.Camera renames W.Cameras (Eye);
+               True_Lens : constant Fit.Lens :=
+                 (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
+               Fixed     : Flow.Luma_Access := Picture;
+               Fixed_Pyr : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Width, Height, Fixed.all);
+               type Match is record
+                  X      : Vec3;
+                  U, V   : Real;
+                  Su, Sv : Real;
+               end record;
+               package Match_Vectors is new Ada.Containers.Vectors (Positive, Match);
+               use type Driver.Alignment.Verdict;
+               Lens : Fit.Lens := Result.Lens;
+               Pose : Rigid := Result.Poses (Result.Poses'First);
+               Step : constant Real := EF."**" (Real'Model_Epsilon, 1.0 / 3.0);
+               function Project (L : Fit.Lens; P : Rigid; X : Vec3; U, V : out Real) return Boolean is
+                  Xc : constant Vec3 := Transposed_Times (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+               begin
+                  U := 0.0;
+                  V := 0.0;
+                  if Xc (3) <= 0.0 then
+                     return False;
+                  end if;
+                  U := L.Cx + L.Fx * Xc (1) / Xc (3);
+                  V := L.Cy + L.Fy * Xc (2) / Xc (3);
+                  return U >= 0.0 and then U < Real (Width) and then V >= 0.0 and then V < Real (Height);
+               end Project;
+               --  The point of the world a wrist eye's pixel sees, when it is a world's solid's.
+               function World_Point (C : FW.Camera; U, V : Real; X : out Vec3; Solid : out Natural) return Boolean is
+                  Along : Real;
+                  Px    : constant Real := (U - C.Cx) / C.Fx;
+                  Py    : constant Real := (V - C.Cy) / C.Fy;
+                  Pn    : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
+               begin
+                  Fake_Render.Nearest (W, C, U, V, Solid, Along);
+                  X := [0.0, 0.0, 0.0];
+                  if Solid = 0 or else Along >= Real'Last or else W.Solids (Solid).Link /= 0 then
+                     return False;
+                  end if;
+                  X := C.Pose.Translation + Along * Times (C.Pose.Rotation, Vec3'[Px / Pn, Py / Pn, 1.0 / Pn]);
+                  return True;
+               end World_Point;
+               --  A point of the world a wrist eye's picture shows: the picture, its place in it, the point, and the
+               --  points the next pixels across and down show.
+               type Sight is record
+                  View      : Positive;
+                  U0, V0    : Real;
+                  X, Xu, Xv : Vec3;
+               end record;
+               package Sight_Vectors is new Ada.Containers.Vectors (Positive, Sight);
+               use type Driver.Alignment.Pyramid;
+               package Pyramid_Vectors is new Ada.Containers.Vectors (Positive, Driver.Alignment.Pyramid);
+               package Point_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+               Sights    : Sight_Vectors.Vector;
+               Views     : Pyramid_Vectors.Vector;
+               Joints_At : Point_Vectors.Vector;   --  the arms' joints at every pose of their sets, in the world
+               --  FLOW_SCENE_ROUNDS: at most so many rounds; they end when a round moves the arms' joints in the
+               --  picture by no more than the fit's own spread there.
+               Rounds      : constant Positive := Positive (Setting ("FLOW_SCENE_ROUNDS", 8.0));
+               Last_Spread : Real := Real'Last;
+               Prev_U, Prev_V : Real_Vectors.Vector;
+            begin
+               --  The wrist eyes' pictures and the points of the world in them, once.
+               for K in Sets'Range loop
+                  declare
+                     Group : Natural := 0;
+                     Wrist : Natural := 0;
+                  begin
+                     for G in W.Groups.First_Index .. W.Groups.Last_Index loop
+                        if To_String (W.Groups (G).Name) = "arm" & Trim (Sets (K).Number) & "_joints" then
+                           Group := G;
+                        end if;
+                     end loop;
+                     for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
+                        if W.Cameras (C).Link /= 0 and then W.Cameras (C).Arm = Sets (K).Number then
+                           Wrist := C;
+                        end if;
+                     end loop;
+                     if Group /= 0 and then Wrist /= 0 then
+                        declare
+                           Links : FW.Index_Vectors.Vector renames W.Groups (Group).Joints;
+                           N     : constant Natural := Natural (Links.Length);
+                           Rest  : Real_Array (1 .. N);
+                           Draws : Ada.Numerics.Float_Random.Generator;
+                           Given : constant Natural := Sets (K).Views'Length;
+                        begin
+                           Ada.Numerics.Float_Random.Reset (Draws, Seed + K);
+                           for J in 1 .. N loop
+                              Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
+                           end loop;
+                           for V in 1 .. Given + Extra loop
+                              for J in 1 .. N loop
+                                 declare
+                                    L : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
+                                 begin
+                                    L.Q := Rest (J)
+                                      + (if V <= Given
+                                         then Sets (K).Views (Sets (K).Views'First + V - 1).Readings (J)
+                                         else (2.0 * Real (Ada.Numerics.Float_Random.Random (Draws)) - 1.0)
+                                                * Swing / L.Unit);
+                                 end;
+                              end loop;
+                              FW.Forward (W);
+                              if V <= Given then
+                                 for J in 1 .. N loop
+                                    Joints_At.Append (W.Links (Links (Links.First_Index + J - 1)).Pose.Translation);
+                                 end loop;
+                              end if;
+                              declare
+                                 C    : aliased constant FW.Camera := W.Cameras (Wrist);
+                                 Rgb  : Rgb_Access := new Real_Array (1 .. 3 * C.Width * C.Height);
+                                 Luma : Real_Array (1 .. C.Width * C.Height);
+                                 Grid : constant Positive := 2 * Driver.Alignment.Half_Patch (C.Width, C.Height);
+                                 Gu   : Natural := Grid / 2;
+                              begin
+                                 Fake_Render.Render (W, C, Rgb.all);
+                                 for P in Luma'Range loop
+                                    Luma (P) := 0.299 * Rgb (Rgb'First + 3 * (P - 1))
+                                      + 0.587 * Rgb (Rgb'First + 3 * (P - 1) + 1)
+                                      + 0.114 * Rgb (Rgb'First + 3 * (P - 1) + 2);
+                                 end loop;
+                                 Free (Rgb);
+                                 Views.Append (Driver.Alignment.Pyramid_Of (C.Width, C.Height, Luma));
+                                 while Gu < C.Width - Grid / 2 loop
+                                    declare
+                                       Gv : Natural := Grid / 2;
+                                    begin
+                                       while Gv < C.Height - Grid / 2 loop
+                                          declare
+                                             U0 : constant Real := Real (Gu) + 0.5;
+                                             V0 : constant Real := Real (Gv) + 0.5;
+                                             X, Xu, Xv : Vec3;
+                                             S, Su, Sv : Natural;
+                                          begin
+                                             if World_Point (C, U0, V0, X, S)
+                                               and then World_Point (C, U0 + 1.0, V0, Xu, Su)
+                                               and then World_Point (C, U0, V0 + 1.0, Xv, Sv)
+                                               and then Su = S and then Sv = S
+                                             then
+                                                Sights.Append (Sight'(View => Views.Last_Index, U0 => U0, V0 => V0,
+                                                                      X => X, Xu => Xu, Xv => Xv));
+                                             end if;
+                                          end;
+                                          Gv := Gv + Grid;
+                                       end loop;
+                                    end;
+                                    Gu := Gu + Grid;
+                                 end loop;
+                              end;
+                           end loop;
+                           for J in 1 .. N loop
+                              W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
+                           end loop;
+                           FW.Forward (W);
+                        end;
+                     end if;
+                  end;
+               end loop;
+               Put_Line ("scene:" & Views.Length'Image & " wrist pictures," & Sights.Length'Image
+                         & " points of the world in them");
+               for Round in 1 .. Rounds loop
+                  declare
+                     Found : Match_Vectors.Vector;
+                     Asked : Natural := 0;
+                  begin
+                     --  Every point aligned at once (Driver.Parallel_For: each writes its own slot), from plain copies of the points
+                     --  and the pictures.
+                     declare
+                        Count : constant Natural := Natural (Sights.Length);
+                        type Sight_Array is array (Positive range <>) of Sight;
+                        type Sight_Access is access Sight_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Sight_Array, Sight_Access);
+                        type Pyramid_Array is array (Positive range <>) of Driver.Alignment.Pyramid;
+                        type Pyramid_Access is access Pyramid_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Pyramid_Array, Pyramid_Access);
+                        type Slot is record
+                           Asked, Got   : Boolean := False;
+                           U, V, Su, Sv : Real := 0.0;
+                        end record;
+                        type Slot_Array is array (Positive range <>) of Slot;
+                        type Slot_Access is access Slot_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Slot_Array, Slot_Access);
+                        All_Sights : Sight_Access := new Sight_Array (1 .. Natural'Max (1, Count));
+                        All_Views  : Pyramid_Access := new Pyramid_Array (1 .. Natural'Max (1, Natural (Views.Length)));
+                        Slots      : Slot_Access := new Slot_Array (1 .. Natural'Max (1, Count));
+                        procedure One (I : Positive) is
+                           S : Sight renames All_Sights (I);
+                           Tu, Tv, Uu, Uv, Vu, Vv : Real;
+                        begin
+                           if Project (Lens, Pose, S.X, Tu, Tv) and then Project (Lens, Pose, S.Xu, Uu, Uv)
+                             and then Project (Lens, Pose, S.Xv, Vu, Vv)
+                           then
+                              declare
+                                 Query : constant Driver.Alignment.Prediction :=
+                                   (From   => (U => S.U0, V => S.V0),
+                                    To     => (U => Tu, V => Tv),
+                                    Linear => (UU => Uu - Tu, UV => Vu - Tu, VU => Uv - Tv, VV => Vv - Tv),
+                                    Cov    => (UU => Window ** 2, UV => 0.0, VV => Window ** 2),
+                                    Linear_Sigma => Real'Last);
+                                 A : constant Driver.Alignment.Answer :=
+                                   Driver.Alignment.Align_At_Scale (All_Views (S.View), Fixed_Pyr, Query);
+                              begin
+                                 Slots (I).Asked := True;
+                                 if A.Verdict = Driver.Alignment.Found and then A.Narrow
+                                   and then A.Cov.UU > 0.0 and then A.Cov.VV > 0.0
+                                 then
+                                    Slots (I) := (Asked => True, Got => True, U => A.To.U, V => A.To.V,
+                                                  Su => EF.Sqrt (A.Cov.UU), Sv => EF.Sqrt (A.Cov.VV));
+                                 end if;
+                              end;
+                           end if;
+                        end One;
+                        procedure Every is new Driver.Parallel_For (One);
+                     begin
+                        for I in 1 .. Count loop
+                           All_Sights (I) := Sights (I);
+                        end loop;
+                        for I in 1 .. Natural (Views.Length) loop
+                           All_Views (I) := Views (I);
+                        end loop;
+                        if Count > 0 then
+                           Every (1, Count);
+                        end if;
+                        for I in 1 .. Count loop
+                           if Slots (I).Asked then
+                              Asked := Asked + 1;
+                           end if;
+                           if Slots (I).Got then
+                              Found.Append (Match'(X => All_Sights (I).X, U => Slots (I).U, V => Slots (I).V,
+                                                   Su => Slots (I).Su, Sv => Slots (I).Sv));
+                           end if;
+                        end loop;
+                        Free (All_Sights);
+                        Free (All_Views);
+                        Free (Slots);
+                     end;
+                     --  How far the places found lie from the true eye's places of their points.
+                     declare
+                        Off : Real_Array (1 .. Natural'Max (1, Natural (Found.Length)));
+                        Far : Natural := 0;
+                     begin
+                        for M in 1 .. Natural (Found.Length) loop
+                           declare
+                              Tu, Tv : Real;
+                              In_View : constant Boolean := Project (True_Lens, Truth, Found (M).X, Tu, Tv);
+                           begin
+                              Off (M) := (if In_View then EF.Sqrt ((Found (M).U - Tu) ** 2 + (Found (M).V - Tv) ** 2)
+                                          else Real'Last);
+                              if Off (M) > 2.0 then
+                                 Far := Far + 1;
+                              end if;
+                           end;
+                        end loop;
+                        Put_Line ("scene round" & Round'Image & ": asked" & Asked'Image & ", found narrowly"
+                                  & Found.Length'Image & "; off the true eye's places: median "
+                                  & (if Found.Is_Empty then "none" else Image (Driver.Stats.Median (Off), 2))
+                                  & " px, beyond two pixels" & Far'Image);
+                     end;
+                     --  The eye's lens and pose fitted to the places found: terms the focal length's logarithm, the
+                     --  principal point, a turn about the eye's own axes and the centre's move, from Lens and Pose.
+                     declare
+                        Kept : array (1 .. Natural (Found.Length)) of Boolean := [others => True];
+                        Y    : Real_Vector (1 .. 9) := [others => 0.0];
+                        function Lens_Of (Z : Real_Vector) return Fit.Lens is
+                          ((Fx => Lens.Fx * EF.Exp (Z (1)), Fy => Lens.Fy * EF.Exp (Z (1)), Cx => Lens.Cx + Z (2),
+                            Cy => Lens.Cy + Z (3), K1 | K2 => 0.0));
+                        function Pose_Of (Z : Real_Vector) return Rigid is
+                          ((Rotation => Times (Pose.Rotation, Driver.Numerics.Exp (Vec3'[Z (4), Z (5), Z (6)])),
+                            Translation => [Pose.Translation (1) + Z (7), Pose.Translation (2) + Z (8),
+                                            Pose.Translation (3) + Z (9)]));
+                        function Count_Kept return Natural is
+                           C : Natural := 0;
+                        begin
+                           for B of Kept loop
+                              if B then
+                                 C := C + 1;
+                              end if;
+                           end loop;
+                           return C;
+                        end Count_Kept;
+                        function Residuals (Z : Real_Vector) return Real_Array is
+                           R  : Real_Array (1 .. 2 * Natural'Max (1, Count_Kept)) := [others => 0.0];
+                           I  : Natural := 0;
+                           L1 : constant Fit.Lens := Lens_Of (Z);
+                           P1 : constant Rigid := Pose_Of (Z);
+                        begin
+                           for M in Kept'Range loop
+                              if Kept (M) then
+                                 declare
+                                    Xc : constant Vec3 :=
+                                      Transposed_Times
+                                        (P1.Rotation, Driver.Numerics.Minus (Found (M).X, P1.Translation));
+                                    U  : constant Real := L1.Cx + L1.Fx * Xc (1) / Xc (3);
+                                    V  : constant Real := L1.Cy + L1.Fy * Xc (2) / Xc (3);
+                                 begin
+                                    R (I + 1) := (U - Found (M).U) / Found (M).Su;
+                                    R (I + 2) := (V - Found (M).V) / Found (M).Sv;
+                                    I := I + 2;
+                                 end;
+                              end if;
+                           end loop;
+                           return R;
+                        end Residuals;
+                        function Cost (R : Real_Array) return Real is
+                           Sum : Real := 0.0;
+                        begin
+                           for X of R loop
+                              Sum := Sum + X * X;
+                           end loop;
+                           return Sum;
+                        end Cost;
+                        Dropped : Natural;
+                     begin
+                        if Count_Kept >= 5 then
+                           loop
+                              --  Gauss-Newton until a step lowers the cost by less than one residual's worth.
+                              loop
+                                 declare
+                                    R0  : constant Real_Array := Residuals (Y);
+                                    C0  : constant Real := Cost (R0);
+                                    Jac : Real_Matrix (R0'Range, 1 .. 9);
+                                    Ata : Real_Matrix (1 .. 9, 1 .. 9) := [others => [others => 0.0]];
+                                    Atb : Real_Vector (1 .. 9) := [others => 0.0];
+                                    Lower : Real_Matrix (1 .. 9, 1 .. 9);
+                                    Ok    : Boolean;
+                                    Better : Boolean := False;
+                                 begin
+                                    for T in 1 .. 9 loop
+                                       declare
+                                          Up, Down : Real_Vector := Y;
+                                       begin
+                                          Up (T) := Y (T) + Step;
+                                          Down (T) := Y (T) - Step;
+                                          declare
+                                             Ru : constant Real_Array := Residuals (Up);
+                                             Rd : constant Real_Array := Residuals (Down);
+                                          begin
+                                             for I in R0'Range loop
+                                                Jac (I, T) := (Ru (I) - Rd (I)) / (2.0 * Step);
+                                             end loop;
+                                          end;
+                                       end;
+                                    end loop;
+                                    for A in 1 .. 9 loop
+                                       for B in 1 .. 9 loop
+                                          for I in R0'Range loop
+                                             Ata (A, B) := Ata (A, B) + Jac (I, A) * Jac (I, B);
+                                          end loop;
+                                       end loop;
+                                       for I in R0'Range loop
+                                          Atb (A) := Atb (A) - Jac (I, A) * R0 (I);
+                                       end loop;
+                                    end loop;
+                                    Driver.Numerics.Dense.Cholesky (Ata, Lower, Ok);
+                                    exit when not Ok;
+                                    declare
+                                       D     : Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lower, Atb);
+                                       Trial : Real_Vector (1 .. 9);
+                                    begin
+                                       for Halving in 1 .. Real'Machine_Mantissa loop
+                                          for T in 1 .. 9 loop
+                                             Trial (T) := Y (T) + D (T);
+                                          end loop;
+                                          declare
+                                             C1 : constant Real := Cost (Residuals (Trial));
+                                          begin
+                                             if C1 < C0 then
+                                                Y := Trial;
+                                                Better := C0 - C1 >= Real'Max (1.0, C0 / Real (R0'Length));
+                                                exit;
+                                             end if;
+                                          end;
+                                          for T in 1 .. 9 loop
+                                             D (T) := D (T) / 2.0;
+                                          end loop;
+                                       end loop;
+                                    end;
+                                    exit when not Better;
+                                 end;
+                              end loop;
+                              --  The places off by more than Z robust sigmas left out, until none is.
+                              declare
+                                 R     : constant Real_Array := Residuals (Y);
+                                 Scale : constant Real := Driver.Stats.Robust_Sigma (R);
+                                 I     : Natural := 0;
+                              begin
+                                 Dropped := 0;
+                                 for M in Kept'Range loop
+                                    if Kept (M) then
+                                       if EF.Sqrt (R (I + 1) ** 2 + R (I + 2) ** 2)
+                                         > Driver.Conventions.Z * Scale * EF.Sqrt (2.0)
+                                       then
+                                          Kept (M) := False;
+                                          Dropped := Dropped + 1;
+                                       end if;
+                                       I := I + 2;
+                                    end if;
+                                 end loop;
+                              end;
+                              exit when Dropped = 0 or else Count_Kept < 5;
+                           end loop;
+                           --  The fit's covariance at the end (the residuals' scatter over their stated sigmas times
+                           --  the normal matrix's inverse): each term's sigma, and how far the weakest direction lets
+                           --  the focal length and the centre go together.
+                           declare
+                              R0    : constant Real_Array := Residuals (Y);
+                              Jac   : Real_Matrix (R0'Range, 1 .. 9);
+                              Ata   : Real_Matrix (1 .. 9, 1 .. 9) := [others => [others => 0.0]];
+                              Lower : Real_Matrix (1 .. 9, 1 .. 9);
+                              Ok    : Boolean;
+                              Scale : constant Real := Real'Max (1.0, Cost (R0) / Real'Max (1.0, Real (R0'Length - 9)));
+                           begin
+                              for T in 1 .. 9 loop
+                                 declare
+                                    Up, Down : Real_Vector := Y;
+                                 begin
+                                    Up (T) := Y (T) + Step;
+                                    Down (T) := Y (T) - Step;
+                                    declare
+                                       Ru : constant Real_Array := Residuals (Up);
+                                       Rd : constant Real_Array := Residuals (Down);
+                                    begin
+                                       for I in R0'Range loop
+                                          Jac (I, T) := (Ru (I) - Rd (I)) / (2.0 * Step);
+                                       end loop;
+                                    end;
+                                 end;
+                              end loop;
+                              for A in 1 .. 9 loop
+                                 for B in 1 .. 9 loop
+                                    for I in R0'Range loop
+                                       Ata (A, B) := Ata (A, B) + Jac (I, A) * Jac (I, B);
+                                    end loop;
+                                 end loop;
+                              end loop;
+                              Driver.Numerics.Dense.Cholesky (Ata, Lower, Ok);
+                              if Ok then
+                                 declare
+                                    Cov : Real_Matrix (1 .. 9, 1 .. 9);
+                                 begin
+                                    for T in 1 .. 9 loop
+                                       declare
+                                          E : Real_Vector (1 .. 9) := [others => 0.0];
+                                       begin
+                                          E (T) := 1.0;
+                                          declare
+                                             Col : constant Real_Vector :=
+                                               Driver.Numerics.Dense.Cholesky_Solve (Lower, E);
+                                          begin
+                                             for A in 1 .. 9 loop
+                                                Cov (A, T) := Scale * Col (A);
+                                             end loop;
+                                          end;
+                                       end;
+                                    end loop;
+                                    Put_Line ("scene round" & Round'Image & ": sigmas focal "
+                                              & Image (100.0 * EF.Sqrt (Cov (1, 1)), 2) & " %, principal point "
+                                              & Image (EF.Sqrt (Cov (2, 2)), 2) & " " & Image (EF.Sqrt (Cov (3, 3)), 2)
+                                              & " px, turn " & Image (180.0 / Ada.Numerics.Pi
+                                                * EF.Sqrt (Cov (4, 4) + Cov (5, 5) + Cov (6, 6)), 3)
+                                              & " deg, centre " & Image (1000.0 * EF.Sqrt (Cov (7, 7) + Cov (8, 8)
+                                                                                           + Cov (9, 9)), 2)
+                                              & " mm; focal with the centre along the eye's axis: correlation "
+                                              & Image (Cov (1, 9) / EF.Sqrt (Cov (1, 1) * Cov (9, 9)), 3));
+                                    --  The arms' joints in the picture at every pose of their sets, as the eye's
+                                    --  verdict weighs them: how far the fitted eye puts them from where the true eye
+                                    --  does, and how far the fit's own covariance says it may (the worst point's
+                                    --  standard deviation, both axes together), with the arms' fit's for the start.
+                                    declare
+                                       Errors, Spreads, Starts : Real_Vectors.Vector;
+                                    begin
+                                       for X of Joints_At loop
+                                          declare
+                                             Fu, Fv, Tu, Tv, Su, Sv : Real;
+                                          begin
+                                             if Project (Lens_Of (Y), Pose_Of (Y), X, Fu, Fv)
+                                               and then Project (True_Lens, Truth, X, Tu, Tv)
+                                             then
+                                                Errors.Append (EF.Sqrt ((Fu - Tu) ** 2 + (Fv - Tv) ** 2));
+                                                if Project (Result.Lens, Result.Poses (Result.Poses'First), X,
+                                                            Su, Sv)
+                                                then
+                                                   Starts.Append (EF.Sqrt ((Su - Tu) ** 2 + (Sv - Tv) ** 2));
+                                                end if;
+                                                declare
+                                                   Gu, Gv : Real_Vector (1 .. 9);
+                                                   Vu, Vv : Real := 0.0;
+                                                begin
+                                                   for T in 1 .. 9 loop
+                                                      declare
+                                                         Up, Down : Real_Vector := Y;
+                                                         Uu, Uv, Du, Dv : Real;
+                                                         B1, B2 : Boolean;
+                                                      begin
+                                                         Up (T) := Y (T) + Step;
+                                                         Down (T) := Y (T) - Step;
+                                                         B1 := Project (Lens_Of (Up), Pose_Of (Up), X, Uu, Uv);
+                                                         B2 := Project (Lens_Of (Down), Pose_Of (Down), X, Du, Dv);
+                                                         Gu (T) := (if B1 and then B2
+                                                                    then (Uu - Du) / (2.0 * Step) else 0.0);
+                                                         Gv (T) := (if B1 and then B2
+                                                                    then (Uv - Dv) / (2.0 * Step) else 0.0);
+                                                      end;
+                                                   end loop;
+                                                   for A in 1 .. 9 loop
+                                                      for B in 1 .. 9 loop
+                                                         Vu := Vu + Gu (A) * Cov (A, B) * Gu (B);
+                                                         Vv := Vv + Gv (A) * Cov (A, B) * Gv (B);
+                                                      end loop;
+                                                   end loop;
+                                                   Spreads.Append (EF.Sqrt (Vu + Vv));
+                                                end;
+                                             end if;
+                                          end;
+                                       end loop;
+                                       declare
+                                          function Most (V : Real_Vectors.Vector) return Real is
+                                             M : Real := 0.0;
+                                          begin
+                                             for X of V loop
+                                                M := Real'Max (M, X);
+                                             end loop;
+                                             return M;
+                                          end Most;
+                                       begin
+                                          Put_Line ("scene round" & Round'Image & ": the arms' joints in the picture"
+                                                    & Errors.Length'Image & ": off the truth at most "
+                                                    & Image (Most (Errors), 2) & " px (the arms' fit "
+                                                    & Image (Most (Starts), 2) & "), the fit's own spread at most "
+                                                    & Image (Most (Spreads), 2) & " px, the verdict's bar "
+                                                    & Image (Real (Driver.Alignment.Half_Patch (Width, Height))
+                                                             / Driver.Conventions.Z, 2) & " px");
+                                          Last_Spread := Most (Spreads);
+                                       end;
+                                    end;
+                                 end;
+                              end if;
+                           end;
+                           Lens := Lens_Of (Y);
+                           Pose := Pose_Of (Y);
+                           --  The next round's window: how far the fitted eye leaves the places it kept, in pixels.
+                           declare
+                              Px : Real_Array (1 .. 2 * Count_Kept);
+                              I  : Natural := 0;
+                           begin
+                              for M in Kept'Range loop
+                                 if Kept (M) then
+                                    declare
+                                       Tu, Tv : Real;
+                                       Seen   : constant Boolean := Project (Lens, Pose, Found (M).X, Tu, Tv);
+                                    begin
+                                       Px (I + 1) := (if Seen then Tu - Found (M).U else 0.0);
+                                       Px (I + 2) := (if Seen then Tv - Found (M).V else 0.0);
+                                       I := I + 2;
+                                    end;
+                                 end if;
+                              end loop;
+                              Window := Driver.Stats.Robust_Sigma (Px);
+                           end;
+                        end if;
+                        Put_Line ("scene round" & Round'Image & ": kept" & Count_Kept'Image & " of" & Found.Length'Image
+                                  & ", the next window " & Image (Window, 2) & " px"
+                                  & "; focal " & Image (Lens.Fx, 1) & " (" & Image (100.0 * (Lens.Fx / Cam.Fx - 1.0), 2)
+                                  & " %), principal point (" & Image (Lens.Cx, 1) & ", " & Image (Lens.Cy, 1) & ") of ("
+                                  & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & "), centre off by "
+                                  & Image (1000.0 * abs Driver.Numerics.Minus (Pose.Translation, Truth.Translation), 1)
+                                  & " mm, turn off by "
+                                  & Image (180.0 / Ada.Numerics.Pi
+                                           * Driver.Numerics.Angle (Times (Transposed (Truth.Rotation), Pose.Rotation)),
+                                           2) & " deg");
+                     end;
+                  end;
+                  --  Converged: the eye this round moved the arms' joints in the picture by no more than its own spread there.
+                  declare
+                     Moved        : Real := 0.0;
+                     Now_U, Now_V : Real_Vectors.Vector;
+                  begin
+                     for X of Joints_At loop
+                        declare
+                           U, V : Real;
+                           Seen : constant Boolean := Project (Lens, Pose, X, U, V);
+                        begin
+                           Now_U.Append (U);
+                           Now_V.Append (V);
+                           if not Seen then
+                              null;   --  a joint out of the picture moves in it all the same
+                           end if;
+                        end;
+                     end loop;
+                     if Prev_U.Is_Empty then
+                        Moved := Real'Last;
+                     else
+                        for K in Now_U.First_Index .. Now_U.Last_Index loop
+                           Moved := Real'Max (Moved, EF.Sqrt ((Now_U (K) - Prev_U (K)) ** 2 + (Now_V (K) - Prev_V (K)) ** 2));
+                        end loop;
+                     end if;
+                     Prev_U := Now_U;
+                     Prev_V := Now_V;
+                     Put_Line ("scene round" & Round'Image & ": the arms' joints moved at most "
+                               & (if Moved >= Real'Last then "(first round)" else Image (Moved, 2) & " px")
+                               & " since the round before");
+                     exit when Moved <= Last_Spread;
+                  end;
+               end loop;
+               Free (Fixed);
+            end;
+         end if;
       end;
    end;
 end Driver.Robot.Flow_Bench;

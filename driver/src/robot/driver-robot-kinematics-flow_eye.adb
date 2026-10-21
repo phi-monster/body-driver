@@ -1891,6 +1891,95 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       end;
    end Start_Arm;
 
+   --  A covariance widened to a spread in every direction the spread exceeds it, and kept in the others: with Lc Lc'
+   --  the covariance, M = Lc^-1 Spread Lc^-T = V values V', W = V max (1, values) V', and the covariance Lc W Lc'.
+   --  Widened: the most it was widened in any direction, raised to the largest value. Nothing when the covariance is
+   --  not positive definite.
+   procedure Widen_Covariance (Covariance : in out Real_Matrix; Spread : Real_Matrix; Widened : in out Real) is
+      G   : constant Positive := Covariance'Length (1);
+      Lc  : Real_Matrix (1 .. G, 1 .. G);
+      Def : Boolean;
+      function Forward (B : Real_Vector) return Real_Vector is
+         Y : Real_Vector (1 .. G);
+      begin
+         for I in 1 .. G loop
+            Y (I) := B (B'First + I - 1);
+            for K in 1 .. I - 1 loop
+               Y (I) := Y (I) - Lc (I, K) * Y (K);
+            end loop;
+            Y (I) := Y (I) / Lc (I, I);
+         end loop;
+         return Y;
+      end Forward;
+   begin
+      Driver.Numerics.Dense.Cholesky (Covariance, Lc, Def);
+      if not Def then
+         return;
+      end if;
+      declare
+         Y, M    : Real_Matrix (1 .. G, 1 .. G);
+         Values  : Real_Vector (1 .. G);
+         Vectors : Real_Matrix (1 .. G, 1 .. G);
+         W       : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+         T       : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+      begin
+         for C in 1 .. G loop
+            declare
+               Column : Real_Vector (1 .. G);
+            begin
+               for R in 1 .. G loop
+                  Column (R) := Spread (Spread'First (1) + R - 1, Spread'First (2) + C - 1);
+               end loop;
+               Column := Forward (Column);
+               for R in 1 .. G loop
+                  Y (R, C) := Column (R);
+               end loop;
+            end;
+         end loop;
+         --  M = (Lc^-1 Y')'.
+         for C in 1 .. G loop
+            declare
+               Column : Real_Vector (1 .. G);
+            begin
+               for R in 1 .. G loop
+                  Column (R) := Y (C, R);
+               end loop;
+               Column := Forward (Column);
+               for R in 1 .. G loop
+                  M (C, R) := Column (R);
+               end loop;
+            end;
+         end loop;
+         Driver.Numerics.Dense.Small_Eigensystem (M, Values, Vectors);
+         for V of Values loop
+            Widened := Real'Max (Widened, V);
+         end loop;
+         for I in 1 .. G loop
+            for A in 1 .. G loop
+               for B in 1 .. G loop
+                  W (A, B) := W (A, B) + Real'Max (1.0, Values (I)) * Vectors (A, I) * Vectors (B, I);
+               end loop;
+            end loop;
+         end loop;
+         for A in 1 .. G loop
+            for B in 1 .. G loop
+               for K in 1 .. A loop
+                  T (A, B) := T (A, B) + Lc (A, K) * W (K, B);
+               end loop;
+            end loop;
+         end loop;
+         for A in 1 .. G loop
+            for B in 1 .. G loop
+               Covariance (Covariance'First (1) + A - 1, Covariance'First (2) + B - 1) := 0.0;
+               for K in 1 .. B loop
+                  Covariance (Covariance'First (1) + A - 1, Covariance'First (2) + B - 1) :=
+                    Covariance (Covariance'First (1) + A - 1, Covariance'First (2) + B - 1) + T (A, K) * Lc (B, K);
+               end loop;
+            end loop;
+         end loop;
+      end;
+   end Widen_Covariance;
+
    procedure Fit_Eye
      (Arms          : Arm_Flow_Array;
       Width, Height : Positive;
@@ -2122,90 +2211,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                N_Out    : Natural := 0;
                Rows_All : Natural := 0;
 
-               --  The covariance widened to Spread in every direction Spread exceeds it, and kept in the others: with
-               --  Lc Lc' the covariance, M = Lc^-1 Spread Lc^-T = V values V', W = V max (1, values) V', and the
-               --  covariance Lc W Lc'.
+               --  The covariance widened to Spread in every direction Spread exceeds it (Widen_Covariance).
                procedure Widen (Spread : Real_Matrix) is
-                  Lc  : Real_Matrix (1 .. G, 1 .. G);
-                  Def : Boolean;
-                  function Forward (B : Real_Vector) return Real_Vector is
-                     Y : Real_Vector (1 .. G);
-                  begin
-                     for I in 1 .. G loop
-                        Y (I) := B (B'First + I - 1);
-                        for K in 1 .. I - 1 loop
-                           Y (I) := Y (I) - Lc (I, K) * Y (K);
-                        end loop;
-                        Y (I) := Y (I) / Lc (I, I);
-                     end loop;
-                     return Y;
-                  end Forward;
                begin
-                  Driver.Numerics.Dense.Cholesky (Result.Covariance, Lc, Def);
-                  if not Def then
-                     return;
-                  end if;
-                  declare
-                     Y, M    : Real_Matrix (1 .. G, 1 .. G);
-                     Values  : Real_Vector (1 .. G);
-                     Vectors : Real_Matrix (1 .. G, 1 .. G);
-                     W       : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
-                     T       : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
-                  begin
-                     for C in 1 .. G loop
-                        declare
-                           Column : Real_Vector (1 .. G);
-                        begin
-                           for R in 1 .. G loop
-                              Column (R) := Spread (R, C);
-                           end loop;
-                           Column := Forward (Column);
-                           for R in 1 .. G loop
-                              Y (R, C) := Column (R);
-                           end loop;
-                        end;
-                     end loop;
-                     --  M = (Lc^-1 Y')'.
-                     for C in 1 .. G loop
-                        declare
-                           Column : Real_Vector (1 .. G);
-                        begin
-                           for R in 1 .. G loop
-                              Column (R) := Y (C, R);
-                           end loop;
-                           Column := Forward (Column);
-                           for R in 1 .. G loop
-                              M (C, R) := Column (R);
-                           end loop;
-                        end;
-                     end loop;
-                     Driver.Numerics.Dense.Small_Eigensystem (M, Values, Vectors);
-                     for V of Values loop
-                        Result.Widened := Real'Max (Result.Widened, V);
-                     end loop;
-                     for I in 1 .. G loop
-                        for A in 1 .. G loop
-                           for B in 1 .. G loop
-                              W (A, B) := W (A, B) + Real'Max (1.0, Values (I)) * Vectors (A, I) * Vectors (B, I);
-                           end loop;
-                        end loop;
-                     end loop;
-                     for A in 1 .. G loop
-                        for B in 1 .. G loop
-                           for K in 1 .. A loop
-                              T (A, B) := T (A, B) + Lc (A, K) * W (K, B);
-                           end loop;
-                        end loop;
-                     end loop;
-                     for A in 1 .. G loop
-                        for B in 1 .. G loop
-                           Result.Covariance (A, B) := 0.0;
-                           for K in 1 .. B loop
-                              Result.Covariance (A, B) := Result.Covariance (A, B) + T (A, K) * Lc (B, K);
-                           end loop;
-                        end loop;
-                     end loop;
-                  end;
+                  Widen_Covariance (Result.Covariance, Spread, Result.Widened);
                end Widen;
 
                --  The jackknife's spread: the blocks' shifts, each weighted, averaged over the blocks.
@@ -2374,6 +2383,1258 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       end if;
       Release;
    end Fit_Eye;
+
+   ---------------------------------------------------------------------------
+   --  The fit again from the world the arms' own eyes saw
+
+   procedure Refine_By_Scene
+     (Arms          : Arm_Flow_Array;
+      Worlds        : Arm_World_Array;
+      Fixed         : Real_Array;
+      Width, Height : Positive;
+      Result        : in out Report)
+   is
+      Count  : constant Positive := Arms'Length;
+      G      : constant Positive := Terms_For (Count);
+      Lens0  : constant Fit.Lens := Result.Lens;
+      Poses0 : constant Rigid_Array := Result.Poses;
+      Eps3   : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);
+      Fixed_Pyramid : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Width, Height, Fixed);
+
+      --  A point of the world an arm's eye showed: the arm, its picture, the pixel there, the point the pixel's line of
+      --  sight meets the arm's table at and the points the next pixels across and down meet it at.
+      type Sight is record
+         Arm, Picture : Positive := 1;
+         U0, V0       : Real := 0.0;
+         X, Xu, Xv    : Vec3 := [0.0, 0.0, 0.0];
+      end record;
+      type Sight_Array is array (Positive range <>) of Sight;
+      type Sight_Access is access Sight_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Sight_Array, Sight_Access);
+
+      --  A place the fixed eye's picture showed a point at, and its standard deviations across and down.
+      type Match is record
+         Arm    : Positive := 1;
+         Picture : Positive := 1;
+         X      : Vec3 := [0.0, 0.0, 0.0];
+         U, V   : Real := 0.0;
+         Su, Sv : Real := 0.0;
+      end record;
+      type Match_Array is array (Positive range <>) of Match;
+      type Match_Access is access Match_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Match_Array, Match_Access);
+
+      type Pyramid_Array is array (Positive range <>) of Driver.Alignment.Pyramid;
+      type Pyramid_Access is access Pyramid_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Pyramid_Array, Pyramid_Access);
+
+      --  The arms' joints at every pose of their flows, in their arms' reference frames: where the verdict weighs the
+      --  eye, as Fit_Eye weighs it at the arms' points.
+      type Joint_Point is record
+         Arm : Positive := 1;
+         X   : Vec3 := [0.0, 0.0, 0.0];
+      end record;
+      type Joint_Point_Array is array (Positive range <>) of Joint_Point;
+      type Joint_Point_Access is access Joint_Point_Array;
+      procedure Free is new Ada.Unchecked_Deallocation (Joint_Point_Array, Joint_Point_Access);
+
+      function Pictures_Of (A : Positive) return Natural is
+        (if Worlds (Worlds'First + A - 1).Pictures = null then 0
+         else Worlds (Worlds'First + A - 1).Pictures'Length);
+
+      --  The terms are the fit's (Report.Covariance's order), as changes from the flow's: the focal length's logarithm,
+      --  the principal point, and each arm's turn about the camera's own axes and centre.
+      function Lens_Of (Z : Real_Vector) return Fit.Lens is
+        ((Fx => Lens0.Fx * Exp (Z (1)), Fy => Lens0.Fy * Exp (Z (1)), Cx => Lens0.Cx + Z (2), Cy => Lens0.Cy + Z (3),
+          K1 => Lens0.K1, K2 => Lens0.K2));
+
+      function Pose_Of (Z : Real_Vector; A : Positive) return Rigid is
+        ((Rotation    => Times (Poses0 (A).Rotation,
+                                Driver.Numerics.Exp
+                                  (Vec3'[Z (Offset (A) + 1), Z (Offset (A) + 2), Z (Offset (A) + 3)])),
+          Translation => [Poses0 (A).Translation (1) + Z (Offset (A) + 4),
+                          Poses0 (A).Translation (2) + Z (Offset (A) + 5),
+                          Poses0 (A).Translation (3) + Z (Offset (A) + 6)]));
+
+      --  Where the fixed eye of those terms puts a point of arm A's frame, when in front of it and in its picture.
+      function Seen (Z : Real_Vector; A : Positive; X : Vec3; U, V : out Real) return Boolean is
+         P : constant Rigid := Pose_Of (Z, A);
+         In_Front : Boolean;
+      begin
+         Fit.Project (Lens_Of (Z), Transposed_Times (P.Rotation, Minus (X, P.Translation)), U, V, In_Front);
+         return In_Front and then U >= 0.0 and then U <= Real (Width) and then V >= 0.0 and then V <= Real (Height);
+      end Seen;
+
+      --  Where the fixed eye of those terms puts a point of arm A's frame on its picture's plane, in front of it or
+      --  not: a misfit that vanished off the picture let the places' fit run to an eye that saw none of them (the
+      --  fake's seed 22, 10-21: a focal length of 39 px, every misfit nought).
+      procedure Place (Z : Real_Vector; A : Positive; X : Vec3; U, V : out Real) is
+         P : constant Rigid := Pose_Of (Z, A);
+         C : constant Vec3 := Transposed_Times (P.Rotation, Minus (X, P.Translation));
+         L : constant Fit.Lens := Lens_Of (Z);
+      begin
+         U := L.Cx + L.Fx * C (1) / C (3);
+         V := L.Cy + L.Fy * C (2) / C (3);
+      end Place;
+
+      --  The point of arm A's table a pixel of one of its eye's pictures sees: its line of sight from the eye's centre
+      --  to the plane, in front of the eye.
+      function On_Table (W : Wrist_Picture; L : Fit.Lens; T : Driver.Geometry.Plane_Estimate; U, V : Real;
+                         X : out Vec3) return Boolean
+      is
+         D     : constant Vec3 := Times (W.Eye.Rotation, Fit.Ray (L, U, V));
+         Along : constant Real := Dot (D, T.Normal);
+      begin
+         X := W.Eye.Translation;
+         if Along = 0.0 then
+            return False;
+         end if;
+         declare
+            S : constant Real := Dot (Minus (T.Centre, W.Eye.Translation), T.Normal) / Along;
+         begin
+            X := Plus (W.Eye.Translation, Scaled (S, D));
+            return S > 0.0;
+         end;
+      end On_Table;
+
+      --  The picture shows the world at the place, by its mask.
+      function World_At (W : Wrist_Picture; U, V : Real) return Boolean is
+         X : constant Integer := Integer (Real'Floor (U));
+         Y : constant Integer := Integer (Real'Floor (V));
+      begin
+         return W.World = null
+           or else (X in 0 .. W.Width - 1 and then Y in 0 .. W.Height - 1 and then W.World (Y * W.Width + X + 1));
+      end World_At;
+
+      Total_Pictures : Natural := 0;
+      Sights   : Sight_Access;
+      Pyramids : Pyramid_Access;
+      Joints   : Joint_Point_Access;
+      --  The arms' flows as Fit_Eye measured them, the evidence beside the places: each arm's problem (its poses, its
+      --  joints' twists at each, the rates' spread Fit_Eye found, never under the pictures' own sigma), the pixels two
+      --  joints or more move, and those kept.
+      type Problem_Array is array (Positive range <>) of Problem;
+      type Layout_Array is array (Positive range <>) of Layout_Access;
+      type Kept_Array is array (Positive range <>) of Flag_Access;
+      Flows     : Problem_Array (1 .. Count);
+      Layouts   : Layout_Array (1 .. Count);
+      Flow_Kept : Kept_Array (1 .. Count);
+      Flow_Pixels : Natural := 0;
+      --  What the arms' flows tell of the eye, as Fit_Eye's own covariance holds it (widened by its jackknife over the
+      --  poses): the yardstick the places' information is weighed by, direction by direction (Split). Where the places
+      --  tell a direction less than the flows do (a table's plane leaves one open: the focal length against the
+      --  distance), the flows' residuals place the eye along it, the places' terms held; every other direction is the
+      --  places' alone. The flows' own estimate, every term of it off by their outlines' bias, held the open direction
+      --  where it stood when given as a prior beside the places, and was called told 4 sigmas off (the fake's seeds 20
+      --  and 24 at turns of 0.004, 10-21); at their own weight beside the places their bias in an arm's pose (its
+      --  centre 30 mm off) took the eye with it; along the open direction alone, at the places' other terms, the flows
+      --  put the eye within 0.25 % of the focal length on all five seeds.
+      Honest_Lower : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];   --  of Fit_Eye's covariance
+      Honest_Known : Boolean := False;
+      Began        : constant Duration := Driver.Clock.Seconds;   --  for the log: how long the rounds take
+      Aligned_At, Fitted_At : Duration := 0.0;   --  and when the round's places were found, and fitted
+
+      --  Arm A's flow residuals at the terms Z, every pixel's depth eliminated (nought where a pixel is left out).
+      procedure Flow_Residuals (Z : Real_Vector; A : Positive; R : out Real_Array) is
+         L    : constant Fit.Lens := Lens_Of (Z);
+         Pz   : constant Rigid := Pose_Of (Z, A);
+         P    : Problem := Flows (A);
+         X    : constant Parameters :=
+           [Ada.Numerics.Long_Elementary_Functions.Log (L.Fx), 0.0, 0.0, 0.0,
+            Pz.Translation (1), Pz.Translation (2), Pz.Translation (3), L.Cx, L.Cy];
+         Seen : Flag_Access := new Flag_Array (1 .. Layouts (A).Pixels_All);
+      begin
+         P.Cx := L.Cx;
+         P.Cy := L.Cy;
+         All_Residuals (P, Layouts (A).all, Pz.Rotation, X, Flow_Kept (A).all, R, Seen.all);
+         Free (Seen);
+      end Flow_Residuals;
+
+      --  The flows' misfits squared at Z, of every pose but pose Skip_Pose of arm Skip_Arm (none left out by default).
+      function Flow_Cost (Z : Real_Vector; Skip_Arm, Skip_Pose : Natural := 0) return Real is
+         Sum : Real := 0.0;
+      begin
+         for A in 1 .. Count loop
+            declare
+               L : Layout renames Layouts (A).all;
+               R : Real_Access := new Real_Array (1 .. L.Rows);
+            begin
+               Flow_Residuals (Z, A, R.all);
+               for Q in 1 .. L.Pixels_All loop
+                  if A /= Skip_Arm or else L.Pose_Of_Pixel (Q) /= Skip_Pose then
+                     for K in 0 .. L.Count (Q) - 1 loop
+                        Sum := Sum + R (L.First_Row (Q) + K) ** 2;
+                     end loop;
+                  end if;
+               end loop;
+               Free (R);
+            end;
+         end loop;
+         return Sum;
+      end Flow_Cost;
+
+      --  The flows' misfits squared at Z pose by pose: Into (Pose_Slot (A, V)) the sum over pose V of arm A's pixels,
+      --  the arms' poses one after another.
+      function Pose_Slot (A, V : Natural) return Natural is
+         Before : Natural := 0;
+      begin
+         for B in 1 .. A - 1 loop
+            Before := Before + Arms (Arms'First + B - 1).Poses'Length;
+         end loop;
+         return Before + V - Arms (Arms'First + A - 1).Poses'First + 1;
+      end Pose_Slot;
+
+      Pose_Slots : constant Natural := Pose_Slot (Count, Arms (Arms'Last).Poses'Last);
+
+      procedure Pose_Costs (Z : Real_Vector; Into : out Real_Array) is
+      begin
+         Into := [others => 0.0];
+         for A in 1 .. Count loop
+            declare
+               L : Layout renames Layouts (A).all;
+               R : Real_Access := new Real_Array (1 .. L.Rows);
+            begin
+               Flow_Residuals (Z, A, R.all);
+               for Q in 1 .. L.Pixels_All loop
+                  declare
+                     S : constant Positive := Pose_Slot (A, L.Pose_Of_Pixel (Q));
+                  begin
+                     for K in 0 .. L.Count (Q) - 1 loop
+                        Into (S) := Into (S) + R (L.First_Row (Q) + K) ** 2;
+                     end loop;
+                  end;
+               end loop;
+               Free (R);
+            end;
+         end loop;
+      end Pose_Costs;
+
+      --  The places' information (Ata, the normal matrix of their misfits) weighed against the flows': the directions
+      --  Dirs (a column each) where Ata Dirs = Lambda Honest^-1 Dirs, each of one sigma by the flows. Lambda under one:
+      --  the places tell the direction less than the flows.
+      procedure Split (Ata : Real_Matrix; Dirs : out Real_Matrix; Lambda : out Real_Vector) is
+         B : Real_Matrix (1 .. G, 1 .. G);
+         U : Real_Matrix (1 .. G, 1 .. G);
+         C : Real_Matrix (1 .. G, 1 .. G);   --  Ata Lower
+      begin
+         for M in 1 .. G loop
+            for Q in 1 .. G loop
+               declare
+                  Sum : Real := 0.0;
+               begin
+                  for K in 1 .. G loop
+                     Sum := Sum + Ata (M, K) * Honest_Lower (K, Q);
+                  end loop;
+                  C (M, Q) := Sum;
+               end;
+            end loop;
+         end loop;
+         for P in 1 .. G loop
+            for Q in 1 .. G loop
+               declare
+                  Sum : Real := 0.0;
+               begin
+                  for M in 1 .. G loop
+                     Sum := Sum + Honest_Lower (M, P) * C (M, Q);
+                  end loop;
+                  B (P, Q) := Sum;
+               end;
+            end loop;
+         end loop;
+         Driver.Numerics.Dense.Small_Eigensystem (B, Lambda, U);
+         for P in 1 .. G loop
+            for I in 1 .. G loop
+               declare
+                  Sum : Real := 0.0;
+               begin
+                  for K in 1 .. G loop
+                     Sum := Sum + Honest_Lower (P, K) * U (K, I);
+                  end loop;
+                  Dirs (P, I) := Sum;
+               end;
+            end loop;
+         end loop;
+      end Split;
+
+      --  Where along direction V from Z the flows' misfit (every pose but Skip_Pose of Skip_Arm) is least, in V's units
+      --  (the flows' sigma along it): from nought by steps either way that double until the misfit rises, then by
+      --  Brent's method within that bracket (a parabola through the three least misfits found, a golden section where
+      --  the parabola's least would not shrink the bracket enough) until the least is within half Unchanged_Fraction of
+      --  a sigma. Golden sections alone took sixteen misfits a search or more, most of the refinement's time.
+      function Line_Search (Z, V : Real_Vector; Skip_Arm, Skip_Pose : Natural := 0) return Real is
+         function F (S : Real) return Real is
+            X : Real_Vector (1 .. G);
+         begin
+            for T in 1 .. G loop
+               X (T) := Z (T) + S * V (T);
+            end loop;
+            return Flow_Cost (X, Skip_Arm, Skip_Pose);
+         end F;
+         Golden : constant Real := (3.0 - Sqrt (5.0)) / 2.0;   --  the golden section's smaller share
+         F0     : constant Real := F (0.0);
+         Lo, Hi : Real := 0.0;
+         --  The least misfit found (X), the next (W) and the one before it (Vv), as Brent's method keeps them.
+         X, W, Vv    : Real := 0.0;
+         Fx, Fw, Fv  : Real := F0;
+      begin
+         declare
+            Fp : constant Real := F (1.0);
+            Fm : constant Real := F (-1.0);
+         begin
+            if Fp >= F0 and then Fm >= F0 then
+               Lo := -1.0;
+               Hi := 1.0;
+               W := (if Fp <= Fm then 1.0 else -1.0);
+               Fw := Real'Min (Fp, Fm);
+               Vv := -W;
+               Fv := Real'Max (Fp, Fm);
+            else
+               declare
+                  Sign   : constant Real := (if Fp < Fm then 1.0 else -1.0);
+                  Before : Real := 0.0;
+                  F_Before : Real := F0;
+                  Here   : Real := 1.0;
+                  F_Here : Real := Real'Min (Fp, Fm);
+                  Step   : Real := 1.0;
+                  Next   : Real := 2.0;
+                  F_Next : Real := F_Here;
+               begin
+                  for Doubling in 1 .. Real'Machine_Mantissa loop
+                     Step := 2.0 * Step;
+                     Next := Here + Step;
+                     F_Next := F (Sign * Next);
+                     exit when F_Next >= F_Here;
+                     Before := Here;
+                     F_Before := F_Here;
+                     Here := Next;
+                     F_Here := F_Next;
+                  end loop;
+                  Lo := Real'Min (Sign * Before, Sign * Next);
+                  Hi := Real'Max (Sign * Before, Sign * Next);
+                  X := Sign * Here;
+                  Fx := F_Here;
+                  W := (if F_Before <= F_Next then Sign * Before else Sign * Next);
+                  Fw := Real'Min (F_Before, F_Next);
+                  Vv := (if F_Before <= F_Next then Sign * Next else Sign * Before);
+                  Fv := Real'Max (F_Before, F_Next);
+               end;
+            end if;
+         end;
+         declare
+            A   : Real := Lo;
+            B   : Real := Hi;
+            --  the step before last (E) and the last (D); E starts as the bracket, so that the first step may be the
+            --  parabola's through the three misfits the bracketing found
+            E   : Real := Hi - Lo;
+            D   : Real := 0.0;
+            Tol : constant Real := Driver.Conventions.Unchanged_Fraction / 4.0;
+         begin
+            loop
+               declare
+                  M         : constant Real := (A + B) / 2.0;
+                  U         : Real;
+                  Parabolic : Boolean := False;
+               begin
+                  --  The least lies in the bracket and the bracket within 2 Tol of X either way.
+                  exit when abs (X - M) <= 2.0 * Tol - (B - A) / 2.0;
+                  if abs E > Tol then
+                     declare
+                        R0   : constant Real := (X - W) * (Fx - Fv);
+                        Q0   : constant Real := (X - Vv) * (Fx - Fw);
+                        P    : Real := (X - Vv) * Q0 - (X - W) * R0;
+                        Q    : Real := 2.0 * (Q0 - R0);
+                        Last : constant Real := E;
+                     begin
+                        if Q > 0.0 then
+                           P := -P;
+                        else
+                           Q := -Q;
+                        end if;
+                        if abs P < abs (Q * Last / 2.0) and then P > Q * (A - X) and then P < Q * (B - X) then
+                           E := D;
+                           D := P / Q;
+                           Parabolic := True;
+                           if X + D - A < 2.0 * Tol or else B - (X + D) < 2.0 * Tol then
+                              D := (if M >= X then Tol else -Tol);
+                           end if;
+                        end if;
+                     end;
+                  end if;
+                  if not Parabolic then
+                     E := (if X >= M then A - X else B - X);
+                     D := Golden * E;
+                  end if;
+                  U := (if abs D >= Tol then X + D elsif D >= 0.0 then X + Tol else X - Tol);
+                  declare
+                     Fu : constant Real := F (U);
+                  begin
+                     if Fu <= Fx then
+                        if U >= X then
+                           A := X;
+                        else
+                           B := X;
+                        end if;
+                        Vv := W;
+                        Fv := Fw;
+                        W := X;
+                        Fw := Fx;
+                        X := U;
+                        Fx := Fu;
+                     else
+                        if U < X then
+                           A := U;
+                        else
+                           B := U;
+                        end if;
+                        if Fu <= Fw or else W = X then
+                           Vv := W;
+                           Fv := Fw;
+                           W := U;
+                           Fw := Fu;
+                        elsif Fu <= Fv or else Vv = X or else Vv = W then
+                           Vv := U;
+                           Fv := Fu;
+                        end if;
+                     end if;
+                  end;
+               end;
+            end loop;
+            return X;
+         end;
+      end Line_Search;
+
+      --  The step the places tell, in their own directions (Lambda one or more): each direction's share of Atb over its
+      --  Lambda.
+      function Places_Step (Dirs : Real_Matrix; Lambda, Atb : Real_Vector) return Real_Vector is
+         D : Real_Vector (1 .. G) := [others => 0.0];
+      begin
+         for I in 1 .. G loop
+            if Lambda (I) >= 1.0 then
+               declare
+                  Share : Real := 0.0;
+               begin
+                  for P in 1 .. G loop
+                     Share := Share + Dirs (P, I) * Atb (P);
+                  end loop;
+                  for P in 1 .. G loop
+                     D (P) := D (P) + Dirs (P, I) * Share / Lambda (I);
+                  end loop;
+               end;
+            end if;
+         end loop;
+         return D;
+      end Places_Step;
+   begin
+      for A in 1 .. Count loop
+         Total_Pictures := Total_Pictures + Pictures_Of (A);
+      end loop;
+      --  The flows' problems, from Fit_Eye's evidence of every arm (its estimate only the start, its covariance no
+      --  evidence: given as a prior beside the places, the flows' own estimate, its other terms off by their outlines'
+      --  bias, held the open direction where it stood and was called told 4 sigmas off, the fake's seeds 20 and 24 at
+      --  turns of 0.004, 10-21; along that direction alone, at the places' other terms, the flows put the eye within
+      --  0.25 % of the focal length on all five seeds).
+      for A in 1 .. Count loop
+         declare
+            F : Arm_Flow renames Arms (Arms'First + A - 1);
+         begin
+            Flows (A) := (Poses => F.Poses,
+                          Twists => new Twist_Grid (F.Poses'Range, 1 .. Natural'Max (1, F.Joints'Length)),
+                          Width => Width, Height => Height, Joints => F.Joints'Length, Cx => Lens0.Cx, Cy => Lens0.Cy,
+                          Aspect => Lens0.Fy / Lens0.Fx, Additive => Real'Max (1.0, Result.Additive),
+                          Relative => Result.Relative, Unit => null);
+            for V in F.Poses'Range loop
+               declare
+                  T : constant Twist_Array := Twists_At (F.Joints.all, F.Poses (V).Readings);
+               begin
+                  for J in T'Range loop
+                     Flows (A).Twists (V, J) := T (J);
+                  end loop;
+               end;
+            end loop;
+            Layouts (A) := Lay_Out (Flows (A));
+            Flow_Kept (A) := new Flag_Array'(1 .. Layouts (A).Pixels_All => True);
+            Flow_Pixels := Flow_Pixels + Layouts (A).Pixels_All;
+         end;
+      end loop;
+      Driver.Numerics.Dense.Cholesky (Result.Covariance, Honest_Lower, Honest_Known);
+      if not Honest_Known then
+         Driver.Log.Line (Driver.Log.Robot, "flow eye: the flows' covariance is not definite, nothing to weigh the"
+                          & " world's points against");
+         for A in 1 .. Count loop
+            Free (Flows (A).Twists);
+            Free (Layouts (A));
+            Free (Flow_Kept (A));
+         end loop;
+         return;
+      end if;
+      --  Every arm's eye's pictures, and the points of its table on a grid a patch apart in each.
+      Pyramids := new Pyramid_Array (1 .. Natural'Max (1, Total_Pictures));
+      declare
+         Found  : Natural := 0;
+         Upper  : Natural := 0;
+         Placed : Natural := 0;
+      begin
+         for A in 1 .. Count loop
+            declare
+               World : Arm_World renames Worlds (Worlds'First + A - 1);
+            begin
+               if Driver.Geometry.Known (World.Table) then
+                  for P in 1 .. Pictures_Of (A) loop
+                     declare
+                        W    : Wrist_Picture renames World.Pictures (World.Pictures'First + P - 1);
+                        Grid : constant Positive :=
+                          2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));
+                     begin
+                        Upper := Upper + (W.Width / Grid + 1) * (W.Height / Grid + 1);
+                     end;
+                  end loop;
+               end if;
+            end;
+         end loop;
+         Sights := new Sight_Array (1 .. Natural'Max (1, Upper));
+         for A in 1 .. Count loop
+            declare
+               World : Arm_World renames Worlds (Worlds'First + A - 1);
+            begin
+               for P in 1 .. Pictures_Of (A) loop
+                  declare
+                     W    : Wrist_Picture renames World.Pictures (World.Pictures'First + P - 1);
+                     Grid : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));
+                     Gu   : Natural := Grid / 2;
+                  begin
+                     Placed := Placed + 1;
+                     Pyramids (Placed) := Driver.Alignment.Pyramid_Of (W.Width, W.Height, W.Luma.all);
+                     if Driver.Geometry.Known (World.Table) then
+                        while Gu < W.Width - Grid / 2 loop
+                           declare
+                              Gv : Natural := Grid / 2;
+                           begin
+                              while Gv < W.Height - Grid / 2 loop
+                                 declare
+                                    U0 : constant Real := Real (Gu) + 0.5;
+                                    V0 : constant Real := Real (Gv) + 0.5;
+                                    X, Xu, Xv : Vec3;
+                                 begin
+                                    if World_At (W, U0, V0) and then World_At (W, U0 + 1.0, V0)
+                                      and then World_At (W, U0, V0 + 1.0)
+                                      and then On_Table (W, World.Lens, World.Table, U0, V0, X)
+                                      and then On_Table (W, World.Lens, World.Table, U0 + 1.0, V0, Xu)
+                                      and then On_Table (W, World.Lens, World.Table, U0, V0 + 1.0, Xv)
+                                    then
+                                       Found := Found + 1;
+                                       Sights (Found) := (Arm => A, Picture => Placed, U0 => U0, V0 => V0,
+                                                          X => X, Xu => Xu, Xv => Xv);
+                                    end if;
+                                 end;
+                                 Gv := Gv + Grid;
+                              end loop;
+                           end;
+                           Gu := Gu + Grid;
+                        end loop;
+                     end if;
+                  end;
+               end loop;
+            end;
+         end loop;
+         --  Shrunk to the points found.
+         declare
+            Kept : constant Sight_Access := new Sight_Array'(Sights (1 .. Found));
+         begin
+            Free (Sights);
+            Sights := Kept;
+         end;
+      end;
+      if Sights'Length = 0 then
+         Driver.Log.Line (Driver.Log.Robot, "flow eye: no arm's eye saw its table, nothing of the world to place by");
+         Free (Sights);
+         Free (Pyramids);
+         return;
+      end if;
+      --  The arms' joints at every pose of their flows.
+      declare
+         Total : Natural := 0;
+      begin
+         for A in 1 .. Count loop
+            Total := Total + Arms (Arms'First + A - 1).Poses'Length * Arms (Arms'First + A - 1).Joints'Length;
+         end loop;
+         Joints := new Joint_Point_Array (1 .. Natural'Max (1, Total));
+         Total := 0;
+         for A in 1 .. Count loop
+            declare
+               Flow_Of : Arm_Flow renames Arms (Arms'First + A - 1);
+            begin
+               for V of Flow_Of.Poses.all loop
+                  declare
+                     T : constant Twist_Array := Twists_At (Flow_Of.Joints.all, V.Readings);
+                  begin
+                     for J in T'Range loop
+                        Total := Total + 1;
+                        Joints (Total) := (Arm => A, X => T (J).P);
+                     end loop;
+                  end;
+               end loop;
+            end;
+         end loop;
+      end;
+      --  Rounds: every point predicted by the terms the round before left and aligned into the fixed eye's picture
+      --  across the scales (Driver.Alignment.Align_At_Scale), within the widest window the finest size searches every
+      --  round (a window the round before's scatter wide, 0.07 px, kept only the places that agreed with the eye
+      --  already, and the eye stayed where it started: the fake's seed 20, 10-21, focal length 1.8 % off, its own
+      --  sigma 0.14 %); the terms fitted to the places the aligner found
+      --  narrowly, from the flow's estimate (only a start: given its covariance beside the places, a biased flow
+      --  held the eye where it stood and was called told, the fake's seed 20 on 10-21 with 208 places kept of 1941
+      --  and its joints 17 px off), the places off by more than Z robust sigmas left out until none is. Settled when a
+      --  round after the first moves the arms' joints in the picture by no more than its own spread there (the places
+      --  found again from where the round before left the eye put it there again); the rounds go on while one of the
+      --  two, the places' scatter or that move, still falls. No place found at the first: the flow's eye stands.
+      declare
+         Widest   : constant Real :=
+           Driver.Alignment.Sigma_Of_Window (Driver.Alignment.Finest_Radius (Width, Height));
+         Window   : constant Real := Widest;
+         Y        : Real_Vector (1 .. G) := [others => 0.0];
+         Cov      : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+         --  Cov's share in the flows' directions
+         Cov_F    : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+         Definite : Boolean := False;
+         Spread   : Real := Real'Last;
+         Spread_F : Real := Real'Last;   --  the spread the flows' directions leave alone
+         Settled  : Boolean := False;
+         Last_Scatter, Last_Moved : Real := Real'Last;
+         Was_U, Was_V : Real_Array (Joints'Range) := [others => 0.0];
+         Was_Seen     : Flag_Array (Joints'Range) := [others => False];
+         Rounds   : Natural := 0;
+         Kept_All : Natural := 0;
+         Widened  : Real := 1.0;   --  the most the pictures' jackknife widened the covariance in any direction
+         No_World : Boolean := False;   --  the first round found no point to place by
+      begin
+         for J in Joints'Range loop
+            Was_Seen (J) := Seen (Y, Joints (J).Arm, Joints (J).X, Was_U (J), Was_V (J));
+         end loop;
+         loop
+            Rounds := Rounds + 1;
+            declare
+               type Slot is record
+                  Got          : Boolean := False;
+                  U, V, Su, Sv : Real := 0.0;
+               end record;
+               type Slot_Array is array (Positive range <>) of Slot;
+               type Slot_Access is access Slot_Array;
+               procedure Free is new Ada.Unchecked_Deallocation (Slot_Array, Slot_Access);
+               Slots : Slot_Access := new Slot_Array (Sights'Range);
+               procedure One (I : Positive) is
+                  S : Sight renames Sights (I);
+                  Tu, Tv, Uu, Uv, Vu, Vv : Real;
+               begin
+                  if Seen (Y, S.Arm, S.X, Tu, Tv) and then Seen (Y, S.Arm, S.Xu, Uu, Uv)
+                    and then Seen (Y, S.Arm, S.Xv, Vu, Vv)
+                  then
+                     declare
+                        Query : constant Driver.Alignment.Prediction :=
+                          (From   => (U => S.U0, V => S.V0),
+                           To     => (U => Tu, V => Tv),
+                           Linear => (UU => Uu - Tu, UV => Vu - Tu, VU => Uv - Tv, VV => Vv - Tv),
+                           Cov    => (UU => Window ** 2, UV => 0.0, VV => Window ** 2),
+                           Linear_Sigma => Real'Last);
+                        Answer : constant Driver.Alignment.Answer :=
+                          Driver.Alignment.Align_At_Scale (Pyramids (S.Picture), Fixed_Pyramid, Query);
+                        use type Driver.Alignment.Verdict;
+                     begin
+                        if Answer.Verdict = Driver.Alignment.Found and then Answer.Narrow
+                          and then Answer.Cov.UU > 0.0 and then Answer.Cov.VV > 0.0
+                        then
+                           Slots (I) := (Got => True, U => Answer.To.U, V => Answer.To.V,
+                                         Su => Sqrt (Answer.Cov.UU), Sv => Sqrt (Answer.Cov.VV));
+                        end if;
+                     end;
+                  end if;
+               end One;
+               procedure Every is new Driver.Parallel_For (One);
+               Got : Natural := 0;
+            begin
+               Every (Sights'First, Sights'Last);
+               Aligned_At := Driver.Clock.Seconds - Began;
+               for S of Slots.all loop
+                  if S.Got then
+                     Got := Got + 1;
+                  end if;
+               end loop;
+               declare
+                  Matches : Match_Access := new Match_Array (1 .. Natural'Max (1, Got));
+                  Kept    : Flag_Access := new Flag_Array (1 .. Natural'Max (1, Got));
+                  K       : Natural := 0;
+
+                  function Kept_Count return Natural is
+                     C : Natural := 0;
+                  begin
+                     for I in 1 .. Got loop
+                        if Kept (I) then
+                           C := C + 1;
+                        end if;
+                     end loop;
+                     return C;
+                  end Kept_Count;
+
+                  --  The kept places' misfits at the terms, over their sigmas.
+                  function Residuals (Z : Real_Vector) return Real_Array is
+                     R : Real_Array (1 .. 2 * Natural'Max (1, Kept_Count)) := [others => 0.0];
+                     N : Natural := 0;
+                  begin
+                     for I in 1 .. Got loop
+                        if Kept (I) then
+                           declare
+                              M    : Match renames Matches (I);
+                              U, V : Real;
+                           begin
+                              Place (Z, M.Arm, M.X, U, V);
+                              R (N + 1) := (U - M.U) / M.Su;
+                              R (N + 2) := (V - M.V) / M.Sv;
+                              N := N + 2;
+                           end;
+                        end if;
+                     end loop;
+                     return R;
+                  end Residuals;
+
+                  --  The places' misfits squared.
+                  function Cost (R : Real_Array) return Real is
+                     Sum : Real := 0.0;
+                  begin
+                     for X of R loop
+                        Sum := Sum + X * X;
+                     end loop;
+                     return Sum;
+                  end Cost;
+
+                  --  The kept places' misfits' derivatives in the terms at Z (central differences), a row each.
+                  procedure Jacobian_Into (Z : Real_Vector; Jac : out Real_Matrix) is
+                  begin
+                     for T in 1 .. G loop
+                        declare
+                           Up, Down : Real_Vector := Z;
+                        begin
+                           Up (T) := Z (T) + Eps3;
+                           Down (T) := Z (T) - Eps3;
+                           declare
+                              Ru : constant Real_Array := Residuals (Up);
+                              Rd : constant Real_Array := Residuals (Down);
+                           begin
+                              for I in Jac'Range (1) loop
+                                 Jac (I, T) := (Ru (I) - Rd (I)) / (2.0 * Eps3);
+                              end loop;
+                           end;
+                        end;
+                     end loop;
+                  end Jacobian_Into;
+
+                  --  The normal matrix of the places' misfits at the terms (their part over Scale) with the flow's, and
+                  --  the step's right side.
+                  procedure Normal_At
+                    (Z : Real_Vector; R0 : Real_Array; Ata : out Real_Matrix; Atb : out Real_Vector;
+                     Scale : Real := 1.0)
+                  is
+                     Jac : Matrix_Access := new Real_Matrix (R0'Range, 1 .. G);
+                  begin
+                     Jacobian_Into (Z, Jac.all);
+                     for P in 1 .. G loop
+                        Atb (P) := 0.0;
+                        for Q in 1 .. G loop
+                           Ata (P, Q) := 0.0;
+                        end loop;
+                     end loop;
+                     for I in R0'Range loop
+                        for P in 1 .. G loop
+                           if Jac (I, P) /= 0.0 then
+                              for Q in 1 .. G loop
+                                 Ata (P, Q) := Ata (P, Q) + Jac (I, P) * Jac (I, Q) / Scale;
+                              end loop;
+                              Atb (P) := Atb (P) - Jac (I, P) * R0 (I) / Scale;
+                           end if;
+                        end loop;
+                     end loop;
+                     Free (Jac);
+                  end Normal_At;
+
+                  Dropped : Natural;
+                  Moved   : Real := 0.0;
+                  Scatter : Real := Real'Last;   --  of the kept places from the terms, pixels
+               begin
+                  for I in Slots'Range loop
+                     if Slots (I).Got then
+                        K := K + 1;
+                        Matches (K) := (Arm => Sights (I).Arm, Picture => Sights (I).Picture, X => Sights (I).X,
+                                        U => Slots (I).U, V => Slots (I).V,
+                                        Su => Slots (I).Su, Sv => Slots (I).Sv);
+                        Kept (K) := True;
+                     end if;
+                  end loop;
+                  Free (Slots);
+                  if Got > 0 then
+                     loop
+                        --  The places' directions and the flows' alternately, until the flows move the eye along theirs
+                        --  by no more than Unchanged_Fraction of a sigma: damped Gauss-Newton on the places in the
+                        --  directions they tell (Split, Places_Step), each step halved until it lowers their cost,
+                        --  until a step lowers it by less than one residual's worth; then the flows along each of
+                        --  theirs.
+                        for Pass in 1 .. Real'Machine_Mantissa loop
+                           declare
+                              Along : Real := 0.0;   --  the most a flows' direction moved the eye, in its sigmas
+                           begin
+                              loop
+                                 declare
+                                    R0     : constant Real_Array := Residuals (Y);
+                                    C0     : constant Real := Cost (R0);
+                                    Ata    : Real_Matrix (1 .. G, 1 .. G);
+                                    Atb    : Real_Vector (1 .. G);
+                                    Dirs   : Real_Matrix (1 .. G, 1 .. G);
+                                    Lambda : Real_Vector (1 .. G);
+                                    Better : Boolean := False;
+                                 begin
+                                    Normal_At (Y, R0, Ata, Atb);
+                                    Split (Ata, Dirs, Lambda);
+                                    declare
+                                       D     : Real_Vector := Places_Step (Dirs, Lambda, Atb);
+                                       Trial : Real_Vector (1 .. G);
+                                    begin
+                                       for Halving in 1 .. Real'Machine_Mantissa loop
+                                          for T in 1 .. G loop
+                                             Trial (T) := Y (T) + D (T);
+                                          end loop;
+                                          declare
+                                             C1 : constant Real := Cost (Residuals (Trial));
+                                          begin
+                                             if C1 < C0 then
+                                                Y := Trial;
+                                                Better := C0 - C1 >= Real'Max (1.0, C0 / Real (R0'Length));
+                                                exit;
+                                             end if;
+                                          end;
+                                          for T in 1 .. G loop
+                                             D (T) := D (T) / 2.0;
+                                          end loop;
+                                       end loop;
+                                    end;
+                                    exit when not Better;
+                                 end;
+                              end loop;
+                              declare
+                                 R0     : constant Real_Array := Residuals (Y);
+                                 Ata    : Real_Matrix (1 .. G, 1 .. G);
+                                 Atb    : Real_Vector (1 .. G);
+                                 Dirs   : Real_Matrix (1 .. G, 1 .. G);
+                                 Lambda : Real_Vector (1 .. G);
+                              begin
+                                 Normal_At (Y, R0, Ata, Atb);
+                                 Split (Ata, Dirs, Lambda);
+                                 for I in 1 .. G loop
+                                    if Lambda (I) < 1.0 then
+                                       declare
+                                          V : Real_Vector (1 .. G);
+                                          S : Real;
+                                       begin
+                                          for P in 1 .. G loop
+                                             V (P) := Dirs (P, I);
+                                          end loop;
+                                          S := Line_Search (Y, V);
+                                          for P in 1 .. G loop
+                                             Y (P) := Y (P) + S * V (P);
+                                          end loop;
+                                          Along := Real'Max (Along, abs S);
+                                       end;
+                                    end if;
+                                 end loop;
+                              end;
+                              exit when Along <= Driver.Conventions.Unchanged_Fraction;
+                           end;
+                        end loop;
+                        --  The places off by more than Z robust sigmas left out, until none is.
+                        declare
+                           R     : constant Real_Array := Residuals (Y);
+                           Sigma : constant Real := Driver.Stats.Robust_Sigma (R);
+                           N     : Natural := 0;
+                        begin
+                           Dropped := 0;
+                           for I in 1 .. Got loop
+                              if Kept (I) then
+                                 if Sqrt (R (N + 1) ** 2 + R (N + 2) ** 2) > Driver.Conventions.Z * Sigma * Sqrt (2.0)
+                                 then
+                                    Kept (I) := False;
+                                    Dropped := Dropped + 1;
+                                 end if;
+                                 N := N + 2;
+                              end if;
+                           end loop;
+                        end;
+                        --  And the flows' pixels off by more than the gate of their spread, as Fit_Eye leaves them out.
+                        for A in 1 .. Count loop
+                           declare
+                              L : Layout renames Layouts (A).all;
+                              R : Real_Access := new Real_Array (1 .. L.Rows);
+                           begin
+                              Flow_Residuals (Y, A, R.all);
+                              for Q in 1 .. L.Pixels_All loop
+                                 if Flow_Kept (A) (Q) then
+                                    declare
+                                       Own  : Real := 0.0;
+                                       Gate : constant Driver.Uncertain.Gate :=
+                                         Driver.Uncertain.Vector_Gate (L.Count (Q) - 1, 0, Tests => Flow_Pixels);
+                                    begin
+                                       for K in 0 .. L.Count (Q) - 1 loop
+                                          Own := Own + R (L.First_Row (Q) + K) ** 2;
+                                       end loop;
+                                       if Driver.Uncertain.Significant (Gate, Sqrt (Own), 1.0) then
+                                          Flow_Kept (A) (Q) := False;
+                                          Dropped := Dropped + 1;
+                                       end if;
+                                    end;
+                                 end if;
+                              end loop;
+                              Free (R);
+                           end;
+                        end loop;
+                        exit when Dropped = 0 or else Kept_Count = 0;
+                     end loop;
+                  end if;
+                  Kept_All := Kept_Count;
+                  Fitted_At := Driver.Clock.Seconds - Began;
+                  --  The covariance: in the places' directions the inverse of their normal matrix over their misfit
+                  --  per freedom (never below one); in the flows', what the flows' jackknife over their poses leaves
+                  --  (each pose of each arm left out, its shift along the direction weighed by the pixels it holds).
+                  declare
+                     R0    : constant Real_Array := Residuals (Y);
+                     Per_Freedom : constant Real :=
+                       Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));
+                     Ata    : Real_Matrix (1 .. G, 1 .. G);
+                     Atb    : Real_Vector (1 .. G);
+                     Dirs   : Real_Matrix (1 .. G, 1 .. G);
+                     Lambda : Real_Vector (1 .. G);
+                  begin
+                     Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
+                     Split (Ata, Dirs, Lambda);
+                     Definite := (for all I in 1 .. G => Lambda (I) > 0.0);
+                     Cov := [others => [others => 0.0]];
+                     Cov_F := [others => [others => 0.0]];
+                     for I in 1 .. G loop
+                        declare
+                           Var : Real := 0.0;
+                        begin
+                           if Lambda (I) >= 1.0 then
+                              Var := 1.0 / Lambda (I);
+                           else
+                              declare
+                                 V      : Real_Vector (1 .. G);
+                                 Groups : Natural := 0;
+                                 Sum    : Real := 0.0;
+                                 Pixels : Natural := 0;
+                              begin
+                                 for P in 1 .. G loop
+                                    V (P) := Dirs (P, I);
+                                 end loop;
+                                 for A in 1 .. Count loop
+                                    for Q in 1 .. Layouts (A).Pixels_All loop
+                                       Pixels := Pixels + Boolean'Pos (Flow_Kept (A) (Q));
+                                    end loop;
+                                 end loop;
+                                 --  Every pose's misfit a flows' sigma either way along the direction and at the
+                                 --  estimate (Pose_Costs, three misfits in all): the misfit without a pose is the
+                                 --  parabola through the three totals less the pose's own, its shift the parabola's
+                                 --  least against the whole's. A line search for every pose left out took two misfits
+                                 --  of every three the refinement took.
+                                 declare
+                                    Ym, Yp     : Real_Vector (1 .. G);
+                                    Cm, C0, Cp : Real_Array (1 .. Natural'Max (1, Pose_Slots));
+                                    Tm, T0, Tp : Real := 0.0;
+                                    --  Where the parabola through the misfits at -1, 0 and 1 is least; none when it
+                                    --  does not open upwards.
+                                    function Least (Fm, F0, Fp : Real; Opens : out Boolean) return Real is
+                                       Curvature : constant Real := Fp - 2.0 * F0 + Fm;
+                                    begin
+                                       Opens := Curvature > 0.0;
+                                       return (if Opens then (Fm - Fp) / (2.0 * Curvature) else 0.0);
+                                    end Least;
+                                    Opens : Boolean;
+                                    Whole : Real;
+                                 begin
+                                    for T in 1 .. G loop
+                                       Ym (T) := Y (T) - V (T);
+                                       Yp (T) := Y (T) + V (T);
+                                    end loop;
+                                    Pose_Costs (Ym, Cm);
+                                    Pose_Costs (Y, C0);
+                                    Pose_Costs (Yp, Cp);
+                                    for K in 1 .. Pose_Slots loop
+                                       Tm := Tm + Cm (K);
+                                       T0 := T0 + C0 (K);
+                                       Tp := Tp + Cp (K);
+                                    end loop;
+                                    Whole := Least (Tm, T0, Tp, Opens);
+                                    Definite := Definite and then Opens;
+                                    for A in 1 .. Count loop
+                                       for Pose in Arms (Arms'First + A - 1).Poses'Range loop
+                                          declare
+                                             Held : Natural := 0;
+                                             K    : constant Positive := Pose_Slot (A, Pose);
+                                          begin
+                                             for Q in 1 .. Layouts (A).Pixels_All loop
+                                                if Flow_Kept (A) (Q) and then Layouts (A).Pose_Of_Pixel (Q) = Pose then
+                                                   Held := Held + 1;
+                                                end if;
+                                             end loop;
+                                             if Held > 0 and then Held < Pixels then
+                                                declare
+                                                   S : constant Real :=
+                                                     Least (Tm - Cm (K), T0 - C0 (K), Tp - Cp (K), Opens) - Whole;
+                                                begin
+                                                   Definite := Definite and then Opens;
+                                                   Groups := Groups + 1;
+                                                   Sum := Sum + (Real (Pixels) / Real (Held) - 1.0) * S * S;
+                                                end;
+                                             end if;
+                                          end;
+                                       end loop;
+                                    end loop;
+                                 end;
+                                 if Groups >= 2 then
+                                    Var := Sum / Real (Groups);
+                                 else
+                                    Definite := False;
+                                 end if;
+                              end;
+                           end if;
+                           for P in 1 .. G loop
+                              for Q in 1 .. G loop
+                                 Cov (P, Q) := Cov (P, Q) + Dirs (P, I) * Var * Dirs (Q, I);
+                                 if Lambda (I) < 1.0 then
+                                    Cov_F (P, Q) := Cov_F (P, Q) + Dirs (P, I) * Var * Dirs (Q, I);
+                                 end if;
+                              end loop;
+                           end loop;
+                        end;
+                     end loop;
+                     --  What one picture's places share (where its eye stood, its pixels' errors together) their
+                     --  scatter does not tell: the covariance widened to the eye's spread with one picture's places
+                     --  left out at a time, each shift weighed by the places the picture holds (as Fit_Eye's poses).
+                     if Definite then
+                        declare
+                           Jac      : Matrix_Access := new Real_Matrix (R0'Range, 1 .. G);
+                           Spread_M : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+                           Groups   : Natural := 0;
+                           Total    : constant Natural := Kept_Count;
+                        begin
+                           Jacobian_Into (Y, Jac.all);
+                           for P in Pyramids'Range loop
+                              declare
+                                 Ap  : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];
+                                 Gp  : Real_Vector (1 .. G) := [others => 0.0];
+                                 Mp  : Natural := 0;
+                                 Row : Natural := 0;
+                              begin
+                                 for I in 1 .. Got loop
+                                    if Kept (I) then
+                                       if Matches (I).Picture = P then
+                                          Mp := Mp + 1;
+                                          for Q in Row + 1 .. Row + 2 loop
+                                             for A in 1 .. G loop
+                                                for B in 1 .. G loop
+                                                   Ap (A, B) := Ap (A, B) + Jac (Q, A) * Jac (Q, B) / Per_Freedom;
+                                                end loop;
+                                                Gp (A) := Gp (A) + Jac (Q, A) * R0 (Q) / Per_Freedom;
+                                             end loop;
+                                          end loop;
+                                       end if;
+                                       Row := Row + 2;
+                                    end if;
+                                 end loop;
+                                 if Mp > 0 and then Mp < Total then
+                                    declare
+                                       Theta : constant Real_Vector := Places_Step (Dirs, Lambda, Gp);
+                                       W     : constant Real := Real (Total) / Real (Mp) - 1.0;
+                                    begin
+                                       Groups := Groups + 1;
+                                       for A in 1 .. G loop
+                                          for B in 1 .. G loop
+                                             Spread_M (A, B) := Spread_M (A, B) + W * Theta (A) * Theta (B);
+                                          end loop;
+                                       end loop;
+                                    end;
+                                 end if;
+                              end;
+                           end loop;
+                           if Groups >= 2 then
+                              for A in 1 .. G loop
+                                 for B in 1 .. G loop
+                                    Spread_M (A, B) := Spread_M (A, B) / Real (Groups);
+                                 end loop;
+                              end loop;
+                           end if;
+                           Widen_Covariance (Cov, Spread_M, Widened);
+                           Free (Jac);
+                        end;
+                     end if;
+                  end;
+                  --  How far the kept places lie from where the terms put them, in pixels: the next round's window.
+                  declare
+                     Off : Real_Array (1 .. 2 * Natural'Max (1, Kept_All));
+                     N   : Natural := 0;
+                  begin
+                     for I in 1 .. Got loop
+                        if Kept (I) then
+                           declare
+                              U, V : Real;
+                           begin
+                              Place (Y, Matches (I).Arm, Matches (I).X, U, V);
+                              Off (N + 1) := U - Matches (I).U;
+                              Off (N + 2) := V - Matches (I).V;
+                              N := N + 2;
+                           end;
+                        end if;
+                     end loop;
+                     if N > 0 then
+                        Scatter := Driver.Stats.Robust_Sigma (Off (1 .. N));
+                     end if;
+                  end;
+                  --  The arms' joints in the picture: how far this round moved them, and how far the covariance
+                  --  leaves them (the worse axis, the worst joint).
+                  Spread := 0.0;
+                  Spread_F := 0.0;
+                  for J in Joints'Range loop
+                     declare
+                        U, V : Real;
+                        Inside : constant Boolean := Seen (Y, Joints (J).Arm, Joints (J).X, U, V);
+                        Ju, Jv : Real_Vector (1 .. G) := [others => 0.0];
+                     begin
+                        if Inside and then Was_Seen (J) then
+                           Moved := Real'Max (Moved, Sqrt ((U - Was_U (J)) ** 2 + (V - Was_V (J)) ** 2));
+                        end if;
+                        Was_U (J) := U;
+                        Was_V (J) := V;
+                        Was_Seen (J) := Inside;
+                        if Definite and then Inside then
+                           for T in 1 .. G loop
+                              declare
+                                 Up, Down : Real_Vector := Y;
+                                 Uu, Vu, Ud, Vd : Real;
+                                 B1, B2 : Boolean;
+                              begin
+                                 Up (T) := Y (T) + Eps3;
+                                 Down (T) := Y (T) - Eps3;
+                                 B1 := Seen (Up, Joints (J).Arm, Joints (J).X, Uu, Vu);
+                                 B2 := Seen (Down, Joints (J).Arm, Joints (J).X, Ud, Vd);
+                                 if B1 or else B2 then
+                                    Ju (T) := (Uu - Ud) / (2.0 * Eps3);
+                                    Jv (T) := (Vu - Vd) / (2.0 * Eps3);
+                                 end if;
+                              end;
+                           end loop;
+                           declare
+                              Vuu : constant Real := Ju * (Cov * Ju);
+                              Vvv : constant Real := Jv * (Cov * Jv);
+                           begin
+                              Spread := Real'Max (Spread, Sqrt (Real'Max (0.0, Real'Max (Vuu, Vvv))));
+                              Spread_F := Real'Max
+                                (Spread_F, Sqrt (Real'Max (0.0, Real'Max (Ju * (Cov_F * Ju), Jv * (Cov_F * Jv)))));
+                           end;
+                        end if;
+                     end;
+                  end loop;
+                  if not Definite then
+                     Spread := Real'Last;
+                  end if;
+                  declare
+                     function Per_Arm return String is
+                        Text : Unbounded_String;
+                     begin
+                        for A in 1 .. Count loop
+                           declare
+                              C : Natural := 0;
+                           begin
+                              for I in 1 .. Got loop
+                                 if Kept (I) and then Matches (I).Arm = A then
+                                    C := C + 1;
+                                 end if;
+                              end loop;
+                              Append (Text, (if A > 1 then "," else "") & C'Image);
+                           end;
+                        end loop;
+                        return "per arm" & To_String (Text);
+                     end Per_Arm;
+                  begin
+                  Driver.Log.Line (Driver.Log.Robot, "flow eye: the world's points, round" & Rounds'Image & ":"
+                                   & Sights'Length'Image & " asked," & Got'Image & " found," & Kept_All'Image
+                                   & " kept (" & Per_Arm & "), " & Driver.Log.Image (Scatter, 2)
+                                   & " px from the eye, aligned at " & Driver.Log.Image (Real (Aligned_At), 1)
+                                   & " s, fitted at " & Driver.Log.Image (Real (Fitted_At), 1) & ", done at "
+                                   & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ", widened "
+                                   & Driver.Log.Image (Widened, 1) & "; the arms' joints "
+                                   & "moved " & Driver.Log.Image (Moved, 2) & " px, spread "
+                                   & Driver.Log.Image (Spread, 2) & " px (the flows' directions "
+                                   & Driver.Log.Image (Spread_F, 2) & "), focal "
+                                   & Driver.Log.Image (Lens_Of (Y).Fx, 1)
+                                   & (if Definite
+                                      then "; sigmas: focal " & Driver.Log.Image (100.0 * Sqrt (Cov (1, 1)), 2)
+                                           & " %, principal"
+                                           & " point " & Driver.Log.Image (Sqrt (Cov (2, 2)), 2) & " "
+                                           & Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & " px, arm 1 centre "
+                                           & Driver.Log.Image (1000.0 * Sqrt (Cov (7, 7) + Cov (8, 8) + Cov (9, 9)), 1)
+                                           & " mm, turn "
+                                           & Driver.Log.Image (180.0 / Ada.Numerics.Pi
+                                                               * Sqrt (Cov (4, 4) + Cov (5, 5) + Cov (6, 6)), 2)
+                                           & " deg"
+                                      else ""));
+                  end;
+                  Free (Matches);
+                  Free (Kept);
+                  if Rounds = 1 and then Kept_All = 0 then
+                     Driver.Log.Line (Driver.Log.Robot, "flow eye: no point of the world was found in the fixed eye's"
+                                      & " picture; the flow's place stands");
+                     No_World := True;
+                     exit;
+                  end if;
+                  Settled := Rounds > 1 and then Got > 0 and then Definite and then Moved <= Spread;
+                  exit when Settled
+                    or else not (Scatter < Last_Scatter or else Moved < Last_Moved);
+                  Last_Scatter := Scatter;
+                  Last_Moved := Moved;
+               end;
+            end;
+         end loop;
+         if No_World then
+            Free (Sights);
+            Free (Pyramids);
+            Free (Joints);
+            return;
+         end if;
+         --  The eye as the rounds left it, with the places' covariance, judged as Fit_Eye judges.
+         Result.Lens := Lens_Of (Y);
+         for A in 1 .. Count loop
+            Result.Poses (A) := Pose_Of (Y, A);
+         end loop;
+         if Definite then
+            Result.Covariance := Cov;
+         end if;
+         Result.Spread := Spread;
+         Result.Determined := False;
+         if not Settled then
+            Result.Why := To_Unbounded_String
+              ("the world's points did not settle the eye: its last round moved the arms' joints farther than their"
+               & " spread");
+         elsif Spread * Driver.Conventions.Z >= Real (Driver.Alignment.Half_Patch (Width, Height)) then
+            Result.Why := To_Unbounded_String
+              ("the world's points leave the arms' joints in the picture uncertain by"
+               & Driver.Log.Image (Spread, 2) & " px");
+         else
+            Result.Why := Null_Unbounded_String;
+            Result.Determined := True;
+         end if;
+      end;
+      Free (Sights);
+      Free (Pyramids);
+      Free (Joints);
+      for A in 1 .. Count loop
+         Free (Flows (A).Twists);
+         Free (Layouts (A));
+         Free (Flow_Kept (A));
+      end loop;
+   end Refine_By_Scene;
 
    procedure Judge_At
      (Poses         : Pose_Array;

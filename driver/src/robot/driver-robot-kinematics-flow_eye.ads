@@ -11,6 +11,7 @@
 --  placed.
 
 with Ada.Strings.Unbounded;
+with Driver.Geometry;
 with Driver.Numerics;
 with Driver.Robot.Kinematics.Fit;
 
@@ -113,6 +114,48 @@ package Driver.Robot.Kinematics.Flow_Eye is
       Width, Height : Positive;
       Result        : out Report)
    with Pre => Result.Arms = Arms'Length and then Result.Count = Terms_For (Arms'Length);
+
+   --  What an arm's own eye saw of the world at the poses of its flow, for placing the fixed eye by the world's points
+   --  (Refine_By_Scene): its pictures (luma, row after row) with the eye's frame at each in the arm's reference frame,
+   --  its lens, and the table its fit measured there (none when it measured none: the pictures then place nothing).
+   type Pixel_Flags is array (Positive range <>) of Boolean;
+   type Pixel_Flags_Access is access Pixel_Flags;
+
+   type Wrist_Picture is record
+      Luma          : Luma_Access;
+      Width, Height : Positive := 1;
+      Eye           : Driver.Numerics.Rigid := Driver.Numerics.Identity;
+      --  Per pixel, row after row, whether the eye sees the world there and not the arm's own body riding with it
+      --  (the hand's jaws): none, the world everywhere.
+      World         : Pixel_Flags_Access := null;
+   end record;
+   type Wrist_Picture_Array is array (Positive range <>) of Wrist_Picture;
+
+   type Arm_World is record
+      Pictures : access constant Wrist_Picture_Array := null;
+      Lens     : Fit.Lens;
+      Table    : Driver.Geometry.Plane_Estimate;
+   end record;
+   type Arm_World_Array is array (Positive range <>) of Arm_World;
+
+   procedure Refine_By_Scene
+     (Arms          : Arm_Flow_Array;
+      Worlds        : Arm_World_Array;
+      Fixed         : Real_Array;
+      Width, Height : Positive;
+      Result        : in out Report)
+   with Pre => Worlds'Length = Arms'Length and then Result.Arms = Arms'Length
+               and then Result.Count = Terms_For (Arms'Length) and then Fixed'Length = Width * Height;
+   --  The eye Fit_Eye placed (Result), placed again with the world the arms' own eyes saw: the points of each arm's
+   --  table its eye's pictures show (a grid a patch apart, where their lines of sight meet the table), each predicted
+   --  into the fixed eye's picture (Fixed) by the eye as it stands and aligned there across the scales
+   --  (Driver.Alignment.Align_At_Scale, the answers searched narrowly); the eye's terms fitted to the places found,
+   --  from the flow's estimate, round after round until a round after the first moves the arms' joints in the picture
+   --  by no more than the eye's spread there leaves them, or neither the places' scatter nor that move falls. A table
+   --  of texture tells the eye's lens and pose to a fraction of a pixel where the arms' outlines told it to several
+   --  (the fake's seeds 20, 22 and 23, 10-21: the arms' joints 0.65 to 2.48 px from the true eye's places, against
+   --  3.7 to 16 px). No point of the world found (a table with no texture): Result as Fit_Eye left it. Determined as
+   --  Fit_Eye's: settled, the covariance definite and Z times Spread under the half patch.
 
    procedure Judge_At
      (Poses         : Pose_Array;

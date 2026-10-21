@@ -157,6 +157,11 @@ private package Driver.Robot.Kinematics is
    --  estimate, and an arm fitted in it is fitted again from that fit (Fit's
    --  From: its last stage alone).
 
+   function Sees_World (M : Model; A : Arm_Id; U, V : Real) return Boolean;
+   --  Whether arm A's own eye sees the world at the place (U, V) of its picture: its lock-in cell there follows the
+   --  arm's pushes (the hand's jaws, riding with the eye, never do: Query_Points' Responds). True while the lock-in
+   --  has told nothing.
+
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid;
    --  The arm's eye at those readings, in the frame of its eye at the
    --  reference keyframe; the identity until the arm is fitted.

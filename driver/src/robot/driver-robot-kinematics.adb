@@ -3584,6 +3584,39 @@ package body Driver.Robot.Kinematics is
       end;
    end World_Pose_Covariance;
 
+   function Sees_World (M : Model; A : Arm_Id; U, V : Real) return Boolean is
+      K : constant Natural := Index_Of (M, A);
+   begin
+      if K = 0 or else M.Kinematics (K).Eye = 0 or else M.Kinematics (K).Eye > M.Eyes.Last_Index then
+         return True;
+      end if;
+      declare
+         R    : Arm_Evidence renames M.Kinematics (K);
+         S    : Eye_Stream renames M.Eyes (R.Eye);
+         G    : Cell_Grid renames S.Grid;
+         Kept : constant Natural := Natural (S.Kept_Groups.Length);
+      begin
+         if Kept = 0 or else G.Width = 0 or else G.Height = 0 then
+            return True;
+         end if;
+         declare
+            X    : constant Natural := Natural'Min (G.Width - 1, Natural (Real'Floor (Real'Max (0.0, U))));
+            Y    : constant Natural := Natural'Min (G.Height - 1, Natural (Real'Floor (Real'Max (0.0, V))));
+            Cell : constant Natural :=
+              ((Y + 1) * G.Rows - 1) / G.Height * G.Columns + ((X + 1) * G.Columns - 1) / G.Width;
+         begin
+            for J in 0 .. Kept - 1 loop
+               if S.Kept_Groups (J) = Natural (R.Group) and then Cell * Kept + J < Natural (S.Shifts.Length)
+                 and then S.Shifts (Cell * Kept + J) > 0.0
+               then
+                  return True;
+               end if;
+            end loop;
+            return False;
+         end;
+      end;
+   end Sees_World;
+
    function Eye_In_Reference (M : Model; A : Arm_Id; Readings : Real_Array) return Rigid is
    begin
       for R of M.Kinematics loop
