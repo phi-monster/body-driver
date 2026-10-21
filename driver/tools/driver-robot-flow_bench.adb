@@ -2814,7 +2814,11 @@ begin
                                           begin
                                              FW.Project (Cam, Xt, Tu, Tv, Front_T);
                                              Fit.Project (Refined.Lens, Xc, Fu, Fv, Front_F);
-                                             if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
+                                             --  A point past the true lens's fold has no place in its picture: unasked,
+                                             --  the projection left it at the corner, seed 20's eye a million px off.
+                                             if Front_T and then Front_F and then Tu in 0.0 .. Real (Width)
+                                               and then Tv in 0.0 .. Real (Height)
+                                             then
                                                 Seen := Seen + 1;
                                                 Worst := Real'Max (Worst, EF.Sqrt ((Fu - Tu) ** 2 + (Fv - Tv) ** 2));
                                              end if;
