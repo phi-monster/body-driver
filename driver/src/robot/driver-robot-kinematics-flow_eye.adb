@@ -415,6 +415,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Joints : Natural := 0;
       Cx, Cy : Real := 0.0;           --  where the fit starts the principal point, and the focal length down over
       Aspect : Real := 1.0;           --  across (the terms carry them)
+      --  The lens's bend the views are read through (Sight), at the terms' focal lengths and principal point: nought,
+      --  a pinhole's views as they are.
+      K1, K2 : Real := 0.0;
       --  A rate's spread: Additive times the sigma its pictures state, and Relative times the rate (what the pictures
       --  share beyond their noise: an edge's place in the pixels, the turn's reach past the linear), in quadrature.
       Additive : Real := 1.0;
@@ -433,12 +436,37 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Gn     : Vec3;
    end record;
 
-   function Sight (F, Fy, Cx, Cy : Real; View : Pose_View; I : Positive) return Sighting is
-      Xn : constant Real := (View.U (I) - Cx) / F;
-      Yn : constant Real := (View.V (I) - Cy) / Fy;
+   --  Pixel I of a view as the flows' pinhole takes it, at the focal lengths F across and Fy down and the principal
+   --  point: through the lens's radial distortion K1, K2 where it bends (its line of sight by Fit.Ray, the picture's
+   --  gradient carried to the pinhole's pixels by the distortion's derivative), as it is where it bends nought; its
+   --  rates and their sigmas are the pixel's own. Pixel_Jacobian's derivatives are a pinhole's (Fit_Eye's flows bend
+   --  nought).
+   function Sight (F, Fy, Cx, Cy, K1, K2 : Real; View : Pose_View; I : Positive) return Sighting is
    begin
-      return (Xn => Xn, Yn => Yn,
-              Gn => [F * View.Gu (I), Fy * View.Gv (I), -(F * View.Gu (I) * Xn + Fy * View.Gv (I) * Yn)]);
+      if K1 = 0.0 and then K2 = 0.0 then
+         declare
+            Xn : constant Real := (View.U (I) - Cx) / F;
+            Yn : constant Real := (View.V (I) - Cy) / Fy;
+         begin
+            return (Xn => Xn, Yn => Yn,
+                    Gn => [F * View.Gu (I), Fy * View.Gv (I), -(F * View.Gu (I) * Xn + Fy * View.Gv (I) * Yn)]);
+         end;
+      end if;
+      declare
+         M  : constant Vec3 := Fit.Ray ((Fx => F, Fy => Fy, Cx => Cx, Cy => Cy, K1 => K1, K2 => K2),
+                                        View.U (I), View.V (I));
+         Xn : constant Real := M (1);
+         Yn : constant Real := M (2);
+         R2 : constant Real := Xn * Xn + Yn * Yn;
+         D  : constant Real := 1.0 + K1 * R2 + K2 * R2 * R2;
+         S  : constant Real := 2.0 * K1 + 4.0 * K2 * R2;
+         --  The picture's gradient in the pinhole's pixels: the distorted place (x D, y D) moves with the pinhole's
+         --  as d(x D)/dx = D + S x^2, d(x D)/dy = S x y, d(y D)/dy = D + S y^2.
+         Gu : constant Real := View.Gu (I) * (D + S * Xn * Xn) + View.Gv (I) * (Fy / F * S * Xn * Yn);
+         Gv : constant Real := View.Gu (I) * (F / Fy * S * Xn * Yn) + View.Gv (I) * (D + S * Yn * Yn);
+      begin
+         return (Xn => Xn, Yn => Yn, Gn => [F * Gu, Fy * Gv, -(F * Gu * Xn + Fy * Gv * Yn)]);
+      end;
    end Sight;
 
    function Pose_Of (Base : Mat3; X : Parameters) return Rigid is
@@ -454,7 +482,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       View : Pose_View renames P.Poses (V).all;
       F    : constant Real := Exp (X (1));
       Pose : constant Rigid := Pose_Of (Base, X);
-      Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);
+      Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);
       Ray  : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);
       K    : constant Natural := View.Link (I);
       A, B, E, S : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];
@@ -962,7 +990,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   Rho := Real'Max (0.0, Rho);
                   if Ok then
                      declare
-                        Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);
+                        Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);
                         Ray  : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);
                      begin
                         for J in 1 .. Count loop
@@ -2040,7 +2068,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          begin
             S (A).P := (Poses => Arm.Poses, Twists => null, Width => Width, Height => Height,
                         Joints => Arm.Joints'Length, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
-                        Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null);
+                        Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
             S (A).P.Twists := new Twist_Grid (Arm.Poses'Range, 1 .. Natural'Max (1, Arm.Joints'Length));
             for V in Arm.Poses'Range loop
                declare
@@ -2334,7 +2362,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                            declare
                               Pose  : constant Rigid := Pose_Of (S (A).Base, XA);
                               F     : constant Real := Exp (XA (1));
-                              Here  : constant Sighting := Sight (F, F * Exp (XA (10)), XA (8), XA (9), View, I);
+                              Here  : constant Sighting :=
+                                Sight (F, F * Exp (XA (10)), XA (8), XA (9), S (A).P.K1, S (A).P.K2, View, I);
                               Point : constant Vec3 :=
                                 Plus (Pose.Translation,
                                       Scaled (1.0 / Rho, Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0])));
@@ -2407,7 +2436,11 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Result        : in out Report)
    is
       Count  : constant Positive := Arms'Length;
-      G      : constant Positive := Terms_For (Count);
+      G_F    : constant Positive := Terms_For (Count);   --  the flows' terms, Fit_Eye's report's
+      --  The scene's terms: the flows', and after them the lens's two of radial distortion, which the flows (a
+      --  pinhole's) do not tell and the places across the picture do: a real lens bends its picture's rim by pixels,
+      --  and held straight the bend went into the focal length and the eye's distance (the fakes' lenses, 10-21).
+      G      : constant Positive := G_F + 2;
       Lens0  : constant Fit.Lens := Result.Lens;
       Poses0 : constant Rigid_Array := Result.Poses;
       Eps3   : constant Real := Real'Model_Epsilon ** (1.0 / 3.0);
@@ -2463,7 +2496,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  the principal point, the aspect's logarithm, and each arm's turn about the camera's own axes and centre.
       function Lens_Of (Z : Real_Vector) return Fit.Lens is
         ((Fx => Lens0.Fx * Exp (Z (1)), Fy => Lens0.Fy * Exp (Z (1) + Z (4)), Cx => Lens0.Cx + Z (2),
-          Cy => Lens0.Cy + Z (3), K1 => Lens0.K1, K2 => Lens0.K2));
+          Cy => Lens0.Cy + Z (3), K1 => Lens0.K1 + Z (G_F + 1), K2 => Lens0.K2 + Z (G_F + 2)));
 
       function Pose_Of (Z : Real_Vector; A : Positive) return Rigid is
         ((Rotation    => Times (Poses0 (A).Rotation,
@@ -2473,12 +2506,23 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                           Poses0 (A).Translation (2) + Z (Offset (A) + 5),
                           Poses0 (A).Translation (3) + Z (Offset (A) + 6)]));
 
-      --  Where the fixed eye of those terms puts a point of arm A's frame, when in front of it and in its picture.
+      --  Where the fixed eye of those terms puts a point of arm A's frame, when in front of it, inside the lens's fold
+      --  and in its picture. Past where the lens's map of the radius turns back (its slope 1 + 3 K1 r^2 + 5 K2 r^4 no
+      --  longer positive) the map folds a point back inside the picture that no lens shows there.
       function Seen (Z : Real_Vector; A : Positive; X : Vec3; U, V : out Real) return Boolean is
          P : constant Rigid := Pose_Of (Z, A);
+         C : constant Vec3 := Transposed_Times (P.Rotation, Minus (X, P.Translation));
+         L : constant Fit.Lens := Lens_Of (Z);
          In_Front : Boolean;
       begin
-         Fit.Project (Lens_Of (Z), Transposed_Times (P.Rotation, Minus (X, P.Translation)), U, V, In_Front);
+         Fit.Project (L, C, U, V, In_Front);
+         if In_Front then
+            declare
+               R2 : constant Real := (C (1) ** 2 + C (2) ** 2) / C (3) ** 2;
+            begin
+               In_Front := 1.0 + 3.0 * L.K1 * R2 + 5.0 * L.K2 * R2 * R2 > 0.0;
+            end;
+         end if;
          return In_Front and then U >= 0.0 and then U <= Real (Width) and then V >= 0.0 and then V <= Real (Height);
       end Seen;
 
@@ -2489,9 +2533,14 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          P : constant Rigid := Pose_Of (Z, A);
          C : constant Vec3 := Transposed_Times (P.Rotation, Minus (X, P.Translation));
          L : constant Fit.Lens := Lens_Of (Z);
+         --  The lens's own map (Fit.Project's) without its test of the point's side.
+         Xn : constant Real := C (1) / C (3);
+         Yn : constant Real := C (2) / C (3);
+         R2 : constant Real := Xn * Xn + Yn * Yn;
+         D  : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;
       begin
-         U := L.Cx + L.Fx * C (1) / C (3);
-         V := L.Cy + L.Fy * C (2) / C (3);
+         U := L.Cx + L.Fx * Xn * D;
+         V := L.Cy + L.Fy * Yn * D;
       end Place;
 
       --  The point of arm A's table a pixel of one of its eye's pictures sees: its line of sight from the eye's centre
@@ -2546,8 +2595,20 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  and 24 at turns of 0.004, 10-21); at their own weight beside the places their bias in an arm's pose (its
       --  centre 30 mm off) took the eye with it; along the open direction alone, at the places' other terms, the flows
       --  put the eye within 0.25 % of the focal length on all five seeds.
-      Honest_Lower : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];   --  of Fit_Eye's covariance
+      Honest_Lower : Real_Matrix (1 .. G_F, 1 .. G_F) := [others => [others => 0.0]];   --  of Fit_Eye's covariance
       Honest_Known : Boolean := False;
+      --  The lens's bend, which the flows' own estimate (Fit_Eye's, a pinhole's) has no term for and their covariance
+      --  no width: each of its two terms' prior information (one over its variance), as wide as the lens can bend
+      --  before it folds its picture back at the farthest corner (its map of the radius, r (1 + K1 r^2 + K2 r^4), stops
+      --  increasing there at K1 = -1 / (3 r^2) alone, at K2 = -1 / (5 r^4) alone) over Z, about a lens that bends
+      --  nought; taken beside the places' information, whose terms the bend's are.
+      Bend_Prior : Real_Vector (1 .. 2) := [0.0, 0.0];
+
+      --  The bend's terms at Z, and what its prior charges for them.
+      function Bend_Of (Z : Real_Vector; K : Positive) return Real is
+        (if K = 1 then Lens0.K1 + Z (G_F + 1) else Lens0.K2 + Z (G_F + 2));
+      function Bend_Cost (Z : Real_Vector) return Real is
+        (Bend_Prior (1) * Bend_Of (Z, 1) ** 2 + Bend_Prior (2) * Bend_Of (Z, 2) ** 2);
       --  How much less the flows' information is taken than their covariance states: their estimate's misfit against
       --  the places', where those tell a direction better (Weigh_Flows); one until it says more.
       Flows_Scale  : Real := 1.0;
@@ -2571,6 +2632,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       begin
          P.Cx := L.Cx;
          P.Cy := L.Cy;
+         P.K1 := L.K1;
+         P.K2 := L.K2;
          if Twists /= null then
             P.Twists := Twists;
          end if;
@@ -2637,49 +2700,105 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          end loop;
       end Pose_Costs;
 
-      --  The places' information (Ata, the normal matrix of their misfits) weighed against the flows': the directions
-      --  Dirs (a column each) where Ata Dirs = Lambda Honest^-1 Dirs, each of one sigma by the flows. Lambda under one:
-      --  the places tell the direction less than the flows.
+      --  The places' information (Ata, the normal matrix of their misfits with the bend's prior) weighed against the
+      --  flows': the directions Dirs (a column each) and Lambda. The flows' estimate has no bend: in the flows' terms,
+      --  the directions where S Dirs = Lambda Honest^-1 Dirs, S the places' information with the bend eliminated
+      --  (A_FF - A_FK A_KK^-1 A_KF), each of one sigma by the flows, the bend along each as the places put it at those
+      --  terms (-A_KK^-1 A_KF); Lambda under one: the places tell the direction less than the flows. Then the bend's
+      --  own two at the flows' terms held, each of one sigma by the places, Lambda one: the places'. With the bend's
+      --  prior taken for the flows' information instead, the bend went with the flows' directions where the places told
+      --  it less than the prior: the flows' misfit, then read a round late and so with no bend in it, moved it as the
+      --  directions' other terms moved it, and their jackknife left it out of the covariance (the fake's seed 27 told
+      --  4.8 sigmas off along its arms' poses, its bend -0.014 for -0.044; robot.flow.scene's rounds fitted in 150 and
+      --  470 s, its eye not settled, 10-21).
       procedure Split (Ata : Real_Matrix; Dirs : out Real_Matrix; Lambda : out Real_Vector) is
-         B : Real_Matrix (1 .. G, 1 .. G);
-         U : Real_Matrix (1 .. G, 1 .. G);
-         C : Real_Matrix (1 .. G, 1 .. G);   --  Ata Lower
+         B, U, C  : Real_Matrix (1 .. G_F, 1 .. G_F);
+         S        : Real_Matrix (1 .. G_F, 1 .. G_F);   --  the places' information on the flows' terms, the bend free
+         Akk      : Real_Matrix (1 .. 2, 1 .. 2);
+         Cond     : Real_Matrix (1 .. 2, 1 .. G_F);    --  the bend the places put at a change of the flows' terms
+         Lower_K  : Real_Matrix (1 .. 2, 1 .. 2);      --  of A_KK^-1
+         Lambda_F : Real_Vector (1 .. G_F);
+         Ok       : Boolean;
       begin
-         for M in 1 .. G loop
-            for Q in 1 .. G loop
+         for P in 1 .. 2 loop
+            for Q in 1 .. 2 loop
+               Akk (P, Q) := Ata (G_F + P, G_F + Q);
+            end loop;
+         end loop;
+         declare
+            Akk_Inv : constant Real_Matrix := Inverse (Akk);
+         begin
+            for K in 1 .. 2 loop
+               for Q in 1 .. G_F loop
+                  Cond (K, Q) := -(Akk_Inv (1, K) * Ata (G_F + 1, Q) + Akk_Inv (2, K) * Ata (G_F + 2, Q));
+               end loop;
+            end loop;
+            Driver.Numerics.Dense.Cholesky (Akk_Inv, Lower_K, Ok);
+         end;
+         for P in 1 .. G_F loop
+            for Q in 1 .. G_F loop
+               S (P, Q) := Ata (P, Q) + Ata (P, G_F + 1) * Cond (1, Q) + Ata (P, G_F + 2) * Cond (2, Q);
+            end loop;
+         end loop;
+         for P in 1 .. G_F loop
+            for Q in P + 1 .. G_F loop
+               S (P, Q) := (S (P, Q) + S (Q, P)) / 2.0;
+               S (Q, P) := S (P, Q);
+            end loop;
+         end loop;
+         for M in 1 .. G_F loop
+            for Q in 1 .. G_F loop
                declare
                   Sum : Real := 0.0;
                begin
-                  for K in 1 .. G loop
-                     Sum := Sum + Ata (M, K) * Honest_Lower (K, Q);
+                  for K in 1 .. G_F loop
+                     Sum := Sum + S (M, K) * Honest_Lower (K, Q);
                   end loop;
                   C (M, Q) := Sum;
                end;
             end loop;
          end loop;
-         for P in 1 .. G loop
-            for Q in 1 .. G loop
+         for P in 1 .. G_F loop
+            for Q in 1 .. G_F loop
                declare
                   Sum : Real := 0.0;
                begin
-                  for M in 1 .. G loop
+                  for M in 1 .. G_F loop
                      Sum := Sum + Honest_Lower (M, P) * C (M, Q);
                   end loop;
                   B (P, Q) := Sum;
                end;
             end loop;
          end loop;
-         Driver.Numerics.Dense.Small_Eigensystem (B, Lambda, U);
-         for P in 1 .. G loop
-            for I in 1 .. G loop
+         Driver.Numerics.Dense.Small_Eigensystem (B, Lambda_F, U);
+         Dirs := [others => [others => 0.0]];
+         for I in 1 .. G_F loop
+            Lambda (I) := Lambda_F (I);
+            for P in 1 .. G_F loop
                declare
                   Sum : Real := 0.0;
                begin
-                  for K in 1 .. G loop
+                  for K in 1 .. G_F loop
                      Sum := Sum + Honest_Lower (P, K) * U (K, I);
                   end loop;
                   Dirs (P, I) := Sum;
                end;
+            end loop;
+            for K in 1 .. 2 loop
+               declare
+                  Sum : Real := 0.0;
+               begin
+                  for Q in 1 .. G_F loop
+                     Sum := Sum + Cond (K, Q) * Dirs (Q, I);
+                  end loop;
+                  Dirs (G_F + K, I) := Sum;
+               end;
+            end loop;
+         end loop;
+         for K in 1 .. 2 loop
+            Lambda (G_F + K) := 1.0;
+            for P in 1 .. 2 loop
+               Dirs (G_F + P, G_F + K) := Lower_K (P, K);
             end loop;
          end loop;
       end Split;
@@ -2920,7 +3039,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                           Twists => new Twist_Grid (F.Poses'Range, 1 .. Natural'Max (1, F.Joints'Length)),
                           Width => Width, Height => Height, Joints => F.Joints'Length, Cx => Lens0.Cx, Cy => Lens0.Cy,
                           Aspect => Lens0.Fy / Lens0.Fx, Additive => Real'Max (1.0, Result.Additive),
-                          Relative => Result.Relative, Unit => null);
+                          Relative => Result.Relative, Unit => null, K1 => Lens0.K1, K2 => Lens0.K2);
             for V in F.Poses'Range loop
                declare
                   T : constant Twist_Array := Twists_At (F.Joints.all, F.Poses (V).Readings);
@@ -2935,7 +3054,22 @@ package body Driver.Robot.Kinematics.Flow_Eye is
             Flow_Pixels := Flow_Pixels + Layouts (A).Pixels_All;
          end;
       end loop;
-      Driver.Numerics.Dense.Cholesky (Result.Covariance, Honest_Lower, Honest_Known);
+      --  The flows' covariance over their terms, and the bend's prior at the farthest corner (Bend_Prior).
+      declare
+         Corner    : constant Real :=
+           Sqrt (Real'Max (Lens0.Cx, Real (Width) - Lens0.Cx) ** 2 / Lens0.Fx ** 2
+                 + Real'Max (Lens0.Cy, Real (Height) - Lens0.Cy) ** 2 / Lens0.Fy ** 2);
+         Flows_Cov : Real_Matrix (1 .. G_F, 1 .. G_F);
+      begin
+         for P in 1 .. G_F loop
+            for Q in 1 .. G_F loop
+               Flows_Cov (P, Q) := Result.Covariance (P, Q);
+            end loop;
+         end loop;
+         Driver.Numerics.Dense.Cholesky (Flows_Cov, Honest_Lower, Honest_Known);
+         Bend_Prior := [(3.0 * Corner ** 2 * Driver.Conventions.Z) ** 2,
+                        (5.0 * Corner ** 4 * Driver.Conventions.Z) ** 2];
+      end;
       if not Honest_Known then
          Driver.Log.Line (Driver.Log.Robot, "flow eye: the flows' covariance is not definite, nothing to weigh the"
                           & " world's points against");
@@ -3289,6 +3423,11 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                            end if;
                         end loop;
                      end loop;
+                     --  The bend's prior, as it is (no misfit scales it).
+                     for K in 1 .. 2 loop
+                        Ata (G_F + K, G_F + K) := Ata (G_F + K, G_F + K) + Bend_Prior (K);
+                        Atb (G_F + K) := Atb (G_F + K) - Bend_Prior (K) * Bend_Of (Z, K);
+                     end loop;
                      Free (Jac);
                   end Normal_At;
 
@@ -3309,19 +3448,19 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Atb    : Real_Vector (1 .. G);
                      Dirs   : Real_Matrix (1 .. G, 1 .. G);
                      Lambda : Real_Vector (1 .. G);
-                     Hy     : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Honest_Lower, Y);
+                     Hy     : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Honest_Lower, Y (1 .. G_F));
                      Misfit, Places_Share : Real := 0.0;
                      Directions : Natural := 0;
                   begin
                      Rescaled := False;
                      Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
                      Split (Ata, Dirs, Lambda);
-                     for I in 1 .. G loop
+                     for I in 1 .. G_F loop   --  the bend's own two are no flows' estimate
                         if Lambda (I) >= 1.0 then
                            declare
                               Along : Real := 0.0;   --  the eye's place along the direction, in the flows' sigmas
                            begin
-                              for P in 1 .. G loop
+                              for P in 1 .. G_F loop
                                  Along := Along + Dirs (P, I) * Hy (P);
                               end loop;
                               Misfit := Misfit + Along ** 2;
@@ -3338,8 +3477,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                            Factor : constant Real := (Misfit - Places_Share) / Real (Directions);
                         begin
                            Flows_Scale := Flows_Scale * Factor;
-                           for P in 1 .. G loop
-                              for Q in 1 .. G loop
+                           for P in 1 .. G_F loop
+                              for Q in 1 .. G_F loop
                                  Honest_Lower (P, Q) := Honest_Lower (P, Q) * Sqrt (Factor);
                               end loop;
                            end loop;
@@ -3397,19 +3536,24 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                         Kf   : Real_Matrix (1 .. M, 1 .. G) := [others => [others => 0.0]];   --  N^-1 C
                         Dinv : constant Real_Matrix := Inverse (Dirs);
 
-                        --  Arm A's flow residuals' change per sigma along direction I (central differences).
+                        --  Arm A's flow residuals' change per unit of direction I (one flows' sigma), by central
+                        --  differences a sigma of the direction's own either way: the flows' for theirs, the places'
+                        --  (one over the root of Lambda) for the places'. A flows' sigma along a direction the places
+                        --  tell well took the bend, which the flows are read through, past where the lens folds (the
+                        --  fake's seed 26, 10-21: the flows' responses 1E11 to 1E17, the eye's covariance 1E14 px).
                         procedure Along_Direction (A, I : Positive; H : out Real_Array) is
                            Up, Down : Real_Vector (1 .. G);
                            Rd : Real_Access := new Real_Array (H'Range);
+                           Step : constant Real := (if Lambda (I) > 1.0 then 1.0 / Sqrt (Lambda (I)) else 1.0);
                         begin
                            for T in 1 .. G loop
-                              Up (T) := Y (T) + Dirs (T, I);
-                              Down (T) := Y (T) - Dirs (T, I);
+                              Up (T) := Y (T) + Step * Dirs (T, I);
+                              Down (T) := Y (T) - Step * Dirs (T, I);
                            end loop;
                            Flow_Residuals (Up, A, H);
                            Flow_Residuals (Down, A, Rd.all);
                            for Q in H'Range loop
-                              H (Q) := (H (Q) - Rd (Q)) / 2.0;
+                              H (Q) := (H (Q) - Rd (Q)) / (2.0 * Step);
                            end loop;
                            Free (Rd);
                         end Along_Direction;
@@ -3681,7 +3825,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                               loop
                                  declare
                                     R0     : constant Real_Array := Residuals (Y);
-                                    C0     : constant Real := Cost (R0);
+                                    C0     : constant Real := Cost (R0) + Bend_Cost (Y);
                                     Ata    : Real_Matrix (1 .. G, 1 .. G);
                                     Atb    : Real_Vector (1 .. G);
                                     Dirs   : Real_Matrix (1 .. G, 1 .. G);
@@ -3699,7 +3843,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                              Trial (T) := Y (T) + D (T);
                                           end loop;
                                           declare
-                                             C1 : constant Real := Cost (Residuals (Trial));
+                                             C1 : constant Real := Cost (Residuals (Trial)) + Bend_Cost (Trial);
                                           begin
                                              if C1 < C0 then
                                                 Y := Trial;
@@ -4135,6 +4279,15 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                            & Driver.Log.Image (180.0 / Ada.Numerics.Pi
                                                                * Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)), 2)
                                            & " deg"
+                                           & ", bend " & Driver.Log.Image (Lens_Of (Y).K1, 4) & " "
+                                           & Driver.Log.Image (Lens_Of (Y).K2, 4) & " (sigmas "
+                                           & Driver.Log.Image (Sqrt (Cov (G_F + 1, G_F + 1)), 4) & " "
+                                           & Driver.Log.Image (Sqrt (Cov (G_F + 2, G_F + 2)), 4)
+                                           & ", the flows' directions' share "
+                                           & Driver.Log.Image
+                                               (Cov_F (G_F + 1, G_F + 1)
+                                                / Real'Max (Cov (G_F + 1, G_F + 1), Real'Model_Small), 2)
+                                           & ")"
                                       else ""));
                   end;
                   Free (Matches);
@@ -4168,7 +4321,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
             Result.Poses (A) := Pose_Of (Y, A);
          end loop;
          if Definite then
-            Result.Covariance := Cov + Cov_V;
+            --  The flows' terms' share: the distortion's own uncertainty is in it, its terms marginalized.
+            for P in 1 .. G_F loop
+               for Q in 1 .. G_F loop
+                  Result.Covariance (P, Q) := Cov (P, Q) + Cov_V (P, Q);
+               end loop;
+            end loop;
          end if;
          Result.Spread := Spread_T;
          Result.Determined := False;
@@ -4207,7 +4365,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held : aliased constant Pose_Array := Poses;
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
-                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null);
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
       L    : Layout_Access;
    begin
       P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
@@ -4307,7 +4465,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held : aliased constant Pose_Array := Poses;
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
-                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null);
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null,
+                         K1 | K2 => 0.0);
       L    : Layout_Access;
    begin
       P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
@@ -4351,7 +4510,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held : aliased constant Pose_Array := Poses;
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
-                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null);
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
       L    : Layout_Access;
       X    : constant Parameters :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,

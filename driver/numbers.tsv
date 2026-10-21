@@ -2729,6 +2729,7 @@ driver-robot-kinematics-fit.ads	Post => Plane_Response'Result'Length (1) = 3 and
 driver-robot-kinematics-fit.ads	State : Long_Long_Integer := 1;	1	structure	the sampler's state before its first draw: any number but zero
 driver-robot-kinematics-fit.ads	Track : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.ads	with Pre => Fraction > 0.0 and then Fraction <= 1.0;	1.0	math	a fraction
+driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Lens_Of (Y).K1, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Moved, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Aligned_At), 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & "");	1	format	digits printed in a log line or a message
@@ -2747,6 +2748,7 @@ driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "" & Driver.Log.Image (Now.Score, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Flows_Scale, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Lens_Of (Y).Fx, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Lens_Of (Y).K2, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Scatter, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
@@ -2754,6 +2756,10 @@ driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread_F, 2) & ""	2	for
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread_T, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread_T, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (G_F + 1, G_F + 1)), 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (G_F + 2, G_F + 2)), 4)	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (G_F + 2, G_F + 2)), 4)	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (G_F + 2, G_F + 2)), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Widened, 1) & ""	"1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Widened, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	("" & Driver.Log.Image (Result.Spread, 2)	2	format	digits printed in a log line or a message
@@ -2761,12 +2767,17 @@ driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt 
 driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	2.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
 driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	3.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
 driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	3.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
+driver-robot-kinematics-flow_eye.adb	(5.0 * Corner ** 4 * Driver.Conventions.Z) ** 2];	5.0	math	the lens's map of the radius stops increasing at K2 = -1 / (5 r^4) alone
 driver-robot-kinematics-flow_eye.adb	(A, World.Variants (World.Variants'First + 2 * (Kp - 1) + E - 1),	2	structure	two ends to a pair
+driver-robot-kinematics-flow_eye.adb	(Bend_Prior (1) * Bend_Of (Z, 1) ** 2 + Bend_Prior (2) * Bend_Of (Z, 2) ** 2);	1	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	(Bend_Prior (1) * Bend_Of (Z, 1) ** 2 + Bend_Prior (2) * Bend_Of (Z, 2) ** 2);	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	(U_II => (Pu (1, 0) + Pu (-1, 0) - 2.0 * Pu (0, 0)) / 2.0,	2.0	math	the second difference about a pixel (the centre's weight two) over two: half the second derivative, the bend's coefficient
 driver-robot-kinematics-flow_eye.adb	(U_II => (Pu (1, 0) + Pu (-1, 0) - 2.0 * Pu (0, 0)) / 2.0,	2.0	math	the second difference about a pixel (the centre's weight two) over two: half the second derivative, the bend's coefficient
 driver-robot-kinematics-flow_eye.adb	(Vec3'[Z (Offset (A) + 1), Z (Offset (A) + 2), Z (Offset (A) + 3)])),	2	structure	an arm's terms: its turn about the camera's three axes first
 driver-robot-kinematics-flow_eye.adb	(Vec3'[Z (Offset (A) + 1), Z (Offset (A) + 2), Z (Offset (A) + 3)])),	3	structure	an arm's terms: its turn about the camera's three axes first
 driver-robot-kinematics-flow_eye.adb	([X (X'First), X (X'First + Offset (A)), X (X'First + Offset (A) + 1), X (X'First + Offset (A) + 2),	2	structure	the lens's three terms then the arm's turn and centre
+driver-robot-kinematics-flow_eye.adb	(if K = 1 then Lens0.K1 + Z (G_F + 1) else Lens0.K2 + Z (G_F + 2));	1	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	(if K = 1 then Lens0.K1 + Z (G_F + 1) else Lens0.K2 + Z (G_F + 2));	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	(if T <= 4 or else T = 10 then Eps3	10	structure	the aspect's logarithm, an arm's own tenth term: unitless
 driver-robot-kinematics-flow_eye.adb	(if T <= 4 or else T = 10 then Eps3	4	structure	the logarithm of the focal length and the turn are unitless; the rest in the arm's unit
 driver-robot-kinematics-flow_eye.adb	* Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)), 2)	1	structure	the first arm's turn: its own terms 1 to 3
@@ -2774,6 +2785,7 @@ driver-robot-kinematics-flow_eye.adb	* Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)),
 driver-robot-kinematics-flow_eye.adb	* Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)), 2)	2	structure	the first arm's turn: its own terms 1 to 3
 driver-robot-kinematics-flow_eye.adb	* Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)), 2)	3	structure	the first arm's turn: its own terms 1 to 3
 driver-robot-kinematics-flow_eye.adb	- (A (J) / Sg (J)) * A_U * (Y_U + B_U + 2.0 * Rho * A_U) / Aa;	2.0	math	the derivative of the variable projection (Golub and Pereyra) in a joint's unit
+driver-robot-kinematics-flow_eye.adb	/ Real'Max (Cov (G_F + 1, G_F + 1), Real'Model_Small), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));	1	structure	a grid of one pixel at the least
 driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));	2	structure	a patch is twice its half
 driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));	1	structure	a patch of one pixel at least
@@ -2788,6 +2800,8 @@ driver-robot-kinematics-flow_eye.adb	A2 := Real'Max (1.0, (if Sss > 0.0 then Se_
 driver-robot-kinematics-flow_eye.adb	A2 := Real'Max (1.0, (if Sss > 0.0 then Se_S / Sss else 1.0));	1.0	statistics	the stated sigma's share held at one: the pictures' noise is at least what they state
 driver-robot-kinematics-flow_eye.adb	Additive : Real := 1.0;	1.0	statistics	the sigmas the pictures state, before the error model is regressed
 driver-robot-kinematics-flow_eye.adb	Agreeing : constant := 2;	2	statistics	two starts ending at one optimum make it found (as the points' search, Hand_Eye)
+driver-robot-kinematics-flow_eye.adb	Akk : Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	Akk : Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	Along : array (1 .. G) of Positive := [others => 1];	1	structure	any direction until each is set
 driver-robot-kinematics-flow_eye.adb	Append (Text, (if A > 1 then "" else "") & C'Image & "" & Cells'Image & "");	1	structure	the first arm's count without a separator before it
 driver-robot-kinematics-flow_eye.adb	Arm : Positive := 1;	1	structure	placeholder, set before use
@@ -2795,11 +2809,11 @@ driver-robot-kinematics-flow_eye.adb	Arm : Positive := 1;	1	structure	placeholde
 driver-robot-kinematics-flow_eye.adb	Arm, Picture : Positive := 1;	1	structure	placeholder, set before use
 driver-robot-kinematics-flow_eye.adb	Arm_Count_Terms : constant := 6;	6	structure	an arm's terms: the turn's three and the centre's three
 driver-robot-kinematics-flow_eye.adb	Aspect : Real := 1.0;	1.0	math	square pixels (§9A: the cameras' pixels are square)
-driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null);	1.0	math	square pixels (§9A: the cameras' pixels are square), the sigmas as stated
-driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null);	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated
-driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null);	1.0	statistics	the sigmas the pictures state, no share of the rate
-driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null);	1.0	statistics	the sigmas the pictures state, no share of the rate
-driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null);	1.0	statistics	the sigmas the pictures state, the share of the rate the caller gives (a study at a given eye)
+driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null,	1.0	statistics	the sigmas the pictures state, the share of the rate the caller gives (a study at a given eye)
 driver-robot-kinematics-flow_eye.adb	Aspect => Lens0.Fy / Lens0.Fx, Additive => Real'Max (1.0, Result.Additive),	1.0	statistics	never under the sigma the pictures state
 driver-robot-kinematics-flow_eye.adb	Ata : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three dimensions
 driver-robot-kinematics-flow_eye.adb	Ata : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three dimensions
@@ -2809,6 +2823,8 @@ driver-robot-kinematics-flow_eye.adb	B.X (8) - A.X (8), B.X (9) - A.X (9), B.X (
 driver-robot-kinematics-flow_eye.adb	B.X (8) - A.X (8), B.X (9) - A.X (9), B.X (10) - A.X (10)];	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	B.X (8) - A.X (8), B.X (9) - A.X (9), B.X (10) - A.X (10)];	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	Before := Before * Fit.Eye_At (Joints (Joints'First + J - 1 .. Joints'First + J - 1), [1],	1	structure	one joint's step at a time along the chain
+driver-robot-kinematics-flow_eye.adb	Bend_Prior : Real_Vector (1 .. 2) := [0.0, 0.0];	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	Bend_Prior := [(3.0 * Corner ** 2 * Driver.Conventions.Z) ** 2,	3.0	math	the lens's map of the radius stops increasing at K1 = -1 / (3 r^2) alone
 driver-robot-kinematics-flow_eye.adb	Better := C0 - C1 >= Real'Max (1.0, C0 / Real (R0'Length));	1.0	numerics	a step that lowers the cost by less than one residual's worth ends the descent
 driver-robot-kinematics-flow_eye.adb	Budget : Positive := 1;	1	structure	the race's first round: one step each
 driver-robot-kinematics-flow_eye.adb	Budget := 2 * Budget;	2	structure	the race doubles its steps each round
@@ -2816,11 +2832,16 @@ driver-robot-kinematics-flow_eye.adb	Cell : constant Positive := Positive'Max (1
 driver-robot-kinematics-flow_eye.adb	Centre : constant Vec3 := Minus (Middle, Scaled (Away, Times (Base, Vec3'[0.0, 0.0, 1.0])));	1.0	math	the optical axis
 driver-robot-kinematics-flow_eye.adb	Changes : Real_Access := new Real_Array (1 .. Natural'Max (1, N) * Pixels);	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	Cm, C0, Cp : Real_Array (1 .. Natural'Max (1, Pose_Slots));	1	structure	an array of one slot at least, none of them used when no pose
+driver-robot-kinematics-flow_eye.adb	Cond (K, Q) := -(Akk_Inv (1, K) * Ata (G_F + 1, Q) + Akk_Inv (2, K) * Ata (G_F + 2, Q));	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	Cond : Real_Matrix (1 .. 2, 1 .. G_F);	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	Cost := (if 2 * Ok_Count > Sampled then Now else Real'Last);	2	statistics	more than half the pixels moved: a state lowers its cost by losing them
 driver-robot-kinematics-flow_eye.adb	Cov (I, J) := (Cov (I, J) + Cov (J, I)) / 2.0;	2.0	math	a matrix's symmetric part
 driver-robot-kinematics-flow_eye.adb	Cov_F (I, J) := (Cov_F (I, J) + Cov_F (J, I)) / 2.0;	2.0	math	a matrix's symmetric part
 driver-robot-kinematics-flow_eye.adb	Curvature : constant Real := Fp - 2.0 * F0 + Fm;	2.0	math	the second difference of the misfit at a sigma either side and at the estimate
+driver-robot-kinematics-flow_eye.adb	Cy => Lens0.Cy + Z (3), K1 => Lens0.K1 + Z (G_F + 1), K2 => Lens0.K2 + Z (G_F + 2)));	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	D (T) := D (T) / 2.0;	2.0	numerics	a step halved until it lowers the cost
+driver-robot-kinematics-flow_eye.adb	D : constant Real := 1.0 + K1 * R2 + K2 * R2 * R2;	1.0	math	the lens's map of the radius over the radius, 1 + K1 r^2 + K2 r^4
+driver-robot-kinematics-flow_eye.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;	1.0	math	the lens's map of the radius over the radius, 1 + K1 r^2 + K2 r^4
 driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * Gy * A2;	10	structure	the aspect's logarithm, an arm's own tenth term
 driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * Gy * W2;	10	structure	the aspect's logarithm, an arm's own tenth term
 driver-robot-kinematics-flow_eye.adb	DA (J, 2) := C * G_Dot (0.0, W3, -W2);	0.0	math	the cross product's components
@@ -2862,6 +2883,7 @@ driver-robot-kinematics-flow_eye.adb	Flows_Scale : Real := 1.0;	1.0	structure	th
 driver-robot-kinematics-flow_eye.adb	Fm : constant Real := F (-1.0);	1.0	structure	the line search begins a sigma either side of where the eye stands
 driver-robot-kinematics-flow_eye.adb	Fp : constant Real := F (1.0);	1.0	structure	the line search begins a sigma either side of where the eye stands
 driver-robot-kinematics-flow_eye.adb	Fy : constant Real := F * Exp (X (10));	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	G : constant Positive := G_F + 2;	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) / 2.0;	2.0	math	the golden section's smaller share, three less the root of five over two (Brent's method)
 driver-robot-kinematics-flow_eye.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) / 2.0;	3.0	math	the golden section's smaller share, three less the root of five over two (Brent's method)
 driver-robot-kinematics-flow_eye.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) / 2.0;	5.0	math	the golden section's smaller share, three less the root of five over two (Brent's method)
@@ -2869,18 +2891,19 @@ driver-robot-kinematics-flow_eye.adb	Grid : constant Positive := 2 * Positive'Ma
 driver-robot-kinematics-flow_eye.adb	Grid : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));	2	structure	a patch is twice its half
 driver-robot-kinematics-flow_eye.adb	Gu : Natural := Grid / 2;	2	structure	the grid's points at the middles of its cells
 driver-robot-kinematics-flow_eye.adb	Gv : Natural := Grid / 2;	2	structure	the grid's points at the middles of its cells
-driver-robot-kinematics-flow_eye.adb	H (Q) := (H (Q) - Rd (Q)) / 2.0;	2.0	math	a central difference over twice its step
+driver-robot-kinematics-flow_eye.adb	H (Q) := (H (Q) - Rd (Q)) / (2.0 * Step);	2.0	math	a central difference over twice its step
 driver-robot-kinematics-flow_eye.adb	Half_Octave : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (2.0) / 2.0;	2.0	math	half an octave of focal length
 driver-robot-kinematics-flow_eye.adb	Half_Octave : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (2.0) / 2.0;	2.0	math	half an octave of focal length
 driver-robot-kinematics-flow_eye.adb	Here : Real := 1.0;	1.0	structure	the bracket's first steps: a sigma, doubled
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);	9	structure	the principal point down is the ninth term
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);	9	structure	the principal point down is the ninth term
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (XA (10)), XA (8), XA (9), View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
-driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (XA (10)), XA (8), XA (9), View, I);	9	structure	the principal point down is the ninth term
+driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);	9	structure	the principal point down is the ninth term
+driver-robot-kinematics-flow_eye.adb	Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	Hi := 1.0;	1.0	structure	the bracket's first steps: a sigma, doubled
 driver-robot-kinematics-flow_eye.adb	High := 1;	1	structure	the scan starts one half octave either side of its first length
+driver-robot-kinematics-flow_eye.adb	In_Front := 1.0 + 3.0 * L.K1 * R2 + 5.0 * L.K2 * R2 * R2 > 0.0;	1.0	math	the slope of the lens's map of the radius, d/dr r (1 + K1 r^2 + K2 r^4) = 1 + 3 K1 r^2 + 5 K2 r^4
+driver-robot-kinematics-flow_eye.adb	In_Front := 1.0 + 3.0 * L.K1 * R2 + 5.0 * L.K2 * R2 * R2 > 0.0;	3.0	math	the slope of the lens's map of the radius, d/dr r (1 + K1 r^2 + K2 r^4) = 1 + 3 K1 r^2 + 5 K2 r^4
+driver-robot-kinematics-flow_eye.adb	In_Front := 1.0 + 3.0 * L.K1 * R2 + 5.0 * L.K2 * R2 * R2 > 0.0;	5.0	math	the slope of the lens's map of the radius, d/dr r (1 + K1 r^2 + K2 r^4) = 1 + 3 K1 r^2 + 5 K2 r^4
 driver-robot-kinematics-flow_eye.adb	Jac (I, T) := (Ru (I) - Rd (I)) / (2.0 * Eps3);	2.0	math	a central difference spans twice its step
 driver-robot-kinematics-flow_eye.adb	Joints := new Joint_Point_Array (1 .. Natural'Max (1, Total));	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	Joints => Arm.Joints'Length, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,	2.0	math	the picture's middle
@@ -2892,6 +2915,7 @@ driver-robot-kinematics-flow_eye.adb	Jv (Global_Of (A, T)) := (PU (2) - PD (2)) 
 driver-robot-kinematics-flow_eye.adb	Jv (T) := (Vu - Vd) / (2.0 * Eps3);	2.0	math	a central difference spans twice its step
 driver-robot-kinematics-flow_eye.adb	Keep : constant Natural := Natural'Max (Finalists, (Alive + 1) / 2);	2	structure	the race keeps the better half each round
 driver-robot-kinematics-flow_eye.adb	Kept : Flag_Access := new Flag_Array (1 .. Natural'Max (1, Got));	1	structure	an array of at least one element
+driver-robot-kinematics-flow_eye.adb	Lambda (G_F + K) := 1.0;	1.0	math	a bend's own direction, of one sigma by the places, weighs as much as they tell it: their information over their own, one
 driver-robot-kinematics-flow_eye.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubled until a step lowers the cost
 driver-robot-kinematics-flow_eye.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubled until a step lowers the cost
 driver-robot-kinematics-flow_eye.adb	Lambda := Lambda / 2.0;	2.0	numerics	the damping halved after a step that lowered the cost
@@ -2905,6 +2929,8 @@ driver-robot-kinematics-flow_eye.adb	Lo := -1.0;	1.0	structure	the bracket's fir
 driver-robot-kinematics-flow_eye.adb	Low := -1;	1	structure	the scan starts one half octave either side of its first length
 driver-robot-kinematics-flow_eye.adb	Lower : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
 driver-robot-kinematics-flow_eye.adb	Lower : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
+driver-robot-kinematics-flow_eye.adb	Lower_K : Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	Lower_K : Real_Matrix (1 .. 2, 1 .. 2);	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	M (T, T) := M (T, T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	numerics	Marquardt's damping of the diagonal
 driver-robot-kinematics-flow_eye.adb	M : constant Positive := Natural'Max (1, Flows_Of);	1	structure	an array of one at least
 driver-robot-kinematics-flow_eye.adb	M : constant Real := (A + B) / 2.0;	2.0	numerics	the bracket's middle
@@ -2963,6 +2989,10 @@ driver-robot-kinematics-flow_eye.adb	S (A).Base := Times (S (A).Base, Driver.Num
 driver-robot-kinematics-flow_eye.adb	S (A).P.Twists := new Twist_Grid (Arm.Poses'Range, 1 .. Natural'Max (1, Arm.Joints'Length));	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	S (A).P.Unit := new Real_Array'(1 .. Natural'Max (1, Arm.Joints'Length) => 1.0);	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	S (A).P.Unit := new Real_Array'(1 .. Natural'Max (1, Arm.Joints'Length) => 1.0);	1.0	math	every unit as the arm's fit has it before its term moves it
+driver-robot-kinematics-flow_eye.adb	S (P, Q) := (S (P, Q) + S (Q, P)) / 2.0;	2.0	math	the symmetric part: the mean of the two triangles
+driver-robot-kinematics-flow_eye.adb	S (P, Q) := Ata (P, Q) + Ata (P, G_F + 1) * Cond (1, Q) + Ata (P, G_F + 2) * Cond (2, Q);	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	S : constant Real := 2.0 * K1 + 4.0 * K2 * R2;	2.0	math	the radial map's derivative over the radius: dD/dx = x (2 K1 + 4 K2 r^2)
+driver-robot-kinematics-flow_eye.adb	S : constant Real := 2.0 * K1 + 4.0 * K2 * R2;	4.0	math	the radial map's derivative over the radius: dD/dx = x (2 K1 + 4 K2 r^2)
 driver-robot-kinematics-flow_eye.adb	Scale : Real := 1.0)	1.0	structure	no scaling unless asked
 driver-robot-kinematics-flow_eye.adb	Scaled (1.0 / Rho, Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0])));	1.0	math	the depth is the inverse of its inverse
 driver-robot-kinematics-flow_eye.adb	Scaled (1.0 / Rho, Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0])));	1.0	math	the depth is the inverse of its inverse
@@ -2973,6 +3003,8 @@ driver-robot-kinematics-flow_eye.adb	Score := (if 2 * In_Front > Sampled and the
 driver-robot-kinematics-flow_eye.adb	Settled := Rounds > 1 and then Got > 0 and then Definite and then Moved <= Spread;	1	structure	a round after the first
 driver-robot-kinematics-flow_eye.adb	Shift : array (1 .. 2) of Real_Vector (1 .. G);	2	structure	the two ends of a pair
 driver-robot-kinematics-flow_eye.adb	Shift_V (Pair, T) := (Shift (2) (T) - Shift (1) (T)) / 2.0;	2.0	math	half the difference of a pair's two ends: a central difference over a sigma either way
+driver-robot-kinematics-flow_eye.adb	Sight (F, F * Exp (XA (10)), XA (8), XA (9), S (A).P.K1, S (A).P.K2, View, I);	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	Sight (F, F * Exp (XA (10)), XA (8), XA (9), S (A).P.K1, S (A).P.K2, View, I);	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	Sights := new Sight_Array (1 .. Natural'Max (1, Upper));	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));	2.0	statistics	a still is a mean of two frames' worth: its noise is the difference's over the root of two
 driver-robot-kinematics-flow_eye.adb	Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));	2.0	statistics	a still is a mean of two frames' worth: its noise is the difference's over the root of two
@@ -2981,6 +3013,9 @@ driver-robot-kinematics-flow_eye.adb	Sign : constant Real := (if Fp < Fm then 1.
 driver-robot-kinematics-flow_eye.adb	Smooth_Sigma : constant Real := Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (Levels)) / Ada.Numerics.Pi;	2.0	math	the Gaussian whose response at half the sampling rate is one level in the picture's
 driver-robot-kinematics-flow_eye.adb	Start_Ln : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Real (Width) / 2.0);	2.0	math	the half width seen at a right angle's half (no field of view assumed)
 driver-robot-kinematics-flow_eye.adb	Step : Real := 1.0;	1.0	structure	the bracket's first steps: a sigma, doubled
+driver-robot-kinematics-flow_eye.adb	Step : constant Real := (if Lambda (I) > 1.0 then 1.0 / Sqrt (Lambda (I)) else 1.0);	1.0	math	a direction's own sigma in the flows' sigmas: the places' one over the root of Lambda where they tell it better, the flows' one
+driver-robot-kinematics-flow_eye.adb	Step : constant Real := (if Lambda (I) > 1.0 then 1.0 / Sqrt (Lambda (I)) else 1.0);	1.0	math	a direction's own sigma in the flows' sigmas: the places' one over the root of Lambda where they tell it better, the flows' one
+driver-robot-kinematics-flow_eye.adb	Step : constant Real := (if Lambda (I) > 1.0 then 1.0 / Sqrt (Lambda (I)) else 1.0);	1.0	math	a direction's own sigma in the flows' sigmas: the places' one over the root of Lambda where they tell it better, the flows' one
 driver-robot-kinematics-flow_eye.adb	Step := 2.0 * Step;	2.0	numerics	the bracket's steps double until the misfit rises
 driver-robot-kinematics-flow_eye.adb	Su (K + 1) := (Back_At (K + 1) - Back_At (K - 1)) / 2.0;	2.0	math	a central difference
 driver-robot-kinematics-flow_eye.adb	Sum := Sum + (Real (Pixels) / Real (Held) - 1.0) * S * S;	1.0	statistics	the jackknife's weight of a group left out: the rest over it, less one
@@ -3060,7 +3095,14 @@ driver-robot-kinematics-flow_eye.adb	for J in -1 .. 1 loop	1	structure	a pixel a
 driver-robot-kinematics-flow_eye.adb	for J in -1 .. 1 loop	1	structure	a pixel and its eight neighbours, a pixel either way: the second differences' stencil
 driver-robot-kinematics-flow_eye.adb	for J in -1 .. 1 loop	1	structure	a pixel and its eight neighbours, a pixel either way: the second differences' stencil
 driver-robot-kinematics-flow_eye.adb	for J in -1 .. 1 loop	1	structure	a pixel and its eight neighbours, a pixel either way: the second differences' stencil
+driver-robot-kinematics-flow_eye.adb	for K in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	for K in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	for K in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	for K in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	for Kp in 1 .. World.Variants'Length / 2 loop	2	structure	the variants come in pairs
+driver-robot-kinematics-flow_eye.adb	for P in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	for P in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
+driver-robot-kinematics-flow_eye.adb	for Q in 1 .. 2 loop	2	structure	the lens's bend: its two terms, after the flows' terms
 driver-robot-kinematics-flow_eye.adb	for Q in Row + 1 .. Row + 2 loop	2	structure	two residuals a place: across and down
 driver-robot-kinematics-flow_eye.adb	for R in 1 .. Height - 2 loop	2	math	a central difference needs a neighbour either side
 driver-robot-kinematics-flow_eye.adb	for T in 2 .. 7 loop	2	structure	the turn's and the centre's terms
