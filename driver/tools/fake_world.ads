@@ -123,12 +123,25 @@ package Fake_World is
       Mount          : Rigid := Identity;      --  the optical frame in the link's frame (x right, y down, z forward)
       Width, Height  : Positive := 320;
       Fx, Fy, Cx, Cy : Real := 0.0;
+      K1, K2         : Real := 0.0;
+      --  The lens's radial distortion: the ray along (x, y, 1) in the optical frame (r^2 = x^2 + y^2) shows at the
+      --  pixel (Cx + Fx x d, Cy + Fy y d), d = 1 + K1 r^2 + K2 r^4. A real camera's lens bends its picture, its
+      --  corners by a few to a few tens of pixels; the lab simulator's cameras are pinholes, all nought.
       Pose           : Rigid := Identity;      --  the optical frame in the world, from Forward
       Shown          : Real_Access;            --  the picture as the renderer's accumulation shows it, RGB per pixel
       Fresh          : Boolean := True;        --  Shown holds nothing yet
    end record;
 
    package Camera_Vectors is new Ada.Containers.Vectors (Positive, Camera);
+
+   procedure Project (C : Camera; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   --  Where the camera shows the point P of its optical frame (x right, y down, z forward), its lens's distortion
+   --  and all: the picture's place (U, V) from its corner, a pixel's centre at a half. In_Front False (U, V nought)
+   --  for a point not ahead of it.
+
+   function Ray (C : Camera; U, V : Real) return Vec3;
+   --  The direction (x, y, 1) in the optical frame of the light the picture's place (U, V) shows: Project's
+   --  inverse, its distortion undone.
 
    --  Every quirk the lab's simulator was seen to have, on by default.
    type Quirks is record

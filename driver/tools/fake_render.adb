@@ -248,9 +248,12 @@ package body Fake_Render is
                      --  The ray through the sub-sample's place in the pixel, in the camera's frame then the world's:
                      --  the places on the plastic number's lattice (Roberts' R2), every one of them at its own distance
                      --  along any line, so that an edge moving across the pixel changes it at as many places as there
-                     --  are rays (a square grid of k by k crosses k of them at once when the edge lies along it).
-                     Px : constant Real := (Real (Col) + Offset (Sub, 1) - C.Cx) / C.Fx;
-                     Py : constant Real := (Real (Row) + Offset (Sub, 2) - C.Cy) / C.Fy;
+                     --  are rays (a square grid of k by k crosses k of them at once when the edge lies along it). The
+                     --  lens's distortion undone (Fake_World.Ray): the light the place shows.
+                     Pr : constant Vec3 :=
+                       Fake_World.Ray (C, Real (Col) + Offset (Sub, 1), Real (Row) + Offset (Sub, 2));
+                     Px : constant Real := Pr (1);
+                     Py : constant Real := Pr (2);
                      Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
                      Cx : constant Real := Px / Pn;
                      Cy : constant Real := Py / Pn;
@@ -358,8 +361,9 @@ package body Fake_Render is
      (W : Fake_World.World; C : Fake_World.Camera; U, V : Driver.Real; Solid : out Natural; Along : out Driver.Real)
    is
       R  : Mat3 renames C.Pose.Rotation;
-      Px : constant Real := (U - C.Cx) / C.Fx;
-      Py : constant Real := (V - C.Cy) / C.Fy;
+      Pr : constant Vec3 := Fake_World.Ray (C, U, V);
+      Px : constant Real := Pr (1);
+      Py : constant Real := Pr (2);
       Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
       Dx : constant Real := (R (1, 1) * Px + R (1, 2) * Py + R (1, 3)) / Pn;
       Dy : constant Real := (R (2, 1) * Px + R (2, 2) * Py + R (2, 3)) / Pn;

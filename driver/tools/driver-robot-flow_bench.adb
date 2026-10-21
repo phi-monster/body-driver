@@ -299,10 +299,15 @@ begin
                               U, Vv : Real := -1.0;
                               Far  : Real := 0.0;
                            begin
-                              if Xc (3) > 0.0 then
-                                 U := Cam.Cx + Cam.Fx * Xc (1) / Xc (3);
-                                 Vv := Cam.Cy + Cam.Fy * Xc (2) / Xc (3);
-                              end if;
+                              declare
+                                 Front : Boolean;
+                              begin
+                                 FW.Project (Cam, Xc, U, Vv, Front);
+                                 if not Front then
+                                    U := -1.0;
+                                    Vv := -1.0;
+                                 end if;
+                              end;
                               if U >= 0.0 and then U < Real (Width) and then Vv >= 0.0 and then Vv < Real (Height)
                               then
                                  Far := Real'Last;
@@ -519,8 +524,9 @@ begin
          Flipped  : Fit.Joint_Array := Sets (1).Joints.all;
          Cam      : FW.Camera renames W.Cameras (Eye);
          Middle_Lens : constant Fit.Lens :=
-           (Fx | Fy => Cam.Fx, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, K1 | K2 => 0.0);
-         True_Lens   : constant Fit.Lens := (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
+           (Fx | Fy => Cam.Fx, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0, K1 => Cam.K1, K2 => Cam.K2);
+         True_Lens   : constant Fit.Lens :=
+           (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 => Cam.K1, K2 => Cam.K2);
       begin
          Put_Line ("the eye's true aspect (fy / fx)" & Real'Image (Cam.Fy / Cam.Fx));
          for J in Flipped'Range loop
@@ -567,7 +573,7 @@ begin
                                    Truth.Translation (3) + Z (9)]));
                function Moved_Lens (Z : LA.Real_Vector) return Fit.Lens is
                  ((Fx => Cam.Fx * EF.Exp (Z (1)), Fy => Cam.Fy * EF.Exp (Z (1)), Cx => Cam.Cx + Z (2),
-                   Cy => Cam.Cy + Z (3), K1 | K2 => 0.0));
+                   Cy => Cam.Cy + Z (3), K1 => Cam.K1, K2 => Cam.K2));
                procedure Places (Z : LA.Real_Vector; Into : out LA.Real_Vector) is
                   P : constant Rigid := Moved_Pose (Z);
                   L : constant Fit.Lens := Moved_Lens (Z);
@@ -592,8 +598,9 @@ begin
                         Along : Real;
                         U  : constant Real := Real (Gx * Step_Px) + 0.5;
                         V  : constant Real := Real (Gy * Step_Px) + 0.5;
-                        Px : constant Real := (U - Cam.Cx) / Cam.Fx;
-                        Py : constant Real := (V - Cam.Cy) / Cam.Fy;
+                        Pr : constant Vec3 := FW.Ray (Cam, U, V);
+                        Px : constant Real := Pr (1);
+                        Py : constant Real := Pr (2);
                         Pn : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
                      begin
                         Fake_Render.Nearest (W, Cam, U, V, Solid, Along);
@@ -926,8 +933,9 @@ begin
                            declare
                               Solid : Natural;
                               Along : Real;
-                              Px    : constant Real := (View.U (I) - Cam.Cx) / Cam.Fx;
-                              Py    : constant Real := (View.V (I) - Cam.Cy) / Cam.Fy;
+                              Pr    : constant Vec3 := FW.Ray (Cam, View.U (I), View.V (I));
+                              Px    : constant Real := Pr (1);
+                              Py    : constant Real := Pr (2);
                               Pn    : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
                               Link  : Natural;
                               Edge  : Boolean := False;
@@ -948,8 +956,9 @@ begin
                                     function Along_Gradient (U, V : Real) return Real is
                                        S2 : Natural;
                                        A2 : Real;
-                                       Qx : constant Real := (U - Cam.Cx) / Cam.Fx;
-                                       Qy : constant Real := (V - Cam.Cy) / Cam.Fy;
+                                       Qr : constant Vec3 := FW.Ray (Cam, U, V);
+                                       Qx : constant Real := Qr (1);
+                                       Qy : constant Real := Qr (2);
                                        Qn : constant Real := EF.Sqrt (Qx * Qx + Qy * Qy + 1.0);
                                        Lk : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
                                        Ax : constant Vec3 := Times (Lk.Pose.Rotation, Lk.Axis);
@@ -1143,7 +1152,8 @@ begin
                function Lens_Of (Y : Real_Vector) return Fit.Lens is
                  ((Fx => True_Lens.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (Y (1)),
                    Fy => True_Lens.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (Y (1)),
-                   Cx => True_Lens.Cx + Y (2), Cy => True_Lens.Cy + Y (3), K1 => 0.0, K2 => 0.0));
+                   Cx => True_Lens.Cx + Y (2), Cy => True_Lens.Cy + Y (3), K1 => True_Lens.K1,
+                   K2 => True_Lens.K2));
                function Res (Y : Real_Vector) return Real_Array is
                  (Flow.Residuals_At (Views, Joints_Of (Y), Width, Height, Truth, Lens_Of (Y), Rel));
                function Cost (R : Real_Array) return Real is
@@ -1401,6 +1411,11 @@ begin
                type Eyes_Access is access Flow.Rigid_Array;
                Worlds   : Flow.Arm_World_Array (Sets'Range);
                Joints_True : Real_Vectors.Vector;   --  every set's joints at its poses, u and v by turns, in the truth
+               --  Each arm's reach over the table, where the eye is judged (finish line of steps 2 and 3, 10-21): its
+               --  base, and how far across and how high its wrist eye went over its poses.
+               Reach_Base : array (Sets'Range) of Vec3 := [others => [0.0, 0.0, 0.0]];
+               Reach_Far  : array (Sets'Range) of Real := [others => 0.0];
+               Reach_Top  : array (Sets'Range) of Real := [others => 0.0];
                Refined  : Flow.Report := Result;
                Began_R  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
                --  FLOW_WRISTS (BENCH) names a file of the wrist pictures and their world masks: read when it exists,
@@ -1470,6 +1485,16 @@ begin
                            end loop;
                            Changes (V) := Change;
                            FW.Forward (W);
+                           if V = 1 then
+                              Reach_Base (K) := W.Links (Links (Links.First_Index)).Pose.Translation;
+                           end if;
+                           declare
+                              E : constant Vec3 := W.Cameras (Wrist).Pose.Translation;
+                           begin
+                              Reach_Far (K) := Real'Max (Reach_Far (K), EF.Sqrt ((E (1) - Reach_Base (K) (1)) ** 2
+                                                                       + (E (2) - Reach_Base (K) (2)) ** 2));
+                              Reach_Top (K) := Real'Max (Reach_Top (K), E (3) - W.Table_Z);
+                           end;
                            if V <= Given then
                               for J in 1 .. N loop
                                  declare
@@ -1477,10 +1502,16 @@ begin
                                     Xc : constant Vec3 :=
                                       Transposed_Times (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
                                  begin
-                                    if Xc (3) > 0.0 then
-                                       Joints_True.Append (Cam.Cx + Cam.Fx * Xc (1) / Xc (3));
-                                       Joints_True.Append (Cam.Cy + Cam.Fy * Xc (2) / Xc (3));
-                                    end if;
+                                    declare
+                                       Tu, Tv : Real;
+                                       Front  : Boolean;
+                                    begin
+                                       FW.Project (Cam, Xc, Tu, Tv, Front);
+                                       if Front then
+                                          Joints_True.Append (Tu);
+                                          Joints_True.Append (Tv);
+                                       end if;
+                                    end;
                                  end;
                               end loop;
                            end if;
@@ -1525,10 +1556,8 @@ begin
                                        declare
                                           Solid : Natural;
                                           Along : Real;
-                                          Px    : constant Real := (Real (X) + 0.5 - C.Cx) / C.Fx;
-                                          Py    : constant Real := (Real (Y) + 0.5 - C.Cy) / C.Fy;
                                           Dc    : constant Vec3 :=
-                                            Times (C.Pose.Rotation, Vec3'[Px, Py, 1.0]);
+                                            Times (C.Pose.Rotation, FW.Ray (C, Real (X) + 0.5, Real (Y) + 0.5));
                                           Dn    : constant Real := EF.Sqrt (Dc (1) ** 2 + Dc (2) ** 2 + Dc (3) ** 2);
                                        begin
                                           Fake_Render.Nearest (W, C, Real (X) + 0.5, Real (Y) + 0.5, Solid, Along);
@@ -1607,7 +1636,7 @@ begin
                                             (Joints => Js.all'Unchecked_Access, Eyes => Eyes.all'Unchecked_Access,
                                              Lens   => (Fx => W.Cameras (Wrist).Fx, Fy => W.Cameras (Wrist).Fy,
                                                         Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy,
-                                                        K1 | K2 => 0.0),
+                                                        K1 => W.Cameras (Wrist).K1, K2 => W.Cameras (Wrist).K2),
                                              Table  => (Centre => [0.0, 0.0, W.Table_Z], Normal => [0.0, 0.0, 1.0],
                                                         Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
                                                         Offset_Sigma => 0.0, others => <>));
@@ -1620,7 +1649,8 @@ begin
                         Worlds (K) :=
                           (Pictures => Pictures (K).all'Unchecked_Access,
                            Lens     => (Fx => W.Cameras (Wrist).Fx, Fy => W.Cameras (Wrist).Fy,
-                                        Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy, K1 | K2 => 0.0),
+                                        Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy,
+                                        K1 => W.Cameras (Wrist).K1, K2 => W.Cameras (Wrist).K2),
                            Table    => (Centre => [0.0, 0.0, W.Table_Z], Normal => [0.0, 0.0, 1.0],
                                         Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
                                         Offset_Sigma => 0.0, others => <>),
@@ -1634,7 +1664,8 @@ begin
                --  FLOW_REFINE_FROM_TRUTH (a study): the refinement started at the true eye; FLOW_REFINE_NO_PRIOR: the
                --  flow's covariance made a million times its terms' units, its estimate no evidence.
                if Ada.Environment_Variables.Exists ("FLOW_REFINE_FROM_TRUTH") then
-                  Refined.Lens := (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
+                  Refined.Lens :=
+                    (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 => Cam.K1, K2 => Cam.K2);
                   for K in Sets'Range loop
                      Refined.Poses (K) := Truth;
                   end loop;
@@ -1705,10 +1736,12 @@ begin
                      Centre_Solid  : Natural := 0;
                      function True_Place (X : Vec3; U, V : out Real) return Boolean is
                         C : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (X, Truth.Translation));
+                        Front : Boolean;
                      begin
-                        U := Cam.Cx + Cam.Fx * C (1) / C (3) - Ray_U;
-                        V := Cam.Cy + Cam.Fy * C (2) / C (3) - Ray_V;
-                        if not (C (3) > 0.0 and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height)) then
+                        FW.Project (Cam, C, U, V, Front);
+                        U := U - Ray_U;
+                        V := V - Ray_V;
+                        if not (Front and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height)) then
                            return False;
                         elsif not Hit_Mode then
                            return True;
@@ -2524,17 +2557,25 @@ begin
                                       Transposed_Times (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
                                     Xc : constant Vec3 :=
                                       Transposed_Times (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+                                    --  in the truth's list as its building put it there (seen by the true lens)
+                                    Tu0, Tv0 : Real;
+                                    Listed   : Boolean;
                                  begin
-                                    if Xt (3) > 0.0 then
+                                    FW.Project (Cam, Xt, Tu0, Tv0, Listed);
+                                    if Listed then
                                        if Xc (3) > 0.0 and then I + 1 <= Joints_True.Last_Index
                                          and then Joints_True (I) in 0.0 .. Real (Width)
                                          and then Joints_True (I + 1) in 0.0 .. Real (Height)
                                        then
-                                          Worst := Real'Max
-                                            (Worst, EF.Sqrt ((Refined.Lens.Cx + Refined.Lens.Fx * Xc (1) / Xc (3)
-                                                              - Joints_True (I)) ** 2
-                                                             + (Refined.Lens.Cy + Refined.Lens.Fy * Xc (2) / Xc (3)
-                                                                - Joints_True (I + 1)) ** 2));
+                                          declare
+                                             Fu, Fv : Real;
+                                             Front  : Boolean;
+                                          begin
+                                             Fit.Project (Refined.Lens, Xc, Fu, Fv, Front);
+                                             Worst := Real'Max
+                                               (Worst, EF.Sqrt ((Fu - Joints_True (I)) ** 2
+                                                                + (Fv - Joints_True (I + 1)) ** 2));
+                                          end;
                                        end if;
                                        I := I + 2;
                                     end if;
@@ -2555,7 +2596,9 @@ begin
                      & " %), principal point (" & Image (Refined.Lens.Cx, 1) & ", "
                      & Image (Refined.Lens.Cy, 1) & ") of ("
                      & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & "), aspect "
-                     & Image (Refined.Lens.Fy / Refined.Lens.Fx, 5) & " of " & Image (Cam.Fy / Cam.Fx, 5));
+                     & Image (Refined.Lens.Fy / Refined.Lens.Fx, 5) & " of " & Image (Cam.Fy / Cam.Fx, 5)
+                     & ", bend " & Image (Refined.Lens.K1, 4) & " " & Image (Refined.Lens.K2, 4) & " of "
+                     & Image (Cam.K1, 4) & " " & Image (Cam.K2, 4));
                   --  The refined eye's terms against the truth over the covariance it states (the logarithm of the
                   --  focal length, the principal point, each arm's turn about the camera's own axes, its centre): the
                   --  chi square, about as many as the terms when the covariance is honest, and the focal length's and
@@ -2766,11 +2809,11 @@ begin
                                     begin
                                        if Xt (3) > 0.0 and then Xc (3) > 0.0 then
                                           declare
-                                             Tu : constant Real := Cam.Cx + Cam.Fx * Xt (1) / Xt (3);
-                                             Tv : constant Real := Cam.Cy + Cam.Fy * Xt (2) / Xt (3);
-                                             Fu : constant Real := Refined.Lens.Cx + Refined.Lens.Fx * Xc (1) / Xc (3);
-                                             Fv : constant Real := Refined.Lens.Cy + Refined.Lens.Fy * Xc (2) / Xc (3);
+                                             Tu, Tv, Fu, Fv : Real;
+                                             Front_T, Front_F : Boolean;
                                           begin
+                                             FW.Project (Cam, Xt, Tu, Tv, Front_T);
+                                             Fit.Project (Refined.Lens, Xc, Fu, Fv, Front_F);
                                              if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
                                                 Seen := Seen + 1;
                                                 Worst := Real'Max (Worst, EF.Sqrt ((Fu - Tu) ** 2 + (Fv - Tv) ** 2));
@@ -2786,6 +2829,63 @@ begin
                         end loop;
                         Put_Line ("refined arm" & Sets (K).Number'Image & ": the table's points at most"
                                   & To_String (Line_H));
+                     end;
+                  end loop;
+                  --  The same within each arm's reach, at heights its wrist eye reached (none, a third, two thirds and
+                  --  all of how high it went over its poses): the arm's own workspace, each miss also in mm across the
+                  --  line of sight at the point's depth (the fixed eye sits above and behind the arms: pixels overstate
+                  --  near points).
+                  for K in Sets'Range loop
+                     declare
+                        P      : constant Rigid := Refined.Poses (K);
+                        Line_W : Unbounded_String;
+                     begin
+                        for Share of Real_Array'[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0] loop
+                           declare
+                              H     : constant Real := Share * Reach_Top (K);
+                              Worst : Real := 0.0;
+                              Worst_Mm : Real := 0.0;   --  the miss across the line of sight, at the point's depth
+                              Sum   : Real := 0.0;
+                              Seen  : Natural := 0;
+                           begin
+                              for I in -50 .. 50 loop
+                                 for J in -50 .. 50 loop
+                                    declare
+                                       X  : constant Vec3 := [0.02 * Real (I), 0.02 * Real (J), W.Table_Z + H];
+                                       Xt : constant Vec3 := Transposed_Times
+                                         (Truth.Rotation, Driver.Numerics.Minus (X, Truth.Translation));
+                                       Xc : constant Vec3 := Transposed_Times
+                                         (P.Rotation, Driver.Numerics.Minus (X, P.Translation));
+                                       Tu, Tv, Fu, Fv : Real;
+                                       Front_T, Front_F : Boolean;
+                                    begin
+                                       FW.Project (Cam, Xt, Tu, Tv, Front_T);
+                                       Fit.Project (Refined.Lens, Xc, Fu, Fv, Front_F);
+                                       if Front_T and then Front_F
+                                         and then EF.Sqrt ((X (1) - Reach_Base (K) (1)) ** 2
+                                                           + (X (2) - Reach_Base (K) (2)) ** 2) <= Reach_Far (K)
+                                         and then Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height)
+                                       then
+                                          declare
+                                             E : constant Real := EF.Sqrt ((Fu - Tu) ** 2 + (Fv - Tv) ** 2);
+                                          begin
+                                             Seen := Seen + 1;
+                                             Sum := Sum + E;
+                                             Worst := Real'Max (Worst, E);
+                                             Worst_Mm := Real'Max (Worst_Mm, 1000.0 * E * Xt (3) / Cam.Fx);
+                                          end;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end loop;
+                              Append (Line_W, " at" & Natural'Image (Natural (100.0 * H)) & " cm mean "
+                                      & Image ((if Seen > 0 then Sum / Real (Seen) else 0.0), 2) & " worst "
+                                      & Image (Worst, 2) & " px (" & Image (Worst_Mm, 1) & " mm)");
+                           end;
+                        end loop;
+                        Put_Line ("refined arm" & Sets (K).Number'Image & " within its reach ("
+                                  & Image (Reach_Far (K), 2) & " m across, " & Image (Reach_Top (K), 2) & " m up):"
+                                  & To_String (Line_W));
                      end;
                   end loop;
                   for K in Sets'Range loop
@@ -2832,7 +2932,7 @@ begin
                Extra     : constant Natural := Natural (Setting ("FLOW_SCENE_EXTRA", 0.0));
                Cam       : FW.Camera renames W.Cameras (Eye);
                True_Lens : constant Fit.Lens :=
-                 (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
+                 (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 => Cam.K1, K2 => Cam.K2);
                Fixed     : Flow.Luma_Access := Picture;
                Fixed_Pyr : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Width, Height, Fixed.all);
                type Match is record
@@ -2853,15 +2953,19 @@ begin
                   if Xc (3) <= 0.0 then
                      return False;
                   end if;
-                  U := L.Cx + L.Fx * Xc (1) / Xc (3);
-                  V := L.Cy + L.Fy * Xc (2) / Xc (3);
+                  declare
+                     Front : Boolean;
+                  begin
+                     Fit.Project (L, Xc, U, V, Front);
+                  end;
                   return U >= 0.0 and then U < Real (Width) and then V >= 0.0 and then V < Real (Height);
                end Project;
                --  The point of the world a wrist eye's pixel sees, when it is a world's solid's.
                function World_Point (C : FW.Camera; U, V : Real; X : out Vec3; Solid : out Natural) return Boolean is
                   Along : Real;
-                  Px    : constant Real := (U - C.Cx) / C.Fx;
-                  Py    : constant Real := (V - C.Cy) / C.Fy;
+                  Pr    : constant Vec3 := FW.Ray (C, U, V);
+                  Px    : constant Real := Pr (1);
+                  Py    : constant Real := Pr (2);
                   Pn    : constant Real := EF.Sqrt (Px * Px + Py * Py + 1.0);
                begin
                   Fake_Render.Nearest (W, C, U, V, Solid, Along);
@@ -3095,7 +3199,7 @@ begin
                         Y    : Real_Vector (1 .. 9) := [others => 0.0];
                         function Lens_Of (Z : Real_Vector) return Fit.Lens is
                           ((Fx => Lens.Fx * EF.Exp (Z (1)), Fy => Lens.Fy * EF.Exp (Z (1)), Cx => Lens.Cx + Z (2),
-                            Cy => Lens.Cy + Z (3), K1 | K2 => 0.0));
+                            Cy => Lens.Cy + Z (3), K1 => Lens.K1, K2 => Lens.K2));
                         function Pose_Of (Z : Real_Vector) return Rigid is
                           ((Rotation => Times (Pose.Rotation, Driver.Numerics.Exp (Vec3'[Z (4), Z (5), Z (6)])),
                             Translation => [Pose.Translation (1) + Z (7), Pose.Translation (2) + Z (8),
@@ -3122,9 +3226,10 @@ begin
                                     Xc : constant Vec3 :=
                                       Transposed_Times
                                         (P1.Rotation, Driver.Numerics.Minus (Found (M).X, P1.Translation));
-                                    U  : constant Real := L1.Cx + L1.Fx * Xc (1) / Xc (3);
-                                    V  : constant Real := L1.Cy + L1.Fy * Xc (2) / Xc (3);
+                                    U, V  : Real;
+                                    Front : Boolean;
                                  begin
+                                    Fit.Project (L1, Xc, U, V, Front);
                                     R (I + 1) := (U - Found (M).U) / Found (M).Su;
                                     R (I + 2) := (V - Found (M).V) / Found (M).Sv;
                                     I := I + 2;

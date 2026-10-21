@@ -139,6 +139,79 @@ package body Fake_World is
               Translation => Position);
    end Look;
 
+   procedure Project (C : Camera; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+   begin
+      In_Front := P (3) > 0.0;
+      U := 0.0;
+      V := 0.0;
+      if In_Front then
+         declare
+            X  : constant Real := P (1) / P (3);
+            Y  : constant Real := P (2) / P (3);
+            R2 : constant Real := X * X + Y * Y;
+            D  : constant Real := 1.0 + C.K1 * R2 + C.K2 * R2 * R2;
+         begin
+            --  Past where the lens's map of the radius turns back, no light reaches the picture: the map would
+            --  fold the point back inside it.
+            In_Front := 1.0 + 3.0 * C.K1 * R2 + 5.0 * C.K2 * R2 * R2 > 0.0;
+            if In_Front then
+               U := C.Cx + C.Fx * X * D;
+               V := C.Cy + C.Fy * Y * D;
+            end if;
+         end;
+      end if;
+   end Project;
+
+   function Ray (C : Camera; U, V : Real) return Vec3 is
+      Xd : constant Real := (U - C.Cx) / C.Fx;
+      Yd : constant Real := (V - C.Cy) / C.Fy;
+      Rd : constant Real := Sqrt (Xd * Xd + Yd * Yd);
+      R  : Real := Rd;
+   begin
+      if (C.K1 = 0.0 and then C.K2 = 0.0) or else Rd = 0.0 then
+         return [Xd, Yd, 1.0];
+      end if;
+      --  The undistorted radius by Newton's method from the distorted one: the lens's map increases out past the
+      --  picture's corners (Add_Camera draws it so), and each step gains digits.
+      for Step in 1 .. Real'Machine_Mantissa loop
+         declare
+            R2    : constant Real := R * R;
+            Miss  : constant Real := R * (1.0 + C.K1 * R2 + C.K2 * R2 * R2) - Rd;
+            Slope : constant Real := 1.0 + 3.0 * C.K1 * R2 + 5.0 * C.K2 * R2 * R2;
+         begin
+            exit when Miss = 0.0;
+            R := R - Miss / Slope;
+            exit when abs (Miss / Slope) <= Real'Epsilon * R;
+         end;
+      end loop;
+      return [Xd * R / Rd, Yd * R / Rd, 1.0];
+   end Ray;
+
+   --  Whether the lens's map of the radius, r (1 + K1 r^2 + K2 r^4), still increases where it reaches the picture's
+   --  farthest corner (walked out a thousandth of the corner's radius a step): a lens that folds the picture back
+   --  shows one place on two rays.
+   function Increasing (C : Camera) return Boolean is
+      Corner : constant Real :=
+        Sqrt (Real'Max (C.Cx, Real (C.Width) - C.Cx) ** 2 / C.Fx ** 2
+              + Real'Max (C.Cy, Real (C.Height) - C.Cy) ** 2 / C.Fy ** 2);
+      Step   : constant Real := Corner / 1000.0;
+      R      : Real := 0.0;
+   begin
+      while R <= 10.0 * Corner loop
+         declare
+            R2 : constant Real := R * R;
+         begin
+            if 1.0 + 3.0 * C.K1 * R2 + 5.0 * C.K2 * R2 * R2 <= 0.0 then
+               return False;
+            elsif R * (1.0 + C.K1 * R2 + C.K2 * R2 * R2) >= Corner then
+               return True;
+            end if;
+         end;
+         R := R + Step;
+      end loop;
+      return False;
+   end Increasing;
+
    procedure Add_Camera (W : in out World; Name : String; Link_Index, Arm : Natural; Mount : Rigid;
                          Width, Height : Positive; Focal_Share : Real) is
       C      : Camera;
@@ -157,6 +230,24 @@ package body Fake_World is
       C.Fy := C.Fx * Aspect;
       C.Cx := Real (Width) / 2.0 + Dx;
       C.Cy := Real (Height) / 2.0 + Dy;
+      --  The lens's distortion, from draws of its own so that the body and the world draw as they did: barrel or
+      --  pincushion, up to some forty pixels at the corners of the fakes' wide pictures, drawn again until the lens's
+      --  map of the radius increases out past the corners (Increasing), and a pinhole where none of as many draws as
+      --  the float has bits does.
+      declare
+         Lens_Draws : Ada.Numerics.Float_Random.Generator;
+         function Draw (Low, High : Real) return Real is
+           (Low + (High - Low) * Real (Ada.Numerics.Float_Random.Random (Lens_Draws)));
+      begin
+         Ada.Numerics.Float_Random.Reset (Lens_Draws, Integer (W.Seed) * 43 + Natural (W.Cameras.Length) + 1);
+         for Attempt in 1 .. Real'Machine_Mantissa loop
+            C.K1 := Draw (-0.06, 0.06);
+            C.K2 := Draw (-0.01, 0.01);
+            exit when Increasing (C);
+            C.K1 := 0.0;
+            C.K2 := 0.0;
+         end loop;
+      end;
       C.Shown := new Real_Array (1 .. 3 * Width * Height);
       W.Cameras.Append (C);
    end Add_Camera;
@@ -1503,6 +1594,7 @@ package body Fake_World is
          Put ("camera " & To_String (C.Name) & " on "
               & (if C.Link = 0 then "the world" else To_String (W.Links (C.Link).Name)) & ": " & Trim (C.Width) & " x "
               & Trim (C.Height) & ", fx " & Img (C.Fx) & " fy " & Img (C.Fy) & " cx " & Img (C.Cx) & " cy " & Img (C.Cy)
+              & ", k1 " & Img (C.K1) & " k2 " & Img (C.K2)
               & ", mounted at " & V (C.Mount.Translation));
       end loop;
       for O of W.Solids loop

@@ -118,12 +118,8 @@ procedure Driver.Robot.Step2_Bench is
       Cam : FW.Camera renames W.Cameras (C);
       P   : constant Vec3 := Inverse (Cam.Pose) * X;
    begin
-      U := 0.0;
-      V := 0.0;
-      Seen := P (3) > 0.0;
+      FW.Project (Cam, P, U, V, Seen);
       if Seen then
-         U := Cam.Cx + Cam.Fx * P (1) / P (3);
-         V := Cam.Cy + Cam.Fy * P (2) / P (3);
          Seen := U >= 0.0 and then U <= Real (Cam.Width) and then V >= 0.0 and then V <= Real (Cam.Height);
       end if;
    end Land;
@@ -511,7 +507,7 @@ procedure Driver.Robot.Step2_Bench is
                   declare
                      U   : constant Real := Real (K * Grid) + Real (Grid) / 2.0;
                      V   : constant Real := Real (R * Grid) + Real (Grid) / 2.0;
-                     Dc  : constant Vec3 := [(U - C.Cx) / C.Fx, (V - C.Cy) / C.Fy, 1.0];
+                     Dc  : constant Vec3 := FW.Ray (C, U, V);
                      Dw  : constant Vec3 := C.Pose.Rotation * ((1.0 / EF.Sqrt (Dc (1) ** 2 + Dc (2) ** 2 + 1.0)) * Dc);
                      Hit : Real;
                      Ok  : Boolean;
@@ -774,10 +770,13 @@ procedure Driver.Robot.Step2_Bench is
                               declare
                                  T  : constant Rigid := Fit.Eye_At (True_J, Order, Change);
                                  Pk : constant Vec3 := Inverse (T) * (Inverse (Cam0) * Points (X.Track));
-                                 U  : constant Real := W.Cameras (Cam).Cx + W.Cameras (Cam).Fx * Pk (1) / Pk (3);
-                                 V  : constant Real := W.Cameras (Cam).Cy + W.Cameras (Cam).Fy * Pk (2) / Pk (3);
+                                 U, V  : Real;
+                                 Front : Boolean;
                               begin
-                                 D.Append (EF.Sqrt ((X.U - U) ** 2 + (X.V - V) ** 2));
+                                 FW.Project (W.Cameras (Cam), Pk, U, V, Front);
+                                 if Front then
+                                    D.Append (EF.Sqrt ((X.U - U) ** 2 + (X.V - V) ** 2));
+                                 end if;
                               end;
                            end if;
                         end;
@@ -819,7 +818,8 @@ procedure Driver.Robot.Step2_Bench is
                   Put_Line ("    fit lens: focal" & Prev_L.Fx'Image & Prev_L.Fy'Image & " for" & W.Cameras (Cam).Fx'Image
                             & W.Cameras (Cam).Fy'Image & ", aspect" & Real'Image (Prev_L.Fy / Prev_L.Fx) & " for"
                             & Real'Image (W.Cameras (Cam).Fy / W.Cameras (Cam).Fx) & ", distortion" & Prev_L.K1'Image
-                            & Prev_L.K2'Image & (if Prev.Pinhole then ", a pinhole" else ", the extras fitted")
+                            & Prev_L.K2'Image & " for" & W.Cameras (Cam).K1'Image & W.Cameras (Cam).K2'Image
+                            & (if Prev.Pinhole then ", a pinhole" else ", the extras fitted")
                             & "; its focal length" & Real'Image ((Prev_L.Fx - W.Cameras (Cam).Fx) / Prev.Focal_Sigma)
                             & " sigmas off (sigma" & Prev.Focal_Sigma'Image & " px)");
                   --  The fit's joints against the true ones, as far as the fit's free scale lets them be set beside
@@ -1075,8 +1075,7 @@ procedure Driver.Robot.Step2_Bench is
                                              declare
                                                 U   : constant Real := Real (K * Grid) + Real (Grid) / 2.0;
                                                 V   : constant Real := Real (R * Grid) + Real (Grid) / 2.0;
-                                                Dc  : constant Vec3 :=
-                                                  [(U - C_Cam.Cx) / C_Cam.Fx, (V - C_Cam.Cy) / C_Cam.Fy, 1.0];
+                                                Dc  : constant Vec3 := FW.Ray (C_Cam, U, V);
                                                 Dw  : constant Vec3 :=
                                                   Cam_O.Rotation
                                                   * ((1.0 / EF.Sqrt (Dc (1) ** 2 + Dc (2) ** 2 + 1.0)) * Dc);
