@@ -2531,6 +2531,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  put the eye within 0.25 % of the focal length on all five seeds.
       Honest_Lower : Real_Matrix (1 .. G, 1 .. G) := [others => [others => 0.0]];   --  of Fit_Eye's covariance
       Honest_Known : Boolean := False;
+      --  How much less the flows' information is taken than their covariance states: their estimate's misfit against
+      --  the places', where those tell a direction better (Weigh_Flows); one until it says more.
+      Flows_Scale  : Real := 1.0;
       Began        : constant Duration := Driver.Clock.Seconds;   --  for the log: how long the rounds take
       Aligned_At, Fitted_At : Duration := 0.0;   --  and when the round's places were found, and fitted
 
@@ -3154,6 +3157,64 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Free (Jac);
                   end Normal_At;
 
+                  --  How far the flows' estimate (the terms at nought) lies from the eye the fit leaves, in the
+                  --  directions the places tell better than the flows (Split, Lambda one or more), against what the two
+                  --  leave each uncertain (the flows' sigma, one in Dirs' units, and the places', one over Lambda,
+                  --  their misfit per freedom taken). Where the misfit says the flows' covariance states too little,
+                  --  their information is taken at the factor that makes the two agree (Flows_Scale, Honest_Lower
+                  --  widened: M the misfit's squares, L the places' share, N the directions, the factor (M - L) / N)
+                  --  and the directions split again (Rescaled). The flows' estimate of the fake's seed 21 lay 4 % off
+                  --  in its focal length against a sigma of 0.64 % and an arm's centre 18 mm off against 9, and the
+                  --  directions it was left with put that arm's table points 1.66 px off (10-21).
+                  procedure Weigh_Flows (Rescaled : out Boolean) is
+                     R0     : constant Real_Array := Residuals (Y);
+                     Per_Freedom : constant Real :=
+                       Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));
+                     Ata    : Real_Matrix (1 .. G, 1 .. G);
+                     Atb    : Real_Vector (1 .. G);
+                     Dirs   : Real_Matrix (1 .. G, 1 .. G);
+                     Lambda : Real_Vector (1 .. G);
+                     Hy     : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Honest_Lower, Y);
+                     Misfit, Places_Share : Real := 0.0;
+                     Directions : Natural := 0;
+                  begin
+                     Rescaled := False;
+                     Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
+                     Split (Ata, Dirs, Lambda);
+                     for I in 1 .. G loop
+                        if Lambda (I) >= 1.0 then
+                           declare
+                              Along : Real := 0.0;   --  the eye's place along the direction, in the flows' sigmas
+                           begin
+                              for P in 1 .. G loop
+                                 Along := Along + Dirs (P, I) * Hy (P);
+                              end loop;
+                              Misfit := Misfit + Along ** 2;
+                              Places_Share := Places_Share + 1.0 / Lambda (I);
+                              Directions := Directions + 1;
+                           end;
+                        end if;
+                     end loop;
+                     if Directions > 0
+                       and then (Misfit - Places_Share) / Real (Directions)
+                                  > 1.0 + Driver.Conventions.Unchanged_Fraction
+                     then
+                        declare
+                           Factor : constant Real := (Misfit - Places_Share) / Real (Directions);
+                        begin
+                           Flows_Scale := Flows_Scale * Factor;
+                           for P in 1 .. G loop
+                              for Q in 1 .. G loop
+                                 Honest_Lower (P, Q) := Honest_Lower (P, Q) * Sqrt (Factor);
+                              end loop;
+                           end loop;
+                        end;
+                        Rescaled := True;
+                     end if;
+                  end Weigh_Flows;
+
+                  Rescaled : Boolean := False;
+
                   Dropped : Natural;
                   Moved   : Real := 0.0;
                   Scatter : Real := Real'Last;   --  of the kept places from the terms, pixels
@@ -3291,14 +3352,19 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                               Free (R);
                            end;
                         end loop;
-                        exit when Dropped = 0 or else Kept_Count = 0;
+                        if Dropped = 0 and then Kept_Count > 0 then
+                           Weigh_Flows (Rescaled);
+                        end if;
+                        exit when (Dropped = 0 and then not Rescaled) or else Kept_Count = 0;
                      end loop;
                   end if;
                   Kept_All := Kept_Count;
                   Fitted_At := Driver.Clock.Seconds - Began;
                   --  The covariance: in the places' directions the inverse of their normal matrix over their misfit
                   --  per freedom (never below one); in the flows', what the flows' jackknife over their poses leaves
-                  --  (each pose of each arm left out, its shift along the direction weighed by the pixels it holds).
+                  --  (each pose of each arm left out, its shift along the direction weighed by the pixels it holds),
+                  --  times how much less their information is taken (Flows_Scale: what their estimate misses by
+                  --  where the places tell, they are taken to miss by along their own directions too).
                   declare
                      R0    : constant Real_Array := Residuals (Y);
                      Per_Freedom : constant Real :=
@@ -3394,7 +3460,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                     end loop;
                                  end;
                                  if Groups >= 2 then
-                                    Var := Sum / Real (Groups);
+                                    Var := Flows_Scale * Sum / Real (Groups);
                                  else
                                     Definite := False;
                                  end if;
@@ -3540,22 +3606,41 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Spread := Real'Last;
                   end if;
                   declare
+                     --  Of each arm, the places kept and the cells of the picture a patch wide they fall in (how much
+                     --  of the picture they cover).
                      function Per_Arm return String is
-                        Text : Unbounded_String;
+                        Text  : Unbounded_String;
+                        Side  : constant Positive :=
+                          2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));
+                        Cells_U : constant Positive := (Width + Side - 1) / Side;
+                        Cells_V : constant Positive := (Height + Side - 1) / Side;
                      begin
                         for A in 1 .. Count loop
                            declare
-                              C : Natural := 0;
+                              C      : Natural := 0;
+                              Cells  : Natural := 0;
+                              Marked : Flag_Array (1 .. Cells_U * Cells_V) := [others => False];
                            begin
                               for I in 1 .. Got loop
                                  if Kept (I) and then Matches (I).Arm = A then
                                     C := C + 1;
+                                    declare
+                                       Cu : constant Natural := Natural'Min
+                                         (Cells_U - 1, Natural (Real'Floor (Real'Max (0.0, Matches (I).U))) / Side);
+                                       Cv : constant Natural := Natural'Min
+                                         (Cells_V - 1, Natural (Real'Floor (Real'Max (0.0, Matches (I).V))) / Side);
+                                    begin
+                                       if not Marked (Cv * Cells_U + Cu + 1) then
+                                          Marked (Cv * Cells_U + Cu + 1) := True;
+                                          Cells := Cells + 1;
+                                       end if;
+                                    end;
                                  end if;
                               end loop;
-                              Append (Text, (if A > 1 then "," else "") & C'Image);
+                              Append (Text, (if A > 1 then "," else "") & C'Image & " in" & Cells'Image & " cells");
                            end;
                         end loop;
-                        return "per arm" & To_String (Text);
+                        return "per arm" & To_String (Text) & " of" & Natural'Image (Cells_U * Cells_V);
                      end Per_Arm;
                   begin
                   Driver.Log.Line (Driver.Log.Robot, "flow eye: the world's points, round" & Rounds'Image & ":"
@@ -3564,7 +3649,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                    & " px from the eye, aligned at " & Driver.Log.Image (Real (Aligned_At), 1)
                                    & " s, fitted at " & Driver.Log.Image (Real (Fitted_At), 1) & ", done at "
                                    & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ", widened "
-                                   & Driver.Log.Image (Widened, 1) & "; the arms' joints "
+                                   & Driver.Log.Image (Widened, 1) & ", the flows' information taken at 1/"
+                                   & Driver.Log.Image (Flows_Scale, 2) & "; the arms' joints "
                                    & "moved " & Driver.Log.Image (Moved, 2) & " px, spread "
                                    & Driver.Log.Image (Spread, 2) & " px (the flows' directions "
                                    & Driver.Log.Image (Spread_F, 2) & "), focal "

@@ -2641,6 +2641,7 @@ driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (1000.0 * Sqrt (Cov (7, 
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (180.0 / Ada.Numerics.Pi	180.0	format	radians printed as degrees
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "" & Driver.Log.Image (Now.Score, 2)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "" & Driver.Log.Image (Now.Score, 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Flows_Scale, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Lens_Of (Y).Fx, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
@@ -2648,6 +2649,7 @@ driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread, 2) & "");	2	for
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread_F, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & ""	"1	format	the text of a log line
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Widened, 1) & ""	"1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Widened, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	("" & Driver.Log.Image (Result.Spread, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	(3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);	1.0	math	the central difference's bias d^2 / (6 s^2) against its noise over 2 d |g|, balanced: d^3 = 3 s^2 sigma / (sqrt 2 |g|)
@@ -2662,6 +2664,9 @@ driver-robot-kinematics-flow_eye.adb	* Sqrt (Cov (4, 4) + Cov (5, 5) + Cov (6, 6
 driver-robot-kinematics-flow_eye.adb	- (A (J) / Sg (J)) * A_U * (Y_U + B_U + 2.0 * Rho * A_U) / Aa;	2.0	math	the derivative of the variable projection (Golub and Pereyra) in a joint's unit
 driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));	1	structure	a grid of one pixel at the least
 driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (W.Width, W.Height));	2	structure	a patch is twice its half
+driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));	1	structure	a patch of one pixel at least
+driver-robot-kinematics-flow_eye.adb	2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));	2	math	a patch is twice the half patch wide
+driver-robot-kinematics-flow_eye.adb	> 1.0 + Driver.Conventions.Unchanged_Fraction	1.0	statistics	a misfit per direction over one says the flows' covariance states too little (Unchanged_Fraction beyond it: a change too small to act on)
 driver-robot-kinematics-flow_eye.adb	A (T, T) := A (T, T) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	numerics	Marquardt's damping of the diagonal
 driver-robot-kinematics-flow_eye.adb	A, B, E, S : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];	1	structure	an array of at least one element
 driver-robot-kinematics-flow_eye.adb	A, B, Sg : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];	1	structure	an array of at least one element
@@ -2671,7 +2676,7 @@ driver-robot-kinematics-flow_eye.adb	A2 := Real'Max (1.0, (if Sss > 0.0 then Se_
 driver-robot-kinematics-flow_eye.adb	A2 := Real'Max (1.0, (if Sss > 0.0 then Se_S / Sss else 1.0));	1.0	statistics	the stated sigma's share held at one: the pictures' noise is at least what they state
 driver-robot-kinematics-flow_eye.adb	Additive : Real := 1.0;	1.0	statistics	the sigmas the pictures state, before the error model is regressed
 driver-robot-kinematics-flow_eye.adb	Agreeing : constant := 2;	2	statistics	two starts ending at one optimum make it found (as the points' search, Hand_Eye)
-driver-robot-kinematics-flow_eye.adb	Append (Text, (if A > 1 then "" else "") & C'Image);	1	structure	a separator before every arm but the first
+driver-robot-kinematics-flow_eye.adb	Append (Text, (if A > 1 then "" else "") & C'Image & "" & Cells'Image & "");	1	structure	the first arm's count without a separator before it
 driver-robot-kinematics-flow_eye.adb	Arm : Positive := 1;	1	structure	placeholder, set before use
 driver-robot-kinematics-flow_eye.adb	Arm : Positive := 1;	1	structure	placeholder, set before use
 driver-robot-kinematics-flow_eye.adb	Arm, Picture : Positive := 1;	1	structure	placeholder, set before use
@@ -2733,6 +2738,7 @@ driver-robot-kinematics-flow_eye.adb	Every (1, L.Pixels_All);	1	structure	the po
 driver-robot-kinematics-flow_eye.adb	Every (1, Rotations);	1	structure	the pool's work from its first item
 driver-robot-kinematics-flow_eye.adb	F0 : constant Real := F (0.0);	0.0	structure	the line search begins a sigma either side of where the eye stands
 driver-robot-kinematics-flow_eye.adb	Finalists : constant := 2 * Agreeing;	2	structure	the finalists are twice the starts that must agree (as the points' search, Hand_Eye)
+driver-robot-kinematics-flow_eye.adb	Flows_Scale : Real := 1.0;	1.0	structure	the flows' information as their covariance states it, until their misfit against the places says less
 driver-robot-kinematics-flow_eye.adb	Fm : constant Real := F (-1.0);	1.0	structure	the line search begins a sigma either side of where the eye stands
 driver-robot-kinematics-flow_eye.adb	Fp : constant Real := F (1.0);	1.0	structure	the line search begins a sigma either side of where the eye stands
 driver-robot-kinematics-flow_eye.adb	Golden : constant Real := (3.0 - Sqrt (5.0)) / 2.0;	2.0	math	the golden section's smaller share, three less the root of five over two (Brent's method)
@@ -2790,6 +2796,7 @@ driver-robot-kinematics-flow_eye.adb	P.Twists := new Twist_Grid (Poses'Range, 1 
 driver-robot-kinematics-flow_eye.adb	Patch : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));	1	structure	a patch at least a pixel wide
 driver-robot-kinematics-flow_eye.adb	Patch : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));	2	math	a patch is twice its half
 driver-robot-kinematics-flow_eye.adb	Picture : Positive := 1;	1	structure	placeholder, set before use
+driver-robot-kinematics-flow_eye.adb	Places_Share := Places_Share + 1.0 / Lambda (I);	1.0	statistics	the places' variance along a direction of one flows' sigma: the inverse of their information there
 driver-robot-kinematics-flow_eye.adb	Poses0 (A).Translation (2) + Z (Offset (A) + 5),	5	structure	the lens's three terms, then an arm's six: its turn's three, its centre's three
 driver-robot-kinematics-flow_eye.adb	Poses0 (A).Translation (3) + Z (Offset (A) + 6)]));	6	structure	the lens's three terms, then an arm's six: its turn's three, its centre's three
 driver-robot-kinematics-flow_eye.adb	Positive (Real'Floor (Ada.Numerics.Long_Elementary_Functions.Log (Real'Last) / 2.0 / Half_Octave));	2.0	numerics	as far as a float's exponent reaches, in half octaves either way
@@ -2802,7 +2809,9 @@ driver-robot-kinematics-flow_eye.adb	R : Real_Array (1 .. 2 * Natural'Max (1, Ke
 driver-robot-kinematics-flow_eye.adb	Ray : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);	1.0	math	the line of sight on the plane one unit ahead
 driver-robot-kinematics-flow_eye.adb	Ray : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);	1.0	math	the line of sight on the plane one unit ahead
 driver-robot-kinematics-flow_eye.adb	Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));	1	structure	an array of at least one element
+driver-robot-kinematics-flow_eye.adb	Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));	1	structure	one freedom at least
 driver-robot-kinematics-flow_eye.adb	Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));	1.0	statistics	the misfit per freedom, never below the places' own sigmas
+driver-robot-kinematics-flow_eye.adb	Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));	1.0	statistics	the places' misfit per freedom, never below one, as the covariance takes it
 driver-robot-kinematics-flow_eye.adb	Result (X) := Exp (-Real (X * X) / (2.0 * Smooth_Sigma * Smooth_Sigma));	2.0	math	the Gaussian's exponent
 driver-robot-kinematics-flow_eye.adb	Result.Rate (I, J) := (if Step /= 0.0 then D / (2.0 * Step) else 0.0);	2.0	math	a central difference over a turn either way
 driver-robot-kinematics-flow_eye.adb	Result.Sigma (I, J) := (if Step /= 0.0 then Sigma_C / (2.0 * abs Step) else Real'Last);	2.0	math	a central difference over a turn either way
@@ -2903,6 +2912,7 @@ driver-robot-kinematics-flow_eye.adb	if Groups >= 2 then	2	statistics	a spread n
 driver-robot-kinematics-flow_eye.adb	if Groups >= 2 then	2	statistics	a spread needs two groups
 driver-robot-kinematics-flow_eye.adb	if Lambda (I) < 1.0 then	1.0	statistics	the places tell a direction better than the flows where their information passes the flows' (one: the flows' own)
 driver-robot-kinematics-flow_eye.adb	if Lambda (I) < 1.0 then	1.0	statistics	the places tell a direction better than the flows where their information passes the flows' (one: the flows' own)
+driver-robot-kinematics-flow_eye.adb	if Lambda (I) >= 1.0 then	1.0	statistics	the places tell a direction better than the flows where their information passes the flows' (one: the flows' own)
 driver-robot-kinematics-flow_eye.adb	if Lambda (I) >= 1.0 then	1.0	statistics	the places tell a direction better than the flows where their information passes the flows' (one: the flows' own)
 driver-robot-kinematics-flow_eye.adb	if Lambda (I) >= 1.0 then	1.0	statistics	the places tell a direction better than the flows where their information passes the flows' (one: the flows' own)
 driver-robot-kinematics-flow_eye.adb	if P.Poses (V).Link (I) >= 2 then	2	math	one joint's rate fixes the depth and tells nothing: two or more
