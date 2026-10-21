@@ -294,6 +294,141 @@ package body Driver.Robot.Kinematics.Fit is
      (Driver.Conventions.Z * Sqrt (Tilt_1 + Tilt_2) < Ada.Numerics.Pi / 2.0
       and then Driver.Uncertain.Significant (C, Sqrt (Scale_Variance)));
 
+   --  What the pinhole's cost says of a lens's aspect and distortion beyond the fit's covariance (L, R: the fit with
+   --  them, of the joints Joints; Rise: the pinhole's robust cost over every sighting above the fit's, at one error
+   --  model). The covariance puts the pinhole (the extras nought: the aspect's logarithm, the second focal length's
+   --  less the first's, and the two distortion terms) a chi square of X' C^-1 X from the fit, C their covariance; the
+   --  sightings put it at twice the rise. Where the covariance's is the larger, the fit's variance along the direction
+   --  from it to the pinhole is widened to what the sightings say (the focal length's profile's rule: a step whose cost
+   --  rose by C says the step over the root of 2 C, no less than the step where C stays under a sigma's half), every
+   --  term carrying its share by its regression on that direction, and the fit is judged again as Refine_Tracks judges
+   --  it: each focal length and each reading scale significant, each axis within its cone. A drone's eye (its one turn
+   --  about the upright all that tells its lens) was fitted at 213 by 71 px for 163 by 163, the pinhole at 162 costing
+   --  3.3 more over 5271 sightings where the covariance put it hundreds of chi squares away, its joints 85 chi squares
+   --  over 9 off the truth (the bench's drone 3:1, 10-21); a table arm's (aspect 0.9973) costs 2 to 6 more, as its
+   --  covariance says.
+   procedure Weigh_Extras (L : Lens; R : in out Fit_Report; Joints : Joint_Array; Rise : Real) is
+      N       : constant Natural := Joints'Length;
+      Reduced : constant Natural := Terms (N);
+   begin
+      if Natural (R.Covariance.Length) /= Reduced * Reduced then
+         return;
+      end if;
+      declare
+         function V (P, Q : Positive) return Real is
+           (R.Covariance (R.Covariance.First_Index + (P - 1) * Reduced + Q - 1));
+         X : constant Real_Vector (1 .. 3) := [Ln (L.Fy / L.Fx), L.K1, L.K2];
+         --  Each extra as the reduced terms make it: the second focal length's logarithm less the first's, and the
+         --  two distortion terms.
+         E : array (1 .. 3) of Real_Vector (1 .. Reduced) := [others => [others => 0.0]];
+         C, Lf : Real_Matrix (1 .. 3, 1 .. 3);
+         Pd : Boolean;
+      begin
+         E (1) (Lens_Term'Pos (Log_Fx) + 1) := -1.0;
+         E (1) (Lens_Term'Pos (Log_Fy) + 1) := 1.0;
+         E (2) (Lens_Term'Pos (Radial_1) + 1) := 1.0;
+         E (3) (Lens_Term'Pos (Radial_2) + 1) := 1.0;
+         for A in 1 .. 3 loop
+            for B in 1 .. 3 loop
+               C (A, B) := 0.0;
+               for P in 1 .. Lens_Terms loop
+                  for Q in 1 .. Lens_Terms loop
+                     C (A, B) := C (A, B) + E (A) (P) * V (P, Q) * E (B) (Q);
+                  end loop;
+               end loop;
+            end loop;
+         end loop;
+         Driver.Numerics.Dense.Cholesky (C, Lf, Pd);
+         if not Pd then
+            return;
+         end if;
+         declare
+            Y      : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, X);
+            Chi    : Real := 0.0;
+            Said   : constant Real := Real'Max (2.0 * Rise, 1.0);   --  the chi square the sightings put it at
+            W      : Real_Vector (1 .. Reduced) := [others => 0.0];
+            S      : Real_Vector (1 .. Reduced) := [others => 0.0];
+         begin
+            for A in 1 .. 3 loop
+               Chi := Chi + X (A) * Y (A);
+            end loop;
+            if Chi <= Said then
+               return;
+            end if;
+            --  A covariance that puts the pinhole more than Z of its sigmas further than the sightings do is no
+            --  account of the fit at all: the lens with them is not told, the pinhole taken (the bench's drone 3:1,
+            --  10-21: widened to the sightings' word its focal length's sigma came to 46 px and its joints' tilts to
+            --  18 to 26 degrees, yet one combination of them stayed 6 sigmas off, 61 chi squares over 9).
+            if Chi > Driver.Conventions.Z ** 2 * Said then
+               R.Determined := False;
+               R.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                 ("the pinhole costs " & Driver.Log.Image (Rise, 2) & " more where the lens's covariance put it a chi"
+                  & " square of " & Driver.Log.Image (Chi, 1) & " from its extras: their covariance is no account of them");
+               Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (R.Why));
+               return;
+            end if;
+            --  The direction from the fit to the pinhole in the terms' distance: lambda = Y . extras / Chi, one at the
+            --  fit, nought at the pinhole, its variance 1 / Chi; widened to 1 / Said.
+            for A in 1 .. 3 loop
+               for P in 1 .. Reduced loop
+                  W (P) := W (P) + Y (A) / Chi * E (A) (P);
+               end loop;
+            end loop;
+            for P in 1 .. Reduced loop
+               for Q in 1 .. Reduced loop
+                  S (P) := S (P) + V (P, Q) * W (Q);
+               end loop;
+            end loop;
+            declare
+               Var  : constant Real := 1.0 / Chi;
+               Gain : constant Real := (1.0 / Said - Var) / Var ** 2;
+            begin
+               for P in 1 .. Reduced loop
+                  for Q in 1 .. Reduced loop
+                     R.Covariance.Replace_Element
+                       (R.Covariance.First_Index + (P - 1) * Reduced + Q - 1, V (P, Q) + Gain * S (P) * S (Q));
+                  end loop;
+               end loop;
+            end;
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: the pinhole costs " & Driver.Log.Image (Rise, 2)
+                             & " more where the covariance put it a chi square of " & Driver.Log.Image (Chi, 1)
+                             & " from the lens's extras (aspect " & Driver.Log.Image (L.Fy / L.Fx, 4)
+                             & "): their sigma widened by " & Driver.Log.Image (Sqrt (Chi / Said), 2));
+            --  Judged again on the widened covariance.
+            R.Focal_Sigma := L.Fx * Sqrt (V (1, 1));
+            if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (V (1, 1)))
+              or else not Driver.Uncertain.Significant (L.Fy, L.Fy * Sqrt (V (2, 2)))
+            then
+               R.Determined := False;
+               R.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                 ("the sightings leave the focal lengths undetermined once the pinhole's cost widens the lens's"
+                  & " extras: "
+                  & Real'Image (L.Fx) & " +-" & Real'Image (L.Fx * Sqrt (V (1, 1))) & " and " & Real'Image (L.Fy)
+                  & " +-" & Real'Image (L.Fy * Sqrt (V (2, 2))) & " px");
+               return;
+            end if;
+            for J in 1 .. N loop
+               declare
+                  O : constant Natural := Lens_Terms + Joint_Terms * (J - 1);
+               begin
+                  if not Joint_Determined
+                    (V (O + Joint_Term'Pos (Tilt_1) + 1, O + Joint_Term'Pos (Tilt_1) + 1),
+                     V (O + Joint_Term'Pos (Tilt_2) + 1, O + Joint_Term'Pos (Tilt_2) + 1),
+                     V (O + Joint_Term'Pos (Scale) + 1, O + Joint_Term'Pos (Scale) + 1),
+                     Joints (Joints'First + J - 1).C)
+                  then
+                     R.Determined := False;
+                     R.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                       ("the sightings leave joint" & J'Image & " undetermined once the pinhole's cost widens the"
+                        & " lens's extras");
+                     return;
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+   end Weigh_Extras;
+
    function Median_Error (Median : Real; Count : Positive) return Real is
       Q     : constant Real := Upper_Quartile;
       Sigma : constant Real := Median / Q;
@@ -2717,13 +2852,13 @@ package body Driver.Robot.Kinematics.Fit is
 
          --  Stage 5: the tracks.
          Enter (5);
-         --  The lens's aspect and distortion are kept whenever the fit with them is determined; the pinhole (square
-         --  pixels, no distortion) only where the sightings do not tell them, refined from the same start. A held
-         --  aspect is in no covariance: kept only where significant together with the distortion by the fit's
-         --  covariance, the pinhole held the bench's arm 1:2 (its eye's aspect 0.9973) square in four draws of six,
-         --  its joints' tilts and units 19 to 44 chi squares over 18 off the truth against their covariance (12 to 24
-         --  kept), and a drone's eye's focal length 2.7 of its sigmas off at a sigma of 0.21 px (1.0 of 13.9 kept)
-         --  (10-21).
+         --  The lens's aspect and distortion are kept whenever the fit with them is determined and its covariance is an
+         --  account of them (Weigh_Extras, against the pinhole fitted beside them); the pinhole (square pixels, no
+         --  distortion) only where the sightings do not tell them. A held aspect is in no covariance: kept only where
+         --  significant together with the distortion by the fit's covariance, the pinhole held the bench's arm 1:2 (its
+         --  eye's aspect 0.9973) square in four draws of six, its joints' tilts and units 19 to 44 chi squares over 18
+         --  off the truth against their covariance (12 to 24 kept), and a drone's eye's focal length 2.7 of its sigmas
+         --  off at a sigma of 0.21 px (1.0 of 13.9 kept) (10-21).
          --  One axis of turn (a drone's, a wheeled base's carrying its eye over the floor) tells
          --  the focal length, the distortion and the turn's scale only along a valley, and the pixels' aspect not at all
          --  where the eye looks level: free, they left the bench's drones and mast eyes undetermined, 5 of 6 and 2 of 3,
@@ -2734,12 +2869,37 @@ package body Driver.Robot.Kinematics.Fit is
             Report_P : Fit_Report := Report;
          begin
             Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
-            if not Report.Determined then
-               --  The pinhole nearest the lens with them, refined from its joints: begun from the stage before, a
-               --  wheeled base's head (bench seed 1, 10-20) went from 166 px to 25 (the truth 171) in 18 passes while
-               --  the lens with them stayed at 166, and was fitted there.
-               Joints_P := Joints;
-               L_P := (Fx | Fy => Sqrt (L.Fx * L.Fy), Cx => L.Cx, Cy => L.Cy, others => 0.0);
+            --  The pinhole nearest the lens with them, refined from its joints (begun from the stage before, a wheeled
+            --  base's head, bench seed 1 10-20, went from 166 px to 25, the truth 171, in 18 passes while the lens
+            --  with them stayed at 166), and judged at the lens's error model: the lens with them holds it as its own
+            --  special case. Its cost is all that is asked of it here, its covariance only where it is taken.
+            Joints_P := Joints;
+            L_P := (Fx | Fy => Sqrt (L.Fx * L.Fy), Cx => L.Cx, Cy => L.Cy, others => 0.0);
+            Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Spread => False,
+                           Pinhole => True, Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+            --  Where the pinhole's sightings cost less, the lens with them lies in a worse basin than its special
+            --  case (the bench's drone 1:1, 10-21: at 118.7 by 151.0 px, its cost 2000 above the pinhole's at 170.7
+            --  px, the truth 171.4): it is refitted from the pinhole's.
+            if Report.All_Count > 0 and then Report_P.All_Count > 0 and then Report_P.Cost_Judged < Report.Cost_Judged
+            then
+               declare
+                  Joints_E : Joint_Array := Joints_P;
+                  L_E      : Lens := L_P;
+                  Report_E : Fit_Report := Report;
+               begin
+                  Refine_Tracks (Changes, Sight, Joints_E, Order, L_E, Report_E, Focal_Within,
+                                 Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                  if Report_E.All_Count > 0 and then Report_E.Cost_Judged < Report.Cost_Judged then
+                     Joints := Joints_E;
+                     L := L_E;
+                     Report := Report_E;
+                  end if;
+               end;
+            end if;
+            if Report.Determined and then Report_P.All_Count > 0 then
+               Weigh_Extras (L, Report, Joints, Report_P.Cost_Judged - Report.Cost_Judged);
+            end if;
+            if not Report.Determined and then Report_P.All_Count > 0 then
                Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True);
                if Report_P.All_Count > 0 then
                   Joints := Joints_P;
