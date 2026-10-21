@@ -2402,11 +2402,14 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Fixed_Pyramid : constant Driver.Alignment.Pyramid := Driver.Alignment.Pyramid_Of (Width, Height, Fixed);
 
       --  A point of the world an arm's eye showed: the arm, its picture, the pixel there, the point the pixel's line of
-      --  sight meets the arm's table at and the points the next pixels across and down meet it at.
+      --  sight meets the arm's table at, and the points its eight neighbours' lines of sight meet it at (Around (I, J)
+      --  the pixel I across and J down from it, Around (0, 0) the point itself), for the warp to second order.
+      type Neighbours is array (-1 .. 1, -1 .. 1) of Vec3;
       type Sight is record
          Arm, Picture : Positive := 1;
          U0, V0       : Real := 0.0;
-         X, Xu, Xv    : Vec3 := [0.0, 0.0, 0.0];
+         X            : Vec3 := [0.0, 0.0, 0.0];
+         Around       : Neighbours := [others => [others => [0.0, 0.0, 0.0]]];
       end record;
       type Sight_Array is array (Positive range <>) of Sight;
       type Sight_Access is access Sight_Array;
@@ -2976,17 +2979,21 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                  declare
                                     U0 : constant Real := Real (Gu) + 0.5;
                                     V0 : constant Real := Real (Gv) + 0.5;
-                                    X, Xu, Xv : Vec3;
+                                    Around : Neighbours;
+                                    All_On : Boolean := True;
                                  begin
-                                    if World_At (W, U0, V0) and then World_At (W, U0 + 1.0, V0)
-                                      and then World_At (W, U0, V0 + 1.0)
-                                      and then On_Table (W, World.Lens, World.Table, U0, V0, X)
-                                      and then On_Table (W, World.Lens, World.Table, U0 + 1.0, V0, Xu)
-                                      and then On_Table (W, World.Lens, World.Table, U0, V0 + 1.0, Xv)
-                                    then
+                                    for I in -1 .. 1 loop
+                                       for J in -1 .. 1 loop
+                                          All_On := All_On
+                                            and then World_At (W, U0 + Real (I), V0 + Real (J))
+                                            and then On_Table (W, World.Lens, World.Table, U0 + Real (I), V0 + Real (J),
+                                                               Around (I, J));
+                                       end loop;
+                                    end loop;
+                                    if All_On then
                                        Found := Found + 1;
                                        Sights (Found) := (Arm => A, Picture => Placed, U0 => U0, V0 => V0,
-                                                          X => X, Xu => Xu, Xv => Xv);
+                                                          X => Around (0, 0), Around => Around);
                                     end if;
                                  end;
                                  Gv := Gv + Grid;
@@ -3091,20 +3098,39 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                Slots : Slot_Access := new Slot_Array (Sights'Range);
                procedure One (I : Positive) is
                   S : Sight renames Sights (I);
-                  Tu, Tv, Uu, Uv, Vu, Vv : Real;
+                  --  Where the eye puts the pixel and its neighbours (the pixel I across and J down from it)
+                  Pu, Pv : array (-1 .. 1, -1 .. 1) of Real;
+                  Seen_All : Boolean := True;
                begin
-                  if Seen (Y, S.Arm, S.X, Tu, Tv) and then Seen (Y, S.Arm, S.Xu, Uu, Uv)
-                    and then Seen (Y, S.Arm, S.Xv, Vu, Vv)
-                  then
+                  for I in -1 .. 1 loop
+                     for J in -1 .. 1 loop
+                        Seen_All := Seen_All and then Seen (Y, S.Arm, S.Around (I, J), Pu (I, J), Pv (I, J));
+                     end loop;
+                  end loop;
+                  if Seen_All then
                      declare
+                        --  The warp to second order about the pixel, from its neighbours' places: its linear
+                        --  part by central differences, its bend by the second ones (Driver.Alignment.Bend_Part).
+                        --  With the linear part by the differences forward alone and no bend, the aligner's places
+                        --  at the true eye's prediction erred with the warp's curvature (their correlation 0.08 to
+                        --  0.42, the fake's seeds 20 to 24) and robustly by 0.12 to 0.17 px; so asked, by 0.07 to
+                        --  0.11, the correlation gone (10-21).
                         Query : constant Driver.Alignment.Prediction :=
                           (From   => (U => S.U0, V => S.V0),
-                           To     => (U => Tu, V => Tv),
-                           Linear => (UU => Uu - Tu, UV => Vu - Tu, VU => Uv - Tv, VV => Vv - Tv),
+                           To     => (U => Pu (0, 0), V => Pv (0, 0)),
+                           Linear => (UU => (Pu (1, 0) - Pu (-1, 0)) / 2.0, UV => (Pu (0, 1) - Pu (0, -1)) / 2.0,
+                                      VU => (Pv (1, 0) - Pv (-1, 0)) / 2.0, VV => (Pv (0, 1) - Pv (0, -1)) / 2.0),
                            Cov    => (UU => Window ** 2, UV => 0.0, VV => Window ** 2),
                            Linear_Sigma => Real'Last);
+                        Bend : constant Driver.Alignment.Bend_Part :=
+                          (U_II => (Pu (1, 0) + Pu (-1, 0) - 2.0 * Pu (0, 0)) / 2.0,
+                           U_IJ => (Pu (1, 1) - Pu (1, -1) - Pu (-1, 1) + Pu (-1, -1)) / 4.0,
+                           U_JJ => (Pu (0, 1) + Pu (0, -1) - 2.0 * Pu (0, 0)) / 2.0,
+                           V_II => (Pv (1, 0) + Pv (-1, 0) - 2.0 * Pv (0, 0)) / 2.0,
+                           V_IJ => (Pv (1, 1) - Pv (1, -1) - Pv (-1, 1) + Pv (-1, -1)) / 4.0,
+                           V_JJ => (Pv (0, 1) + Pv (0, -1) - 2.0 * Pv (0, 0)) / 2.0);
                         Answer : constant Driver.Alignment.Answer :=
-                          Driver.Alignment.Align_At_Scale (Pyramids (S.Picture), Fixed_Pyramid, Query);
+                          Driver.Alignment.Align_At_Scale (Pyramids (S.Picture), Fixed_Pyramid, Query, Bend => Bend);
                         use type Driver.Alignment.Verdict;
                      begin
                         if Answer.Verdict = Driver.Alignment.Found and then Answer.Narrow

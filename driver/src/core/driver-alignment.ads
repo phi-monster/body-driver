@@ -116,6 +116,19 @@ package Driver.Alignment is
 
    Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);
 
+   --  What the second picture's warp bends by beyond its linear part, known from the scene and held, not fitted: the
+   --  place an offset (I, J) of the first picture's patch lands at moves by U_II I^2 + U_IJ I J + U_JJ J^2 across and
+   --  by the V's down, in the second picture's pixels per the first's squared. A plane seen at a slant bends every
+   --  patch of it the same way, and fitted as linear the bend's mean over the patch moves the place found: the fake's
+   --  fixed eyes' places of a table their arms' eyes saw erred along it by 1.7 to 2.5 times the bend's mean over a
+   --  patch (their correlation 0.08 to 0.42), and given it their robust error fell from 0.12-0.17 px to 0.07-0.11
+   --  (10-21).
+   type Bend_Part is record
+      U_II, U_IJ, U_JJ, V_II, V_IJ, V_JJ : Real := 0.0;
+   end record;
+
+   No_Bend : constant Bend_Part := (others => 0.0);
+
    type Place_Covariance is record
       UU, UV, VV : Real := 0.0;
    end record;
@@ -176,18 +189,21 @@ package Driver.Alignment is
 
    Not_Asked_Answer : constant Answer := (Verdict => Not_Found, Because => Not_Asked, others => <>);
 
-   function Align (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer
+   function Align
+     (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True; Bend : Bend_Part := No_Bend) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
    --  Widen: a point the usual patch cannot decide may be tried with one twice as wide (four times the
    --  pixels); the caller allows that only while it has nothing else to stand on (Keyframes: no field yet).
    --  R1 on the Pi: the wide retries found one point in twelve and were most of the aligner's time.
+   --  Bend: the warp's bend beyond Query's linear part, at the full sizes (Bend_Part); none, the warp linear.
 
    function From_Level (P : Pyramid; Level : Natural) return Pyramid
      with Pre => Level < Levels (P);
    --  The picture at that level as a pyramid of its own, its sizes from that level down: a place at the level is the
    --  full size's over Halving ** Level (corner-origin coordinates scale with the pixels).
 
-   function Align_At_Scale (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True) return Answer
+   function Align_At_Scale
+     (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True; Bend : Bend_Part := No_Bend) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
    --  As Align, where the two pictures may show the place at very different scales (two eyes of different lenses, or
    --  one eye near and far): the finer picture is compared at the size of it that is as fine as the other's full size
