@@ -83,8 +83,7 @@ with Driver.Numerics;
 package Driver.Robot.Kinematics.Fit is
 
    package Real_Lists is new Ada.Containers.Vectors (Positive, Real);
-
-
+   package Joint_Lists is new Ada.Containers.Vectors (Positive, Positive);
 
    type Lens is record
       Fx, Fy, Cx, Cy : Real := 0.0;   --  focal lengths and principal point, pixels
@@ -105,6 +104,8 @@ package Driver.Robot.Kinematics.Fit is
    end record;
 
    type Joint_Array is array (Positive range <>) of Joint;
+
+   type Vec3_Array is array (Positive range <>) of Vec3;
    --  An arm's joints in the order of their readings.
 
    type Chain_Order is array (Positive range <>) of Positive;
@@ -124,7 +125,8 @@ package Driver.Robot.Kinematics.Fit is
    --  joint its Joint_Terms: the tilt of its axis along the two directions
    --  across it (Across), the point on it nearest the reference eye moved
    --  along the same two, and its reading scale.
-   Lens_Terms : constant := 6;
+   type Lens_Term is (Log_Fx, Log_Fy, Centre_X, Centre_Y, Radial_1, Radial_2);
+   Lens_Terms : constant := Lens_Term'Pos (Lens_Term'Last) + 1;
    type Joint_Term is (Tilt_1, Tilt_2, Point_1, Point_2, Scale);
    Joint_Terms : constant := Joint_Term'Pos (Joint_Term'Last) + 1;
    function Moves_The_Fit (Decrease : Real) return Boolean is
@@ -138,16 +140,25 @@ package Driver.Robot.Kinematics.Fit is
    --  axes the data barely determine (the focal length against the distortion),
    --  for the cost they carry is far below any fraction of it.
 
-   function Scale_Of (Floor, Own : Real) return Real;
-   --  The scale a residual of a sighting is judged at: what the model leaves of any sighting (Floor) and what the
-   --  matcher states of this one's place (Own, a sighting's own), as variances. Never zero.
+   type Error_Model is record
+      Floor : Real := 0.0;   --  what the model leaves of any sighting, in pixels
+      Gain  : Real := 1.0;   --  how much of what the matcher states of a sighting's place its residual bears out
+   end record;
+   --  How far a sighting's residual lies, as the residuals show it: a floor common to every sighting, and the gain
+   --  times what the matcher states of the sighting (a sighting's own standard deviation), as variances.
 
-   function Floor_Of (R, Own : Real_Array) return Real
+   function Scale_Of (Model : Error_Model; Own : Real) return Real;
+   --  The scale a residual of a sighting stating Own is judged at: Model's floor and its gain times Own, as variances.
+   --  Never zero. Read from the residuals of thousands of sightings, it is judged as known (at Z).
+
+   function Model_Of (R, Own : Real_Array) return Error_Model
      with Pre => R'Length = Own'Length;
-   --  The floor of the scales the residuals R are judged at beside the standard deviations Own their sightings
-   --  state (one per residual): the one at which the median of a residual over its scale is the Gaussian's, so a
-   --  residual of the size typical of its sighting is typical. With none stated it is the noise the residuals show
-   --  (the robust scale about zero); zero when what the sightings state accounts for the residuals by itself.
+   --  The floor and the gain read from the residuals R beside the standard deviations Own their sightings state (one
+   --  per residual): those at which the median of a residual over its scale is the Gaussian's, over all of them and
+   --  over the half that states the more, so a residual is as typical of its scale whatever its sighting states. With
+   --  none stated the floor is the noise the residuals show (the robust scale about zero) and the gain one; a floor of
+   --  zero when what the sightings state accounts for the residuals by itself, a gain of zero when it accounts for
+   --  nothing the floor does not.
 
    function Terms (Joints : Natural) return Natural is (Lens_Terms + Joint_Terms * Joints);
    function Term_Of (Joint : Positive; T : Joint_Term) return Positive is
@@ -181,6 +192,42 @@ package Driver.Robot.Kinematics.Fit is
    --  Place are Real'Last on the diagonal when the covariance is not the
    --  fit's of these joints.
 
+   procedure Move_Term (J : in out Joint_Array; L : in out Lens; Term : Positive; By : Real)
+     with Pre => Term <= Terms (J'Length);
+   --  The fit's term Term, in its covariance's order (the lens's Lens_Terms, then each joint's Joint_Terms), moved by
+   --  By: the logarithm of a focal length, the principal point or a distortion term of L, or a joint's tilt along the
+   --  two directions across its axis (Across), its point moved along them, or its reading scale.
+
+   function Step_Covariance
+     (Joints     : Joint_Array;
+      Chain      : Chain_Order;
+      From, To   : Real_Array;
+      Covariance : Real_Lists.Vector) return Mat3
+     with Pre => From'Length = Joints'Length and then To'Length = Joints'Length
+                 and then Chain'Length = Joints'Length;
+   --  What the fit's uncertainty leaves the eye's displacement from readings Q0 + From to Q0 + To uncertain by (the
+   --  difference of Eye_At's places), from the joints' parameters, each moved by its standard deviation either way:
+   --  one fit's errors move both ends, and a step short beside where the eye stands is known far better than either
+   --  end. Real'Last on the diagonal when the covariance is not the fit's of these joints.
+
+   function Place_Covariance_In_Unit
+     (Joints       : Joint_Array;
+      Chain        : Chain_Order;
+      Change       : Real_Array;
+      Unit_Changes : Driver.Numerics.Arrays.Real_Matrix;
+      Covariance   : Real_Lists.Vector) return Mat3
+     with Pre => Change'Length = Joints'Length and then Chain'Length = Joints'Length
+                 and then Unit_Changes'Length (2) = Joints'Length;
+   --  The covariance of the eye's place at readings Q0 + Change (Eye_At) in the arm's own unit, the root mean
+   --  square of the eye's positions over the unit's keyframes (Unit_Changes, one a row, as Unit_Sigma has them):
+   --  each joint term is moved by its standard deviation either way and the place is taken over the unit the moved
+   --  joints make, times the unit the fit's joints make. What the fit leaves uncertain of the arm's lengths against
+   --  its depths moves every place with the unit, the farther from the reference the more, and every length the
+   --  hand compares (a tip's distance, a press's hit, the eye's room above the table) is in that unit: in it, that
+   --  part is none (a18 on 10-16, a14's body: the eye 6.5 units below the reference, its place uncertain by 0.82
+   --  units by Pose_Covariance, 12 per cent, where the truth puts the arm's tool within 0.16 mm, a seventieth of a
+   --  unit, once its scale is taken out). Real'Last on the diagonal as Pose_Covariance.
+
    --  A point the reference keyframe shows at (U0, V0), seen again at (U, V)
    --  in keyframe Frame (2 or more; the reference is 1).
    type Sighting is record
@@ -196,6 +243,14 @@ package Driver.Robot.Kinematics.Fit is
       --  How many degrees of freedom that standard deviation rests on (the matcher estimated it from so many other
       --  fits of the point): a residual over it follows Student's t with that many, not the Gaussian; zero when it is
       --  known.
+      Off_U, Off_V : Real := 0.0;
+      --  How far the joints its keyframe did not ask moved the point, in pixels: where they stand off the reference
+      --  (a servo's landing within its dead band, its sag under a load that changed) times how far the point moves
+      --  per unit of each (first order). The stages that fit one joint at a time take the point at U - Off_U,
+      --  V - Off_V, where the keyframe's own joint alone would have put it.
+      Off_Told : Boolean := True;
+      --  Every such joint's motion of the point per unit is told; when not, the one-joint stages leave the sighting
+      --  out.
    end record;
 
    type Sighting_Array is array (Positive range <>) of Sighting;
@@ -221,8 +276,33 @@ package Driver.Robot.Kinematics.Fit is
       Why        : Ada.Strings.Unbounded.Unbounded_String;
       Used       : Natural := 0;       --  sightings in the last fit
       Median_Px  : Real := 0.0;        --  their median Sampson residual
-      Sigma_Px   : Real := 0.0;        --  the noise measured from them
+      All_Median_Px : Real := 0.0;     --  the median residual over every sighting given, inlier or not: comparable
+                                       --  between two fits of the same sightings that keep different inliers
+      All_Count  : Natural := 0;       --  the sightings that median is over
+      Cost_Judged : Real := 0.0;
+      --  The robust cost (Huber at Z, no residual counting more than one at Z) of every sighting's residuals across and
+      --  down, inlier or not, each in units of the
+      --  scale the error model the refinement was asked to judge by gives it (Refine_Tracks' Judge_Floor and Judge_Gain;
+      --  its own when none): comparable between two fits of the same sightings that keep different inliers
+      Judge_Floor, Judge_Gain : Real := 0.0;   --  the error model Cost_Judged was taken at
+      Pinhole    : Boolean := False;   --  the lens fitted as a pinhole with square pixels: its aspect and distortion
+                                       --  not significant as a group (Fit's stage 5)
+      Sigma_Px   : Real := 0.0;        --  the noise measured from them (the error model's floor)
+      Own_Gain   : Real := 1.0;        --  and how much of the matcher's stated sigmas they bear out (its gain)
       Flipped    : Boolean := False;   --  every translation changed sign to put the points in front
+      Order_Told : Boolean := False;   --  the sightings tell the joints' order along the arm, not only that it is
+                                       --  the best of the orders (stage 4; a fit begun from another, that one's)
+      Untold     : Joint_Pair_Lists.Vector;  --  when stage 4 did not tell the order: the joints next to each other along
+                                             --  the best order whose swap leaves residuals not significantly the
+                                             --  larger; empty when told, or when no stage 4 was run
+      Untold_Turns : Real_Lists.Vector;
+      --  Per pair of Untold, two: the turns of its Earlier joint and of its Later one, in their readings' units, that
+      --  tell the untold orders apart most (by the pixels between their places of the points times the root of how
+      --  many stay in the picture) of those that put the points no farther apart than a narrow window follows.
+      Untold_Orders : Joint_Lists.Vector;
+      --  Every order of the joints the sightings do not tell from the best (stage 4's search over all of them),
+      --  one after another, each as many joints long as the fit has: where the arm may be at a keyframe still to
+      --  be aligned, as far as the order goes (Kinematics.Offer_Of); empty when told, or when no stage 4 was run.
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals
@@ -236,7 +316,20 @@ package Driver.Robot.Kinematics.Fit is
                                           --  with each term of Covariance (the others' depths at their
                                           --  best): the share of its uncertainty every depth has in common
       Seconds      : Real_Lists.Vector;   --  per stage reached, from the first, how long the fit spent in it
+      --  The focal search's width (half, in the logarithm) and range, least and most, which a fit begun from this one
+      --  takes up (Fit_Start); 0 where there was no search.
+      Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
+      --  The sightings of the last fit that walked the focal length's profile, this one or one it was begun from; 0
+      --  where none did.
+      Profiled_Over : Natural := 0;
+      --  Per joint, three numbers: for a joint that slides, the turn per reading unit (its axis times its rate) of the
+      --  turn its own keyframes were explained by nearly as well when stage 1 took it for a slide, which every fit
+      --  begun from this one weighs against the slide again (Fit_Start); zero for a joint that turns, or has none.
+      Slide_Turns : Real_Lists.Vector;
    end record;
+
+   function Slide_Turns_Of (Report : Fit_Report; N : Natural) return Vec3_Array;
+   --  Report.Slide_Turns, a turn a joint, for a fit begun from it (Fit_Start); every one zero when it has none.
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
    --  Whether a track's depth is one: positive, and significant against its own relative uncertainty (Sigma is that
@@ -244,8 +337,38 @@ package Driver.Robot.Kinematics.Fit is
    --  depth at all (the first fit of an arm once had one at 1.7E97 units, its logarithm uncertain by 2.5E6) is not
    --  known; it is not a point of little weight.
 
+   type Flag_Matrix is array (Positive range <>, Positive range <>) of Boolean;
+
+   --  Where a fit may begin from (Fit's From): a fit of the same arm just made, on nearly the same sightings, its joints,
+   --  their order along the arm, its lens, and its focal search's width and range (Fit_Report); none unless Valid.
+   type Fit_Start (N : Natural) is record
+      Valid          : Boolean := False;
+      Joints         : Joint_Array (1 .. N);
+      Chain          : Chain_Order (1 .. N);
+      L              : Lens;
+      Focal_Within   : Real := 0.0;
+      Searched_Least : Real := 0.0;
+      Searched_Most  : Real := 0.0;
+      --  A fit of an estimate before this one: the stages after the focal search (2 to 5) run from it, its joints and
+      --  lens taken for the search's result. Otherwise a fit of this estimate: the last stage alone.
+      Whole          : Boolean := False;
+      Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
+      Slide_Turns    : Vec3_Array (1 .. N) := [others => [0.0, 0.0, 0.0]];   --  per joint (Fit_Report)
+      Untold_Orders  : Joint_Lists.Vector;
+      --  The orders its search left untold beside its order (Fit_Report.Untold_Orders, each N joints long): an order
+      --  one move from that order and not among them was told from it, and stays told while it is kept.
+      Fixed          : Boolean := False;
+      --  Its order is kept as given (Chain, whether Valid or not: a first fit of a given order runs every stage but
+      --  the search), searched for no other and not said to be told: the fit of one order of the joints, every term
+      --  refined in it, to be set beside the fits of other orders.
+   end record;
+
+   No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);
+
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;   --  per keyframe (row), every joint's reading change from the reference
+      Asked      : Flag_Matrix;        --  per keyframe (row) and joint: the sweep asked the joint to turn for it
       Visible    : Real_Array;         --  per joint, the reading change its eye can just see (0: unknown)
       Sightings  : Sighting_Array;
       Width, Height : Positive;
@@ -254,8 +377,10 @@ package Driver.Robot.Kinematics.Fit is
       Chain      : out Chain_Order;
       L          : out Lens;
       Report     : out Fit_Report;
-      Who        : String := "")   --  what is fitted, for a line at every stage it enters; none when empty
+      Who        : String := "";   --  what is fitted, for a line at every stage it enters; none when empty
+      From       : Fit_Start := No_Start)   --  a fit just made to begin from: the last stage alone (Fit_Start)
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
+                 and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);
    --  The covariance is the inverse normal equations around the spread of the
    --  gradient (Conley's sandwich), made positive semi-definite (Sandwich). The
@@ -313,6 +438,29 @@ package Driver.Robot.Kinematics.Fit is
    procedure Pick (S : in out Sampler; N : Positive; Into : out Count_Array)
      with Pre => Into'Length <= N;
    --  Into'Length distinct numbers of 1 .. N, the next of the generator's.
+
+   procedure Turn_On_Plane
+     (Before, After : Vec3_Array;
+      Weight        : Real_Array;
+      W             : Vec3;
+      Turn          : out Real;
+      Shift         : out Vec3;
+      Normal        : out Vec3;
+      Found         : out Boolean)
+     with Pre => Before'First = After'First and then Before'Last = After'Last
+                 and then Weight'First = Before'First and then Weight'Last = Before'Last;
+   --  A plane's points seen before and after a turn of the eye about W and a shift across it, by their lines of
+   --  sight in the eye's frame: X' = R X + T, R = Rot (W, -Turn), T across W, and the plane N . X = 1 in the first
+   --  frame, so that a point's line of sight after is (R + T N^T) times its line before. In the frame of W the
+   --  homography's last row is (0, 0, 1) and its first two rows are six unknowns, linear in the lines of sight (the
+   --  line after crossed with the homography's image of the line before is nought): weighted least squares. The
+   --  turn is the one of the two that leave the first two rows less the turn's of rank one (T N^T) whose other
+   --  minors the fit leaves the least; Shift and Normal are that rank-one part's factors, Normal of unit length
+   --  (the plane's distance is in Shift). A plane's points give the turn where a turn's epipolar lines do not:
+   --  they are one plane, and the motion that maps them is told by the plane, not left a family (the desktop
+   --  regime's synthetic arm, 10-16: a 0.6 rad sweep's first stage chose 69 px of 400 by its epipolar lines on a
+   --  plane of points, 421 when the points' depths were off the plane). Not Found when the points do not determine
+   --  the six unknowns.
 
    function Rayleigh_Median return Real;
    --  The median of the length of a vector of two components that are Gaussian with the same sigma, over that
@@ -407,126 +555,6 @@ package Driver.Robot.Kinematics.Fit is
 
    procedure Plane_Axes (P : Sight_Plane; Normal, E1, E2 : out Vec3);
    --  The plane's normal and two directions along it, right-handed with it.
-
-   function On_Plane (P : Sight_Plane; H : Vec3) return Vec3;
-   --  Where the line of sight H meets the plane.
-
-   ---------------------------------------------------------------------------
-   --  Linking two frames through an eye that sees one plane in both.
-
-   --  A point on a plane, in the plane's coordinates, and where an eye sees it.
-   type Plane_Point is record
-      X, Y : Real := 0.0;
-      U, V : Real := 0.0;
-   end record;
-
-   type Plane_Point_Array is array (Positive range <>) of Plane_Point;
-
-   procedure Plane_Homography
-     (Points : Plane_Point_Array;
-      H      : out Mat3;
-      Fits   : out Flag_Array;
-      Sigma  : out Real;
-      Found  : out Boolean)
-     with Pre => Fits'First = Points'First and then Fits'Last = Points'Last;
-   --  The homography that takes the plane's coordinates to where the eye sees
-   --  them (exact for an eye without distortion): by the least median of the
-   --  residuals over samples of four (the direct linear transform of each, on
-   --  coordinates centred and scaled), so up to half the points may be
-   --  anything; then by robust least squares on the points that fit (Fits),
-   --  re-chosen at their own noise until the choice settles. Sigma is their
-   --  noise.
-
-   --  One frame's side of a link: its eye's lens and that lens's covariance,
-   --  the tracks on its plane, and where the linking eye answered them.
-   type Table_Track is record
-      U0, V0 : Real := 0.0;          --  the track's reference pixel
-      Depth  : Real := 0.0;          --  along its reference line of sight
-      Sigma  : Real := Real'Last;    --  of the logarithm of the depth
-   end record;
-
-   package Track_Lists is new Ada.Containers.Vectors (Positive, Table_Track);
-
-   type Eye_Answer is record
-      Track : Positive := 1;         --  which of the side's tracks
-      U, V  : Real := 0.0;           --  where the linking eye sees it
-   end record;
-
-   package Answer_Lists is new Ada.Containers.Vectors (Positive, Eye_Answer);
-
-   type Chain_Side is record
-      L                : Lens;
-      Lens_Covariance  : Real_Lists.Vector;    --  Lens_Terms x Lens_Terms, row by row (the fit's)
-      Plane_Covariance : Mat3 := [others => [others => 0.0]];   --  of its plane's A beyond its lens's
-                                                                  --  lines of sight (Plane_Covariance)
-      Tracks           : Track_Lists.Vector;    --  the tracks on its plane
-      Answers          : Answer_Lists.Vector;
-   end record;
-
-   function Side_Plane (S : Chain_Side; L : Lens) return Sight_Plane;
-   --  The side's plane through its tracks seen through lens L, their depths
-   --  held (Refit_Plane over all of them).
-
-   package Flag_Lists is new Ada.Containers.Vectors (Positive, Boolean);
-
-   --  The joint parameters of a link, in this order: the first plane's
-   --  homography into the eye (its eight free entries), the similarity that
-   --  takes the second plane's coordinates to the first's (log scale, turn,
-   --  two shifts), then per side its lens (Lens_Terms) and how far the eye's
-   --  view moves its plane from the one its tracks give (three).
-   Similarity_Terms : constant := 4;
-   Side_Terms       : constant := Lens_Terms + 3;
-   Link_Terms       : constant := Similarity_Terms + 2 * Side_Terms;   --  what the placement rests on
-   Chain_Terms      : constant := 8 + Link_Terms;
-
-   type Plane_Link is record
-      Found      : Boolean := False;
-      Consistent : Boolean := False;   --  one homography explains both sides' points
-      X          : Real_Lists.Vector;  --  the joint solution, Chain_Terms
-      Covariance : Real_Lists.Vector;  --  of X's last Link_Terms, row by row
-      Sigma      : Real := Real'Last;  --  the noise the sides' own homographies leave their answers, pooled
-      Joint      : Real := Real'Last;  --  the joint fit's, its answers' residuals only, in the first side's units
-      F          : Real := 0.0;        --  the test of the four constraints one homography adds
-      First_Fits, Second_Fits : Flag_Lists.Vector;   --  per answer: its side's homography kept it
-      Used       : Natural := 0;       --  answers of both sides kept
-   end record;
-
-   procedure Plane_Chain (First, Second : Chain_Side; Second_Eye : Boolean; Link : out Plane_Link);
-   --  The similarity S that takes the second side's plane coordinates to the
-   --  first's (x a track's coordinates on its own side's plane: where its line
-   --  of sight through its lens meets the plane, along the plane's axes), from
-   --  an eye's view of both. An eye whose lens is unknown answered both sides'
-   --  tracks: one homography H of the first plane into it explains both, H (x)
-   --  for the first's answers and H (S (x)) for the second's. With
-   --  Second_Eye, the second side's own eye answered the first side's tracks,
-   --  and its lens explains them: S^-1 (x) back on the second plane, seen
-   --  through the second lens. Each side's lens and plane are its own frame's
-   --  estimates, held to them by their covariances: the eye's view moves them
-   --  only as far as their uncertainty lets, so that their errors are not
-   --  taken for the link's. From the homography of each side's answers
-   --  (Plane_Homography, at the estimates) and the similarity nearest the map
-   --  they give, then all of it by robust least squares on the answers those
-   --  homographies kept, each in units of its side's own noise. Consistent is
-   --  False when the joint fit leaves more than a free homography for each
-   --  side's answers does, by more than Z's tail allows (the extra sum of
-   --  squares of the four constraints, F (4, 2 n - 8 per homography)): then
-   --  the two sides are no views of one plane through one eye. Covariance is
-   --  the sandwich over the answers with the estimates' own.
-
-   procedure Chain_Placement
-     (First, Second : Chain_Side;
-      Link          : Plane_Link;
-      Placement     : out Rigid;
-      Scale         : out Real;
-      Covariance    : out Real_Lists.Vector)
-     with Pre => Natural (Link.X.Length) = Chain_Terms;
-   --  The second frame in the first, X_first = Placement * (Scale * X_second):
-   --  the turn takes the second plane's axes to the first's turned by the
-   --  similarity's turn, the shift follows the similarity's along the first
-   --  plane and the planes' offsets across it, each plane and lens as the
-   --  link left them. Covariance (7 x 7, row by row) is that of the turn (a
-   --  rotation vector in the first frame), the centre and the log of the
-   --  scale, carried from the link's.
 
 private
 

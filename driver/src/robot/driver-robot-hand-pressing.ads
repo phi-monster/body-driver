@@ -33,6 +33,7 @@ package Driver.Robot.Hand.Pressing is
       Into  : Vec3 := Zero3;      --  down: into the table, unit, arm frame
       Least : Real := Real'Last;  --  the smallest move of the tool that tells from its noise, where the aim leaves it
       Plan  : Driver.Robot.Motion.Plan;   --  from the tool as at O to Above; unset unless Ok
+      Yawed : Real := 0.0;        --  the turn about the way down the plan took from the least rotation, radians
    end record;
 
    --  How far the tool stands off where an aim put it, and what tells it from there.
@@ -41,6 +42,10 @@ package Driver.Robot.Hand.Pressing is
       Place_Sigma : Real := Real'Last;  --  and the sigma it is told against
       Turn       : Real := Real'Last;   --  how far its turn is off the aim's, radians,
       Turn_Sigma : Real := Real'Last;   --  and the sigma it is told against
+      --  How far off the aim the arm's own landing leaves the tool: its place and turn at the readings a free push of
+      --  the arm falls short by (Steps.Free_Landing), along the way the arm stands short of the aim's readings.
+      Allow_Place : Real := 0.0;
+      Allow_Turn  : Real := 0.0;
    end record;
 
    function Off_Aim (M : Model; Arm : Arm_Id; O : Observation; A : Aimed) return Aim_Offset;
@@ -51,16 +56,24 @@ package Driver.Robot.Hand.Pressing is
 
    function At_Aim (Off : Aim_Offset) return Boolean is
      (Off.Place_Sigma < Real'Last and then Off.Turn_Sigma < Real'Last
-      and then not Driver.Uncertain.Significant (Off.Place, Off.Place_Sigma)
-      and then not Driver.Uncertain.Significant (Off.Turn, Off.Turn_Sigma));
+      and then not Driver.Uncertain.Significant (Real'Max (0.0, Off.Place - Off.Allow_Place), Off.Place_Sigma)
+      and then not Driver.Uncertain.Significant (Real'Max (0.0, Off.Turn - Off.Allow_Turn), Off.Turn_Sigma));
    --  The tool stands where the aim put it, as far as anything tells: neither its place nor its turn significantly
-   --  off. What the press needs of an aim is the tool's pose, not the joints':
+   --  off. Beyond what the arm's own landing leaves: a servo stops anywhere within its dead band of its target,
+   --  and a tool told to a tenth of a millimetre was judged short of every tilted aim the dead band left a millimetre or
+   --  two off (u9, servo seed 3 of the fake robot, both arms, 10-19: hand 1's aims "delivered 0.987 of 604" and
+   --  "0.989 of 557", the tool 0.172 from the aim against 0.046, turned 0.006 rad against 0.004, and no tilted press
+   --  of its tip was made, its tip never tested across its line of sight). What the press needs of an aim is the
+   --  tool's pose, not the joints':
    --  a large aim that ends within a few ten-thousandths of its joints' targets, the arm's own sag under its load
    --  where it stands, is judged short against the free pushes of the boot that never carried that load (A89's hand
    --  2: every aim "delivered 1.000 of" 1.36 to 1.46, "blocked", and no press was made in the whole boot).
 
    procedure Aim
-     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0);
+     (M : Model; Arm : Arm_Id; Eye : Eye_Id; O : Observation; Along : Vec3; Result : out Aimed; Yaw : Real := 0.0;
+      Shift : Vec3 := [0.0, 0.0, 0.0]);
+   --  Shift moves the whole aim by that much, in the arm's frame (Aim_Reaching: across the table, to where nothing
+   --  stands).
    --  The tool turned about the eye (a point of the tool frame, so that the
    --  eye keeps its view) by the least rotation that points Along, a
    --  direction of the tool frame, into the table, and a plan to get there.
@@ -70,6 +83,13 @@ package Driver.Robot.Hand.Pressing is
    --  circle and not others (A22's lobe 2 aimed straight stands 0.117 outside
    --  the readings the arm has shown at the least rotation, 0.103 inside them
    --  at 30 degrees).
+   --  Along is pointed down exactly and the turn about the way down is Yaw
+   --  where the arm reaches the whole pose, else that of the nearest pose
+   --  pointing Along down (Motion.Pose_Goal Free_About): an arm of five
+   --  joints reaches a pose with Along down at one turn of the circle at most,
+   --  and h20 (servo seed 3, 10-17) planned none of its sixteen aims, each left
+   --  0.036 rad off its turn at a fifth of the way, its conditioning 1e-6.
+   --  Above is then where the plan takes the tool, Yawed the turn it took.
 
    procedure Aim_Reaching
      (M       : Model;
@@ -85,10 +105,14 @@ package Driver.Robot.Hand.Pressing is
       Unmeasured : out Boolean;
       Why     : out Ada.Strings.Unbounded.Unbounded_String;
       Footprint : Real := 0.0);
-   --  The first aim of Along that the arm can be taken to, and from which it can be taken down to the contact the
-   --  presses so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they
-   --  do not predict it): the least rotation first, then the hand turned about the way down by a quarter either way,
-   --  by half a turn, by three quarters, and by the whole of one (eight poses of the circle). A path past an end a
+   --  The aim of Along that the arm can be taken to, and from which it can be taken down to the contact the presses
+   --  so far predict (Tip in the tool frame, Surface in the arm's: nothing is asked of the descent when they do not
+   --  predict it), of the least rotation and the hand turned about the way down by an eighth of a turn either way, a
+   --  quarter, three eighths, and half a turn (eight poses of the circle), where the arm's fit places the tool most
+   --  surely (Least_Push there; the least rotation of those as sure): the fit is surest where its sweep moved the arm,
+   --  and a joint turned far past what the sweep saw is placed by axes it never pinned (f16u's press aims turned a
+   --  joint 273 units from its reference, the sweep 47 at most, and the tool there stood 49 mm uncertain for the
+   --  0.19 mm its truth was off at the poses it saw: the presses halved spans of that). A path past an end a
    --  channel showed is not planned (Driver.Robot.Motion.Plan_Reach); Yaw is the turn that was taken. Reaches is
    --  False when none is planned, Result then the last tried, and Why says why the least rotation was not, with the
    --  descent when it is that; Unmeasured is True when that was for want of a measured arm. An aim whose tip would

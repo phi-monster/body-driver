@@ -1,3 +1,4 @@
+with Driver.Uncertain;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
@@ -75,6 +76,31 @@ package body Driver.Robot.Hand.Tips is
       end;
    end Known_Sights;
 
+   --  The faces of the sights in the fit, in Known_Sights' order.
+   function Known_Faces (T : Sight_Table) return Driver.Robot.Hand.Touch.Face_Array is
+      Count : Natural := 0;
+   begin
+      for Row of T loop
+         for S of Row loop
+            Count := Count + Boolean'Pos (In_Fit (S));
+         end loop;
+      end loop;
+      declare
+         Result : Driver.Robot.Hand.Touch.Face_Array (1 .. Count);
+         N      : Natural := 0;
+      begin
+         for Row of T loop
+            for S of Row loop
+               if In_Fit (S) then
+                  N := N + 1;
+                  Result (N) := (if S.Lined then S.Face else Corner_Vectors.Empty_Vector);
+               end if;
+            end loop;
+         end loop;
+         return Result;
+      end;
+   end Known_Faces;
+
    function Fit_Ok (B : Book) return Boolean is (not B.Fitted.Is_Empty and then B.Fitted.Element.Ok);
 
    function Surface (B : Book) return Driver.Geometry.Plane_Estimate is
@@ -121,6 +147,12 @@ package body Driver.Robot.Hand.Tips is
       --  it as far as the presses' tilts do not tell.
       return Fitted_Tip (B, Index, Kind).Tip;
    end Tip;
+
+   function Face (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Corner_Vectors.Vector is
+      Index : constant Natural := Fitted_Index (B, Lobe, At_Opening, Kind);
+   begin
+      return (if Index = 0 then Corner_Vectors.Empty_Vector else Fitted_Tip (B, Index, Kind).Face);
+   end Face;
 
    function Beat (B : Book; Lobe : Positive; At_Opening : Opening; Kind : Tip_Kind := Loaded) return Driver.Clock.Beat is
       Result : Driver.Clock.Beat := 0;
@@ -322,7 +354,8 @@ package body Driver.Robot.Hand.Tips is
                F : constant Driver.Robot.Hand.Touch.Fit_Result :=
                  Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
                                               As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
-                                                     else Driver.Robot.Hand.Touch.On_Sight));
+                                                     else Driver.Robot.Hand.Touch.On_Sight),
+                                              Faces => Known_Faces (T));
             begin
                B.Free := Fit_Holders.To_Holder (F);
                if F.Ok then
@@ -443,7 +476,8 @@ package body Driver.Robot.Hand.Tips is
             F : constant Driver.Robot.Hand.Touch.Fit_Result :=
               Driver.Robot.Hand.Touch.Fit (Presses.all, Known_Sights (T), [1 => Prior_Of (B)],
                                            As => (if Any_Unlined (T) then Driver.Robot.Hand.Touch.Free
-                                                  else Driver.Robot.Hand.Touch.On_Sight));
+                                                  else Driver.Robot.Hand.Touch.On_Sight),
+                                           Faces => Known_Faces (T));
          begin
             B.Fitted := Fit_Holders.To_Holder (F);
             for I in B.Kept.First_Index .. B.Kept.Last_Index loop
@@ -478,7 +512,12 @@ package body Driver.Robot.Hand.Tips is
    function Leading (B : Book; At_Opening : Opening; Into : Vec3) return Natural is
       --  The lobe whose tip is foremost along Into, when every lobe seen at
       --  this opening has a fitted tip; else the lobe whose line of sight lies
-      --  closest to Into.
+      --  closest to Into. A face's tip is foremost by its corner that is (Face),
+      --  its line closest by the corner's line that is: two jaws shut on one
+      --  another have their tips at the one place where they meet, and the
+      --  corners apart (u18, seed 3 of the fake robot, 10-19: of the twelve
+      --  presses a tip rested on, given by the tips, 7 went to the jaw whose
+      --  corner touched, 3 to the other one, and at 2 both had).
       T       : constant Sight_Table := Sights_Of (B);
       By_Tips : Boolean := True;
       Best    : Natural := 0;
@@ -492,10 +531,19 @@ package body Driver.Robot.Hand.Tips is
       for L in T'Range loop
          if T (L) (At_Opening).Known then
             declare
-               Ahead : constant Real :=
+               Ahead : Real :=
                  (if By_Tips then Tip (B, L, At_Opening).Mean * Into
                   else T (L) (At_Opening).Ray.Direction.Unit_Vector * Into);
             begin
+               if By_Tips then
+                  for X of Face (B, L, At_Opening) loop
+                     Ahead := Real'Max (Ahead, X * Into);
+                  end loop;
+               else
+                  for X of T (L) (At_Opening).Face loop
+                     Ahead := Real'Max (Ahead, X * Into);
+                  end loop;
+               end if;
                if Ahead > Score then
                   Score := Ahead;
                   Best := L;
@@ -549,10 +597,90 @@ package body Driver.Robot.Hand.Tips is
       end loop;
    end Settle;
 
+   --  Lobes measured again in another number keep the presses of the fingers they still show: a press stays with the
+   --  new lobe whose line of sight, at every opening where both are known, is the old lobe's within what the two are
+   --  uncertain by (their directions' sigmas and their tips' spreads, at Z), the nearest of those, and its slides
+   --  go with their lobes; the presses of a lobe no new one shows are dropped. Dropped with every lobe, the presses of
+   --  u28's hand 1 (servo seed 3 of the fake robot, 10-19), ten of them, its open tip confirmed, were gone when its
+   --  closer, swept again where its lobe was not followed, showed a fixed jaw beside the moving one; it pressed one
+   --  more, and its sizes were never measured.
    procedure Set_Sights (B : in out Book; Sights : Sight_Table) is
    begin
       if Lobes (B) /= Sights'Length then
-         B.Kept.Clear;
+         declare
+            Old  : constant Sight_Table := (if B.Sights.Is_Empty then Sights (Sights'First .. Sights'First - 1)
+                                            else B.Sights.Element);
+            Into : array (1 .. Old'Length) of Natural := [others => 0];
+            Now  : Kept_Vectors.Vector;
+         begin
+            for L in Old'Range loop
+               declare
+                  Nearest : Real := Real'Last;
+               begin
+                  for N in Sights'Range loop
+                     declare
+                        Agree : Boolean := True;
+                        Both  : Boolean := False;   --  some opening where both lines are known
+                        Worst : Real := 0.0;
+                     begin
+                        for O in Opening loop
+                           declare
+                              Was : Sight_Of renames Old (L) (O);
+                              Is_Now : Sight_Of renames Sights (N) (O);
+                           begin
+                              if Was.Known and then Is_Now.Known and then Was.Lined and then Is_Now.Lined then
+                                 declare
+                                    A     : constant Vec3 := Was.Ray.Direction.Unit_Vector;
+                                    C     : constant Vec3 := Is_Now.Ray.Direction.Unit_Vector;
+                                    Turn  : constant Real := Arcsin (Real'Min (1.0, abs Cross (A, C)));
+                                    Sigma : constant Real :=
+                                      Sqrt (Was.Ray.Direction.Sigma ** 2 + Is_Now.Ray.Direction.Sigma ** 2
+                                            + Was.Spread ** 2 + Is_Now.Spread ** 2);
+                                 begin
+                                    Both := True;
+                                    if A * C <= 0.0 or else Driver.Uncertain.Significant (Turn, Sigma) then
+                                       Agree := False;
+                                    end if;
+                                    Worst := Real'Max (Worst, Turn);
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        if Both and then Agree and then Worst < Nearest then
+                           Nearest := Worst;
+                           Into (L) := N;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end loop;
+            for K of B.Kept loop
+               if K.Lobe = 0 or else (K.Lobe <= Into'Last and then Into (K.Lobe) > 0) then
+                  declare
+                     Moved : Kept := K;
+                  begin
+                     if K.Lobe > 0 then
+                        Moved.Lobe := Into (K.Lobe);
+                     end if;
+                     Moved.Slides.Clear;
+                     for N in Sights'Range loop
+                        declare
+                           From : Natural := 0;
+                        begin
+                           for L in Into'Range loop
+                              if Into (L) = N and then L <= Natural (K.Slides.Length) then
+                                 From := L;
+                              end if;
+                           end loop;
+                           Moved.Slides.Append (if From > 0 then K.Slides (From) else (others => <>));
+                        end;
+                     end loop;
+                     Now.Append (Moved);
+                  end;
+               end if;
+            end loop;
+            B.Kept := Now;
+         end;
       end if;
       B.Sights := Table_Holders.To_Holder (Sights);
       B.Fitted := Fit_Holders.Empty_Holder;

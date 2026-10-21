@@ -1,32 +1,60 @@
+with Ada.Environment_Variables;
 with Ada.Exceptions;
 with System.Multiprocessors;
 
 package body Driver.Workers is
 
-   Count : constant Natural := Natural (System.Multiprocessors.Number_Of_CPUs) - 1;
-   --  The workers; the caller of a Run is the one more.
+   Count : constant Natural :=
+     (if Ada.Environment_Variables.Exists ("BD_WORKERS")
+      then Natural'Value (Ada.Environment_Variables.Value ("BD_WORKERS"))
+      else Natural (System.Multiprocessors.Number_Of_CPUs) - 1);
+   --  The workers; the caller of a Run is the one more. BD_WORKERS sets how many, where many drivers share the
+   --  processors (a bench of fits, one an arm: each its own processor, none waiting on the others' workers).
+
+   function Size return Positive is (Count + 1);
 
    --  What one call of Run has out: how many of its indices have not ended,
    --  and the first failure among them. Lives on the caller's stack for the
    --  call; the workers reach it through an access that the call outlives.
    protected type Batch is
-      procedure Start (Indices : Positive);
+      procedure Start (First, Last : Positive);
+      procedure Take (Index : out Natural);
+      --  The next of its indices none has taken yet, and nought when every one has been.
       procedure Ended (E : Ada.Exceptions.Exception_Occurrence);
       --  One index ended, with E the failure when it failed (Null_Occurrence when it did not).
+      procedure Join;
+      procedure Leave;
+      --  A worker taken on, and that worker done with the batch: it reaches the batch no more after Leave.
       entry Wait;
-      --  Every index has ended.
+      --  Every index has ended and every worker taken on has left: a worker may be taken on and find every index
+      --  gone, and the batch must outlive its last look.
       procedure Raise_Kept;
    private
+      Next : Positive := 1;
+      Upto : Natural := 0;
       Left : Natural := 0;
+      Taken_On : Natural := 0;
       Kept : Ada.Exceptions.Exception_Occurrence;
       Has  : Boolean := False;
    end Batch;
 
    protected body Batch is
-      procedure Start (Indices : Positive) is
+      procedure Start (First, Last : Positive) is
       begin
-         Left := Indices;
+         Next := First;
+         Upto := Last;
+         Left := Last - First + 1;
       end Start;
+
+      procedure Take (Index : out Natural) is
+      begin
+         if Next <= Upto then
+            Index := Next;
+            Next := Next + 1;
+         else
+            Index := 0;
+         end if;
+      end Take;
 
       procedure Ended (E : Ada.Exceptions.Exception_Occurrence) is
          use type Ada.Exceptions.Exception_Id;
@@ -38,7 +66,17 @@ package body Driver.Workers is
          Left := Left - 1;
       end Ended;
 
-      entry Wait when Left = 0 is
+      procedure Join is
+      begin
+         Taken_On := Taken_On + 1;
+      end Join;
+
+      procedure Leave is
+      begin
+         Taken_On := Taken_On - 1;
+      end Leave;
+
+      entry Wait when Left = 0 and then Taken_On = 0 is
       begin
          null;
       end Wait;
@@ -55,24 +93,35 @@ package body Driver.Workers is
 
    type Job is record
       Work  : Work_Access;
-      Index : Positive;
       Of_It : Batch_Access;
    end record;
 
-   procedure Do_Job (J : Job);
-   --  Runs the index and tells its batch it ended, with the failure if it failed.
+   procedure Do_Jobs (J : Job);
+   --  Takes the batch's indices one after another until none is left, runs each and tells the batch it ended, with
+   --  the failure if it failed.
 
-   procedure Do_Job (J : Job) is
+   procedure Do_Jobs (J : Job) is
+      Index : Natural;
    begin
-      begin
-         J.Work (J.Index);
-      exception
-         when E : others =>
-            J.Of_It.Ended (E);
-            return;
-      end;
-      J.Of_It.Ended (Ada.Exceptions.Null_Occurrence);
-   end Do_Job;
+      loop
+         J.Of_It.Take (Index);
+         exit when Index = 0;
+         declare
+            Failed : Boolean := False;
+         begin
+            begin
+               J.Work (Index);
+            exception
+               when E : others =>
+                  J.Of_It.Ended (E);
+                  Failed := True;
+            end;
+            if not Failed then
+               J.Of_It.Ended (Ada.Exceptions.Null_Occurrence);
+            end if;
+         end;
+      end loop;
+   end Do_Jobs;
 
    type Worker_Stack is array (Positive range <>) of Positive;
 
@@ -120,7 +169,8 @@ package body Driver.Workers is
          or
             terminate;
          end select;
-         Do_Job (Mine);
+         Do_Jobs (Mine);
+         Mine.Of_It.Leave;
          Idle.Push (Number);
       end loop;
    end Worker;
@@ -134,20 +184,21 @@ package body Driver.Workers is
       if Last < First then
          return;
       end if;
-      Mine.Start (Last - First + 1);
-      for I in First .. Last loop
-         declare
-            J : constant Job := (Work => Work, Index => I, Of_It => Mine'Unchecked_Access);
-            W : Natural;
-         begin
+      Mine.Start (First, Last);
+      declare
+         J : constant Job := (Work => Work, Of_It => Mine'Unchecked_Access);
+         W : Natural;
+      begin
+         --  As many of the idle workers as there are indices beyond the caller's own; then the caller takes its
+         --  share with them.
+         for Recruit in First + 1 .. Last loop
             Idle.Pop (W);
-            if W = 0 then
-               Do_Job (J);
-            else
-               Pool (W).Go (J);
-            end if;
-         end;
-      end loop;
+            exit when W = 0;
+            Mine.Join;
+            Pool (W).Go (J);
+         end loop;
+         Do_Jobs (J);
+      end;
       Mine.Wait;
       Mine.Raise_Kept;
    end Run;

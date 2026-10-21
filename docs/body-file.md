@@ -66,13 +66,13 @@ measured from:
 
 | Member | What | Measured from |
 |---|---|---|
-| `noise` | every channel's reading noise and its degrees of freedom | the readings |
+| `noise` | every channel's reading noise and its degrees of freedom, and its creep (`drift`: its steady change a beat at rest, 0 where none stands out) | the readings |
 | `travel` | every channel's lowest and highest reading so far | the readings |
 | `ends` | every channel's end down and up, found where the body stopped a push of it at the same reading from two poses of the other channels (`low`, `high`, with `has_low` and `has_high` saying whether there is one), and the `stops` not yet found again, each with the channel, the sense, the reading and the group's readings it was made from | the noise |
 | `steps` | every group's longest wait for an answer, its free pushes' shortfalls | the noise |
-| `lags` | every eye's image lag, and whether it is known | the noise |
+| `lags` | every eye's image lag, and whether it is known, and the longest it took to settle after a move (`settling`, beats) | the noise |
 | `responses` | every eye's cell noise at rest, what each channel's push does to each cell, each group's effect on the eye | the noise, the lags |
-| `graph` | every group's role and arm, the arms, the carrier, every eye's mount | the responses |
+| `graph` | every group's role and arm, the turns at which the recognition saw each of its channels move an eye (`seen_at`, 0 where none did; the sweeps begin there), the arms, the carrier, every eye's mount | the responses |
 | `kinematics` | every arm's fit (joints, lens, uncertainty), its table, where it stands in the world; the lens and place of every eye fixed in the world | the graph, the responses |
 
 The `ends` are what the arm showed by being stopped, not by being seen
@@ -92,10 +92,20 @@ from the rest pose confirms no end by itself: its stops share one pose.
 model that has seen no robot takes the file's groups and eyes, so a measured
 body can be loaded and planned on with no robot connected.
 
-### The kinematics (method 7)
+### The kinematics (method 10)
 
 Per arm, `kinematics.arms` holds:
 
+- `shifts`: per channel, how far the arm's eye's view moves per reading unit of it, in pixels, as the
+  keyframes measured it (per point, its displacements regressed on the changes of every channel that moved; the
+  median over the points), 0 where not measured; `shift_sigmas` the standard deviation of each (0 where not
+  measured, with `shifts_known` false), `shift_points` how many points each rests on, `shifts_seen` whether the
+  view moves with the channel (false for a joint that moves a part of the body in the view, such as the hand's),
+  and `shift_told` how many points told it. They are kept when the arm's sweep begins anew, and a body begun
+  from the file sweeps from them.
+- `match_noise`: how far the driver's aligner errs on the arm's eye's pictures, in pixels, as the keyframes
+  measured it (0 or absent: not measured). Kept when the sweep begins anew; a body begun from the file judges the
+  places its eye sees things at by it until new keyframes measure it again.
 - `chain`: the arm's joints along it, from its base to the eye, each by its
   reading's place in the group (1 for the first). The robot reports its
   joints in any order; the fit finds the order from the keyframes that moved
@@ -109,6 +119,9 @@ Per arm, `kinematics.arms` holds:
   A keyframe taken later refines every term in that unit and moves no
   length, and a reloaded arm is not fitted again, so what is stored stays in
   the unit it was stored in.
+- `unit_changes`: the readings of the keyframes that define the unit, less the reference's, a row of the
+  arm's channels each, so that a body begun from the file, which keeps no keyframes, still has the unit's
+  uncertainty.
 - `table`: the plane most of the arm's tracked points lie on, each point
   judged by its own depth uncertainty, in the arm's own frame, with its whole
   uncertainty: its points' scatter about it, what the fit moves every depth
@@ -122,37 +135,40 @@ Per arm, `kinematics.arms` holds:
   arm's table gives the world its up.
 - `placed` and `placement`: where the arm's frame stands in the world, which
   is the first arm's frame: a point X of the arm's frame is at
-  `rotation * (scale * X) + centre` there. `covariance` (6 x 6) is that of
-  the turn and the centre, `scale_sigma` the scale's. `through` names the eye
-  that placed it: an eye whose view shows both arms move and holds both arms'
-  tables as one plane. It is a fixed eye that sees both arms, or the arm's
-  own eye when that eye shows the first arm. `points` is how many of the two
-  arms' table points that eye's view tied together, and `px` the noise of
-  that tie in the eye's units. The first arm stands as it is (`through` 0).
+  `rotation * (scale * X) + centre` there. `covariance` (7 x 7) is that of
+  the turn, the centre and the scale's logarithm, `scale_sigma` the scale's.
+  `through` names the eye that placed it: an eye fixed in the world that
+  watched both this arm and the first move, fitted to both (its pose in each
+  arm's frame), and to which the two arms' tables are one plane. `points` is
+  how many sightings that eye's fit rests on, and `px` the noise they show,
+  in its pixels. The first arm stands as it is (`through` 0).
 
 Per eye fixed in the world (the graph mounts it `world_fixed`), `kinematics.fixed` holds the lens and the place the
-eye was measured to have, from the first arm's tracked points and the eye's answers to where they are:
+eye was measured to have from the arms it watched move: its picture is kept at every keyframe of an arm whose push
+moves part of it (the lock-in), the points of its first such picture that respond to the push are followed through
+the others by the same aligner as the arms' own keyframes, and the eye is fitted to the arms' fitted motion
+(`Kinematics.Hand_Eye`): its lens, its pose in each arm's frame, and which link of the arm, and at what depth, each
+point rides on.
 
-- `known` says whether the points determine them. When they do not (all the points on the table, too few
-  answers, answers that leave a focal length or the turn or the centre unsure), `why` says what they leave out,
-  the eye is unknown (every answer about it carries an unknown pose and unknown lines of sight) and the numbers
-  are the fit's last state, not a result. `arm` is the arm whose points measured it (the first: the world).
+- `known` says whether that determines them and the first arm (the world) is among the arms it was fitted to.
+  When not, `why` says what is left out and the numbers are the fit's last state, not a result. `arm` is the
+  arm whose frame is the world.
 - `lens` holds the focal lengths and the principal point, in pixels, and the distortion (zero when the two
   terms are not significant as a pair). `rotation` (row by row) and `centre` are its camera frame in the world,
   which is the first arm's frame, in that arm's unit.
 - `covariance` (12 x 12, row by row) is that of the lens's six terms, in the order of the arms' (the logarithms
   of the two focal lengths, the principal point, the two distortion terms; the distortion rows are zero when not
-  kept), the camera's turn about its own axes (three) and its centre in the world (three). It is the sandwich
-  of the normal equations around the spread of the gradient, as the arms' (the spatial kernel of the residuals),
-  with the spread the points' own uncertainty adds: each point's depth, and what the first arm's fit moves every
-  point by together (its covariance of 36 terms carried through the gains of every depth and, for a point on the
-  table, through the table's response, with the table's scatter). A point on the table is where its line of sight
-  meets the table, not at the depth of its own refinement: the error of a depth along the table's normal would
-  pass for the structure that fixes the lens, and a plane alone fixes none.
-- `used` of `offered` answers fit (the answers whose round trip comes back to the query, within the noise of all
-  the round trips, and whose point the arm has); `sigma_px` is the noise they show, `distorted` whether the
-  distortion terms are kept. `from_matches` and `from_sets` say what the fit rests on (the first arm's keyframes
-  with matches, the sets of its reference matched into other eyes): it is measured again when either changed.
+  kept), the camera's turn about its own axes (three) and its centre in the world (three), the arms' joints
+  carried as their fits state them.
+- `used` of `offered` sightings fit (those the model has a place for); `sigma_px` is the noise they show,
+  `distorted` whether the distortion terms are kept. `from` counts the arms' keyframes aligned in the eye's
+  views (and aligned again) that the fit rests on: it is measured again when that changed.
+
+Method 8 keeps each arm's `shifts`, the view's motion per reading unit as the keyframes measured it; method 9
+keeps their sigmas, the points they rest on and which channels the view moves with. Method 10 measures the fixed
+eyes and the arms' placement from the arms the fixed eyes watch move (`Kinematics.Hand_Eye`), where method 9
+matched the first arm's reference points into the other eyes' pictures by an instrument (its `from_matches` and
+`from_sets` are now `from`, and the placement's covariance takes the scale's logarithm in).
 
 Method 4's covariance of the fit counted the sightings of a keyframe as one
 share of the gradient and the keyframes as independent. The matcher's errors

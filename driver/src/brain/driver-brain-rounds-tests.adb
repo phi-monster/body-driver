@@ -41,6 +41,7 @@ package body Driver.Brain.Rounds.Tests is
    --  episode ends after Looks_Left looks.
    type Scene is new Surroundings with record
       Looks_Left : Natural := Natural'Last;
+      Still_Arm  : Boolean := False;   --  a third eye first: fixed, the wrist eye of an arm that never moves, no arm seen
    end record;
 
    overriding procedure Look (S : in out Scene; Named : Driver.Brain.Names.Table; Now : out Snapshot);
@@ -56,8 +57,16 @@ package body Driver.Brain.Rounds.Tests is
       Now := (others => <>);
       Now.Images.Append (Picture);
       Now.Images.Append (Picture);
-      Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 1, Mount => (Kind => Driver.Robot.Arm_Carried, Arm => 1)));
-      Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 2, Mount => (Kind => Driver.Robot.World_Fixed)));
+      if S.Still_Arm then
+         Now.Images.Append (Picture);
+         Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 1, Mount => (Kind => Driver.Robot.World_Fixed), Arms => 0));
+         Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 2, Mount => (Kind => Driver.Robot.World_Fixed), Arms => 1));
+         Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 3, Mount => (Kind => Driver.Robot.Arm_Carried, Arm => 1), Arms => 1));
+         Now.Keys := Quantity_Keys;
+         return;
+      end if;
+      Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 1, Mount => (Kind => Driver.Robot.Arm_Carried, Arm => 1), others => <>));
+      Now.Eyes.Append (Driver.Brain.Round.Eye_Facts'(Eye => 2, Mount => (Kind => Driver.Robot.World_Fixed), others => <>));
       Now.Keys := Quantity_Keys;
    end Look;
 
@@ -211,8 +220,8 @@ package body Driver.Brain.Rounds.Tests is
    overriding function Interrupted (P : Body_Fixture) return Boolean is (False);
 
    procedure Episode (Programs : Text_Vectors.Vector; Brain : out Scripted; Doer : out Body_Fixture;
-                      Looks : Natural := Natural'Last) is
-      Around : Scene := (Looks_Left => Looks);
+                      Looks : Natural := Natural'Last; Still_Arm : Boolean := False) is
+      Around : Scene := (Looks_Left => Looks, Still_Arm => Still_Arm);
       Eyes   : Eyes_Fixture;
    begin
       Brain := (Programs => Programs, Prompts => <>, Asked_At => <>);
@@ -282,6 +291,17 @@ package body Driver.Brain.Rounds.Tests is
       Check (Has (Brain.Prompts (2), "what my eye 1 sees now"), "say look = 1 switches the next round's eye");
    end Eye_Switch;
 
+   --  Of two eyes fixed in the scene, a task starts in the one that sees an arm move, not the first: the first is the
+   --  wrist eye of an arm that never moves (a10 to a20 on 10-16).
+   procedure First_View_Sees_The_Arms is
+      Brain : Scripted;
+      Doer  : Body_Fixture;
+   begin
+      Episode (Script ("done" & LF), Brain, Doer, Still_Arm => True);
+      Check (Has (Brain.Prompts (1), "what my eye 2 sees now; it is fixed in the scene"),
+             "the first round does not look through the fixed eye that sees the arm move");
+   end First_View_Sees_The_Arms;
+
    procedure Same_Again is
       Brain : Scripted;
       Doer  : Body_Fixture;
@@ -333,6 +353,8 @@ package body Driver.Brain.Rounds.Tests is
       Register ("brain.rounds.refused", "a refused program moves the body, or the brain is not told why",
                 Refused_Then_Told'Access);
       Register ("brain.rounds.look", "the brain looks through the wrong eye", Eye_Switch'Access);
+      Register ("brain.rounds.first_view", "a task starts in a fixed eye that sees no arm move where another sees one",
+                First_View_Sees_The_Arms'Access);
       Register ("brain.rounds.same", "the brain is not told it repeats a program that moved nothing", Same_Again'Access);
       Register ("brain.rounds.episode", "a program written for an episode that ended still runs", Episode_Ends'Access);
       Register ("brain.rounds.no_answer", "a call that got no answer is told to the brain, or the service is called every beat",

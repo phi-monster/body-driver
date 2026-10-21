@@ -3,7 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Bytes;
 with Driver.Conventions;
 with Driver.Distributions;
-with Driver.World.Pairs;
+with Driver.Round_Trips;
 with Driver.World.Regions;
 
 package body Driver.World.Tracking is
@@ -201,7 +201,7 @@ package body Driver.World.Tracking is
       return Own;
    end Region_Points;
 
-   function Region_And_Around (T : Track) return Driver.Instrument.Point_Array is
+   function Region_And_Around (T : Track) return Point_Array is
       Region : constant Mask := T.Region.Element;
       Own    : constant Natural := Region_Points (T);
       Total  : Natural := Own;
@@ -212,7 +212,7 @@ package body Driver.World.Tracking is
          end loop;
       end loop;
       --  Built where it is returned, not on the stack: it is sized by pixels.
-      return Points : Driver.Instrument.Point_Array (1 .. Total) do
+      return Points : Point_Array (1 .. Total) do
          declare
             Mine   : Natural := 0;
             Beside : Natural := Own;
@@ -233,7 +233,7 @@ package body Driver.World.Tracking is
       end return;
    end Region_And_Around;
 
-   function Match_Points (T : Track) return Driver.Instrument.Point_Array is (Region_And_Around (T));
+   function Match_Points (T : Track) return Point_Array is (Region_And_Around (T));
 
    procedure Asked_Match (T : in out Track) is
    begin
@@ -243,7 +243,7 @@ package body Driver.World.Tracking is
       T.Own_Points := Region_Points (T);
    end Asked_Match;
 
-   function Round_Trip (A : Driver.Instrument.Answer; From : Driver.Instrument.Pixel) return Real is
+   function Round_Trip (A : Answer; From : Driver.Instrument.Pixel) return Real is
      (Sqrt ((A.Back.U - From.U) ** 2 + (A.Back.V - From.V) ** 2));
 
    type Error_Fit is record
@@ -254,11 +254,11 @@ package body Driver.World.Tracking is
    function Error_Of (Trips : Real_Array; Area : Real) return Error_Fit is
       Result : Error_Fit;
    begin
-      Driver.World.Pairs.Matcher_Error (Trips, Area, Result.Sigma, Result.Right);
+      Driver.Round_Trips.Matcher_Error (Trips, Area, Result.Sigma, Result.Right);
       return Result;
    end Error_Of;
 
-   procedure Matched (T : in out Track; Points : Driver.Instrument.Point_Array; Answers : Driver.Instrument.Answer_Array)
+   procedure Matched (T : in out Track; Points : Point_Array; Answers : Answer_Array)
    is
       Still_Found : Natural := 0;
    begin
@@ -277,7 +277,7 @@ package body Driver.World.Tracking is
       begin
          for I in T.Own_Points + 1 .. Answers'Length loop
             declare
-               A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
+               A : Answer renames Answers (Answers'First + I - 1);
                P : constant Driver.Instrument.Pixel := Points (Points'First + I - 1);
             begin
                if A.Found then
@@ -291,7 +291,7 @@ package body Driver.World.Tracking is
             W       : constant Real := Real (Width (T.Asked_On.Element));
             H       : constant Real := Real (Height (T.Asked_On.Element));
             --  The matcher's error from the round trips that came back right
-            --  (Driver.World.Pairs.Matcher_Error): when the eye moved, many
+            --  (Driver.Round_Trips.Matcher_Error): when the eye moved, many
             --  of the pixels around may no longer be in view.
             Error   : constant Error_Fit := Error_Of (Trips.all, W * H);
             Sigma   : constant Real := Error.Sigma;
@@ -309,7 +309,7 @@ package body Driver.World.Tracking is
             end if;
             for I in 1 .. T.Own_Points loop
                declare
-                  A : Driver.Instrument.Answer renames Answers (Answers'First + I - 1);
+                  A : Answer renames Answers (Answers'First + I - 1);
                   P : constant Driver.Instrument.Pixel := Points (Points'First + I - 1);
                begin
                   if A.Found and then A.To.U >= 0.0 and then A.To.V >= 0.0 and then A.To.U < W and then A.To.V < H

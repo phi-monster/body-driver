@@ -62,6 +62,14 @@ package body Driver.Twins is
                if W.Pairs (G).Turned then
                   O.Readings.Replace_Element (G, Second);
                   O.Echoes.Replace_Element (G, First);
+                  if G <= O.Precisions.Last_Index and then G <= O.Echo_Precisions.Last_Index then
+                     declare
+                        Of_First : constant Natural := O.Precisions (G);
+                     begin
+                        O.Precisions.Replace_Element (G, O.Echo_Precisions (G));
+                        O.Echo_Precisions.Replace_Element (G, Of_First);
+                     end;
+                  end if;
                end if;
             end;
          end if;

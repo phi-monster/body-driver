@@ -71,6 +71,8 @@ package body Driver.Numerics is
 
    function Plus (A, B : Vec3) return Vec3 is [A (1) + B (1), A (2) + B (2), A (3) + B (3)];
 
+   function Scaled (S : Real; V : Vec3) return Vec3 is [S * V (1), S * V (2), S * V (3)];
+
    function Minus (A, B : Vec3) return Vec3 is [A (1) - B (1), A (2) - B (2), A (3) - B (3)];
 
    function Dot (A, B : Vec3) return Real is
@@ -208,5 +210,29 @@ package body Driver.Numerics is
    begin
       return (Rotation => Rt, Translation => [-Tt (1), -Tt (2), -Tt (3)]);
    end Inverse;
+
+   function Spiral_Rotation (K, N : Positive) return Mat3 is
+      Phi : constant Real := Sqrt (2.0);
+      Psi : Real := 1.5;
+   begin
+      for Step in 1 .. Real'Machine_Mantissa loop
+         declare
+            Miss  : constant Real := Psi ** 4 - Psi - 4.0;
+            Slope : constant Real := 4.0 * Psi ** 3 - 1.0;
+         begin
+            exit when Miss = 0.0 or else abs (Miss / Slope) <= Real'Epsilon * Psi;
+            Psi := Psi - Miss / Slope;
+         end;
+      end loop;
+      declare
+         S : constant Real := Real (K) - 0.5;
+         T : constant Real := S / Real (N);
+         D : constant Real := 2.0 * Ada.Numerics.Pi * S;
+         A : constant Real := Sqrt (T);
+         B : constant Real := Sqrt (1.0 - T);
+      begin
+         return To_Matrix ((W => A * Sin (D / Phi), X => A * Cos (D / Phi), Y => B * Sin (D / Psi), Z => B * Cos (D / Psi)));
+      end;
+   end Spiral_Rotation;
 
 end Driver.Numerics;

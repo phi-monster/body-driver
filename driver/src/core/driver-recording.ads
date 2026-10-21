@@ -8,7 +8,10 @@
 --  same for text messages, C a new robot connection, S a service request,
 --  T a service reply, F a file the driver read, E a decider's call for the
 --  estimates at once (Driver.Robot.Estimate_Now, no payload), W a
---  decider's write into the world (Driver.World.Replay_Write), and, while the
+--  decider's write into the world (Driver.World.Replay_Write), G the boot's
+--  word to the kinematics that an arm's sweep begins ("arm N": Kinematics.Begin_Anew)
+--  and Q the channels it is turning for the keyframes from then on ("arm N asked 0 1
+--  0 ...": Kinematics.Asking; Driver.Robot.Replay_Sweep applies both), and, while the
 --  heavier estimates are computed apart from the main loop (Driver.Apart, no
 --  payloads), K where the models went apart, A each part of a message the
 --  estimator gave them and B where the main loop took them back. A service record starts
@@ -28,7 +31,8 @@ package Driver.Recording is
 
    type Record_Kind is
      (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
-      File_Read, Estimates_Asked, World_Written, Estimates_Apart, Taken_In, Estimates_Back);
+      File_Read, Estimates_Asked, World_Written, Estimates_Apart, Taken_In, Estimates_Back, Sweep_Begun,
+      Channels_Asked);
 
    type Reader is limited private;
 

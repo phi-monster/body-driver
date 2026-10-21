@@ -39,6 +39,10 @@
 --  units of their noise, whether it moved and was pushed, and its target.
 --  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
 --  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
+--  With --sweeping ARM@BEAT (repeatable), the arm's sweep is said to begin at
+--  that beat: for a recording made before the boot's word to the kinematics
+--  was recorded (kinds G and Q); its keyframes are then taken and aligned,
+--  though nothing is asked of its channels and the fit cannot tell them apart.
 --
 --  The estimators' service calls are answered as Driver.Services describes
 --  for a replay: by the live service when --inst or --eye names one (a
@@ -50,6 +54,7 @@
 with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
+with Ada.Containers.Vectors;
 with Ada.Strings.Fixed;
 with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
@@ -208,7 +213,11 @@ procedure Replay is
             H : constant Hand_Id := Hand_Id (Id);
          begin
             Append (Line_Text, (if Id > 1 then "," else "") & "{""arm"":" & Natural'Image (Natural (Arm_Of (Hands, H)))
-                    & ",""closer"":""" & To_String (Reading_Path (Closer_Group (Hands, H))) & """,""lobes"":[");
+                    & ",""closer"":"""
+                    --  The hand an arm's tool is when the arm has no closer has none (Hand.Closer_Group 0): its path is
+                    --  empty (s32's replay, 10-17, ended in a range check here after 5509 beats).
+                    & (if Natural (Closer_Group (Hands, H)) > 0 then To_String (Reading_Path (Closer_Group (Hands, H))) else "")
+                    & """,""lobes"":[");
             for Lobe in 1 .. Lobe_Count (Hands, H) loop
                Append (Line_Text, (if Lobe > 1 then ",{" else "{"));
                for At_Opening in Opening loop
@@ -289,7 +298,7 @@ procedure Replay is
 
    --  Where a beat's time goes, written at the end: the driver's own work on
    --  each beat, layer by layer, without the robot's.
-   type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart);
+   type Part is (Parsing, Robot_Layer, Hand_Layer, World_Layer, Estimates_Apart, World_Measure);
    Spent : array (Part) of Duration := [others => 0.0];
 
    --  With --watch, the eye followed beat by beat (Driver.Robot.Eye_Watch); with --readings, the group
@@ -368,9 +377,10 @@ procedure Replay is
       end if;
    end Rest;
 
-   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot));
+   function Due return Boolean is (Driver.Robot.Estimates_Due (Robot) or else Driver.World.Measure_Due (Scene));
 
-   procedure Compute is
+   --  The robot's heavier estimates, where the run computed them: due, or asked by a decider (kind E).
+   procedure Compute_Robot is
       Start : constant Duration := Driver.Clock.Seconds;
    begin
       if Dump_Only then
@@ -378,13 +388,73 @@ procedure Replay is
       end if;
       Driver.Robot.Compute_Estimates (Robot);
       Spent (Estimates_Apart) := Spent (Estimates_Apart) + (Driver.Clock.Seconds - Start);
+   end Compute_Robot;
+
+   procedure Compute is
+      Start : Duration;
+   begin
+      if Dump_Only then
+         return;
+      end if;
+      if Driver.Robot.Estimates_Due (Robot) then
+         Compute_Robot;
+      end if;
+      if Driver.World.Measure_Due (Scene) then
+         Start := Driver.Clock.Seconds;
+         Driver.World.Measure (Scene, Robot);
+         Spent (World_Measure) := Spent (World_Measure) + (Driver.Clock.Seconds - Start);
+      end if;
    end Compute;
 
    procedure Never (E : Ada.Exceptions.Exception_Occurrence) is null;
    --  A replay computes in place; the estimator task of the main program
    --  never runs here.
 
-   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never);
+   --  As the run's (body_driver): every message kept back loses its pictures,
+   --  in a replay as in the run, so the replay's models see what the run's
+   --  saw. (The recording holds the pictures: a replay of a recording made
+   --  before this rule drops pictures its run's models did see.)
+   procedure Lighten (M : in out Input) is
+   begin
+      if M.Observed then
+         for C in M.O.Images.First_Index .. M.O.Images.Last_Index loop
+            M.O.Images.Replace_Element (C, Driver.Images.No_Image);
+         end loop;
+      end if;
+   end Lighten;
+
+   package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Never, Lighten);
+
+   --  The boot's word to the kinematics, as the run said it (kinds G and Q).
+   procedure Sweep_Told (Data : Driver.Bytes.Byte_Array) is
+   begin
+      if not Dump_Only then
+         Driver.Robot.Replay_Sweep (Robot, Kind, Data);
+      end if;
+   end Sweep_Told;
+
+   --  --sweeping ARM@BEAT, for a recording made before the boot's word was recorded: the arm's sweep is said to
+   --  begin at that beat (the first keyframe's, read from the run's log), with nothing asked of its channels.
+   type Sweep_Note is record
+      Arm  : Positive := 1;
+      Beat : Natural := 0;
+      Said : Boolean := False;
+   end record;
+   package Sweep_Notes is new Ada.Containers.Vectors (Positive, Sweep_Note);
+   Sweeps : Sweep_Notes.Vector;
+
+   procedure Say_Sweeps is
+   begin
+      for K in Sweeps.First_Index .. Sweeps.Last_Index loop
+         if not Sweeps (K).Said and then Beat >= Sweeps (K).Beat then
+            Apart.Replay_Decider;
+            Driver.Robot.Replay_Sweep (Robot, Driver.Recording.Sweep_Begun,
+                                       Driver.Bytes.To_Bytes ("arm" & Sweeps (K).Arm'Image));
+            Sweeps (K).Said := True;
+            Line (Core, "arm" & Sweeps (K).Arm'Image & " is said to sweep from beat" & Beat'Image & " (--sweeping)");
+         end if;
+      end loop;
+   end Say_Sweeps;
 
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
@@ -420,6 +490,9 @@ procedure Replay is
             Driver.Log.Stamp (Beat);
          end if;
          Apart.Replay_Message (M);
+         if Observed and then not Sweeps.Is_Empty then
+            Say_Sweeps;
+         end if;
       end;
    end Robot_Message;
 
@@ -597,6 +670,16 @@ begin
          Dump_Every := Natural'Value (Argument (I + 3));
       elsif Argument (I) = "--readings" then
          Followed := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--sweeping" and then I + 1 <= Argument_Count then
+         declare
+            Given : constant String := Argument (I + 1);
+            At_Sign : constant Natural := Ada.Strings.Fixed.Index (Given, "@");
+         begin
+            if At_Sign > Given'First and then At_Sign < Given'Last then
+               Sweeps.Append (Sweep_Note'(Arm  => Positive'Value (Given (Given'First .. At_Sign - 1)),
+                                          Beat => Natural'Value (Given (At_Sign + 1 .. Given'Last)), Said => False));
+            end if;
+         end;
       end if;
    end loop;
 
@@ -621,8 +704,10 @@ begin
          when Driver.Recording.Service_Request => Payload.Query (Service_Request'Access);
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
          when Driver.Recording.File_Read       => Apart.Replay_Decider; Payload.Query (File_Read'Access);
-         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute;
+         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute_Robot;
          when Driver.Recording.World_Written   => Apart.Replay_Decider; Payload.Query (World_Write'Access);
+         when Driver.Recording.Sweep_Begun | Driver.Recording.Channels_Asked =>
+            Apart.Replay_Decider; Payload.Query (Sweep_Told'Access);
          when Driver.Recording.Estimates_Apart => Apart.Replay_Apart;
          when Driver.Recording.Taken_In        => Taken_In;
          when Driver.Recording.Estimates_Back  => Back;

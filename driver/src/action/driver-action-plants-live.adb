@@ -20,50 +20,7 @@ package body Driver.Action.Plants.Live is
    package World renames Driver.World;
    package Motion renames Driver.Robot.Motion;
 
-   function Largest_Sigma (C : Mat3) return Real is
-     (Sqrt (Real'Max (C (1, 1), Real'Max (C (2, 2), C (3, 3)))));
-
-   --  How far a closer is closed: its readings projected on the way from its
-   --  open readings to its readings closed on nothing, with the variance of
-   --  that projection from each channel's noise at rest.
-   function Fraction_Of (M : Driver.Robot.Model; H : Robot_Hand.Hands; Id : Robot_Hand.Hand_Id;
-                         O : Driver.Observations.Observation) return Estimate
-   is
-      G : constant Driver.Robot.Group_Id'Base := Robot_Hand.Closer_Group (H, Id);
-   begin
-      --  The hand an arm's tool is has no closer: nothing of it closes.
-      if G = 0 or else Natural (G) > Natural (O.Readings.Length) or else not Driver.Observations.Has_Reading (O, G) then
-         return Unknown;
-      end if;
-      declare
-         Now    : constant Real_Array := O.Readings (G);
-         Open   : constant Real_Array := Robot_Hand.Closer_Reading (H, Id, Robot_Hand.Open);
-         Closed : constant Real_Array := Robot_Hand.Closer_Reading (H, Id, Robot_Hand.Closed_Empty);
-         Way    : Real := 0.0;
-         Along  : Real := 0.0;
-         Var    : Real := 0.0;
-      begin
-         if Now'Length /= Open'Length or else Open'Length /= Closed'Length then
-            return Unknown;
-         end if;
-         for K in Open'Range loop
-            Way := Way + (Closed (K) - Open (K)) ** 2;
-         end loop;
-         if not (Way > 0.0) then
-            return Unknown;
-         end if;
-         for K in Open'Range loop
-            declare
-               Channel : constant Positive := K - Open'First + 1;
-               D       : constant Real := Closed (K) - Open (K);
-            begin
-               Along := Along + (Now (K - Open'First + Now'First) - Open (K)) * D;
-               Var := Var + (D / Way) ** 2 * Driver.Robot.Reading_Noise (M, G, Channel) ** 2;
-            end;
-         end loop;
-         return (Value => Along / Way, Sigma => Sqrt (Var), Degrees_Of_Freedom => 0);
-      end;
-   end Fraction_Of;
+   function Largest_Sigma (Covariance : Mat3) return Real renames Driver.Action.Snapshots.Largest_Sigma;
 
    --  How finely the arm places its tool: of every joint's smallest visible
    --  step, the largest shift and turn of the tool it makes, as the arm's
@@ -193,6 +150,13 @@ package body Driver.Action.Plants.Live is
                   Open_At : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, 1).Reading;
                   Shut_At : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, Count).Reading;
                begin
+                  declare
+                     Open_Foot : constant Real := Robot_Hand.Tip_Footprint (Hands, Id, L, Robot_Hand.Open);
+                     Shut_Foot : constant Real := Robot_Hand.Tip_Footprint (Hands, Id, L, Robot_Hand.Closed_Empty);
+                  begin
+                     Lobe.Footprint := (if Open_Foot > 0.0 and then Shut_Foot > 0.0 then Real'Min (Open_Foot, Shut_Foot)
+                                        else 0.0);
+                  end;
                   for S in 1 .. Count loop
                      declare
                         Reading : constant Real := Robot_Hand.Setting_Sight_At (Hands, Id, L, S).Reading;
@@ -208,7 +172,11 @@ package body Driver.Action.Plants.Live is
                   X.Lobes.Append (Lobe);
                end;
             end loop;
-            X.Fraction := Fraction_Of (Robot, Hands, Id, O);
+            --  How far a thing may go in between the tips before it meets the hand: the hand measures it from its
+            --  presses (Grip_Depth), and a hand whose depth is not known is no grasper (Search.Effector_Of). Left
+            --  unset, every hand was unknown here whatever its presses measured: the snapshot never had a grasper.
+            X.Depth := Robot_Hand.Grip_Depth (Hands, Id);
+            X.Fraction := Robot_Hand.Fraction (Hands, Robot, Id, O);
             S.Hands.Append (X);
          end;
       end loop;
@@ -247,6 +215,18 @@ package body Driver.Action.Plants.Live is
             --  A normal fitted to neighbours one spacing apart, each Sigma off.
             X.Normal_Sigma := (if X.Pitch > 0.0 and then X.Sigma < Real'Last then X.Sigma / X.Pitch else Real'Last);
             X.Support := World.Resting_On (Scene, Id);
+            --  What no eye saw of it, when it rests on a surface: the space under what is seen of it down to the
+            --  surface, as far out as the outline of what is seen (Unseen_Sides). Its sides go in beside the seen
+            --  samples; its spacing and uncertainty stay those of what was seen.
+            if Natural (X.Support) > 0 and then X.Pitch > 0.0 then
+               declare
+                  P : constant Driver.Geometry.Plane_Estimate := World.Plane_Of (Scene, Surface_Id (X.Support));
+               begin
+                  if abs P.Normal > 0.0 then
+                     X.Samples.Append (Unseen_Sides (X.Samples, X.Pitch, P.Centre, Unit (P.Normal)));
+                  end if;
+               end;
+            end if;
             X.Height := World.Height_Above_Support (Scene, Id);
             X.Held_By := World.Held_By (Scene, Id);
             X.Moving := World.Moving (Scene, Id);
@@ -328,7 +308,7 @@ package body Driver.Action.Plants.Live is
       Must_Be_Inside (P, "a reach");
       declare
          Plan : constant Motion.Plan :=
-           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only),
+           Motion.Plan_Reach (P.Robot.all, Goal.Arm, P.Last, (Pose => Goal.Tool, Position_Only => Goal.Position_Only, Free_About => <>),
                               Clearance => Goal.Clearance, Lever => Goal.Lever);
       begin
          case Motion.Status (Plan) is
@@ -373,7 +353,7 @@ package body Driver.Action.Plants.Live is
             begin
                P.Last := Driver.Beats.Latest.all;
                Plan := Motion.Plan_Reach (P.Robot.all, G.Arm, P.Last,
-                                          (Pose => G.Tool, Position_Only => G.Position_Only),
+                                          (Pose => G.Tool, Position_Only => G.Position_Only, Free_About => <>),
                                           Clearance => G.Clearance, Lever => G.Lever);
             end Planning;
          begin
@@ -435,6 +415,8 @@ package body Driver.Action.Plants.Live is
                World.Learn_Friction (P.Scene.all, L.Thing, (Low => L.Bounds.Low, High => L.Bounds.High));
             when Touched_At =>
                World.Touched (P.Scene.all, L.Thing, L.Point);
+            when Held_In =>
+               World.Hold (P.Scene.all, L.Thing, Robot_Hand.Hand_Id (L.Hand));
          end case;
       end Recording;
    begin

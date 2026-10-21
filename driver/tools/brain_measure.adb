@@ -338,7 +338,8 @@ procedure Brain_Measure is
                  (Eye   => Driver.Observations.Camera_Id (E),
                   Mount => (if M = "fixed" then (Kind => Driver.Robot.World_Fixed)
                             else (Kind => Driver.Robot.Arm_Carried,
-                                  Arm  => Driver.Robot.Arm_Id'Value (M (M'First + 4 .. M'Last))))));
+                                  Arm  => Driver.Robot.Arm_Id'Value (M (M'First + 4 .. M'Last)))),
+                  others => <>));
          end;
          --  The other eyes below the view, in camera order, as a round shows them.
          if Driver.Observations."/=" (Driver.Observations.Camera_Id (E), View) then

@@ -1,3 +1,8 @@
+with Ada.Environment_Variables;
+with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with Driver.Log;
 with Driver.Pixels;
 
@@ -76,7 +81,9 @@ package body Driver.Robot.Hand.Sweep is
       Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Low.Frames, High.Frames);
       Per_Channel : Channel_Array := S.Per_Channel.Element;
       Now      : Channel_State;
-      Nothing  : constant Mask := Create (0, 0);   --  the robot's own pixels that did not change: not yet known
+      --  The lobes' parts are attached to the picture's border alone; the robot's own pixels that did not change
+      --  are found by the placing (Located.Still), and a single lobe closes against them.
+      Nothing  : constant Mask := Create (0, 0);
    begin
       Now.Low_From := Low.From;
       Now.High_From := High.From;
@@ -84,6 +91,8 @@ package body Driver.Robot.Hand.Sweep is
       Now.Announced := False;
       Now.Poses_Low := Driver.Robot.Hand.Selfsight.Poses (S.Memory, Low.Closer.Element);
       Now.Poses_High := Driver.Robot.Hand.Selfsight.Poses (S.Memory, High.Closer.Element);
+      Now.Low_At := Driver.Robot.Hand.Views.Reading (Low, Channel);
+      Now.High_At := Driver.Robot.Hand.Views.Reading (High, Channel);
       Now.Changed := Count (Compared.Changed);
       Now.Spread := Compared.Spread;
       Now.Beyond := Compared.Beyond;
@@ -102,8 +111,8 @@ package body Driver.Robot.Hand.Sweep is
             Now.Located := Driver.Robot.Hand.Lobes.From_Change
               (Compared.Changed, Low.Frames, High.Frames, Anchor, At_Low, Compared.Spread, Nothing,
                Motion => (if Motion = null then null else Channel_Motion'Access));
-            Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Nothing);
-            Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Nothing);
+            Now.Closing := Driver.Robot.Hand.Lobes.Direction (Now.Located.Lobes, Now.Located.Still);
+            Now.Change := Driver.Robot.Hand.Lobes.Closing_Change (Now.Located.Lobes, Now.Located.Still);
             Now.Status := (if Now.Located.How = Driver.Robot.Hand.Lobes.Placed then Measured else Unplaced);
          end;
       end if;
@@ -207,6 +216,103 @@ package body Driver.Robot.Hand.Sweep is
                   end if;
                end;
             end if;
+            --  The lobe also as one moved a little from the anchored end (Lobes.Moved_Lobe): where it moved less than
+            --  its width, the placing's lobe is the part of it that was not there before, a crescent (a16 on 10-16: at
+            --  6.998, 1126 pixels of a jaw of 6234, its tip 30 pixels down the jaw's edge), and where it moved
+            --  farther, Moved_Lobe has nothing or a scrap of it. Of the two, the one whose pixels number nearest the
+            --  anchored end's, by their ratio: the lobe is one rigid part, as large at the stop as at the end.
+            if Compared.Trusted then
+               for L in 1 .. N loop
+                  declare
+                     Mine   : constant Mask :=
+                       (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                     Region : Mask;
+                     Centre, Tip : Pixel;
+                     Known  : Boolean;
+
+                     --  How far a region's size is from the anchored lobe's, as the logarithm of their ratio.
+                     function Apart (M : Mask) return Real is
+                       (abs Ada.Numerics.Long_Elementary_Functions.Log
+                          (Real (Driver.Images.Count (M)) / Real (Driver.Images.Count (Mine))));
+                  begin
+                     if Driver.Images.Count (Mine) > 0 then
+                        Driver.Robot.Hand.Lobes.Moved_Lobe
+                          (Mine, Compared.Changed, Anchored.Frames, V.Frames, Region, Centre, Tip, Known);
+                        if Known and then Driver.Images.Count (Region) > 0
+                          and then (not Tips (L).Known or else Driver.Images.Count (Tips (L).Region) = 0
+                                    or else Apart (Region) < Apart (Tips (L).Region))
+                        then
+                           Tips (L) := (Known => True, Tip => Tip, Centre => Centre, Region => Region);
+                        end if;
+                     end if;
+                  end;
+               end loop;
+            end if;
+            --  For a study against a fake robot's truth: with BD_DUMP_KEYS naming a folder, each stop's lobes as
+            --  placed, a line a lobe: where its tip and centre are and how many pixels it has, beside the anchored
+            --  end's.
+            if Ada.Environment_Variables.Exists ("BD_DUMP_KEYS") then
+               declare
+                  File : Ada.Text_IO.File_Type;
+                  Name : constant String := Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stops_c"
+                    & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & ".txt";
+               begin
+                  begin
+                     Ada.Text_IO.Open (File, Ada.Text_IO.Append_File, Name);
+                  exception
+                     when Ada.Text_IO.Name_Error =>
+                        Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
+                  end;
+                  for L in 1 .. N loop
+                     declare
+                        Mine : constant Mask :=
+                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                     begin
+                        Ada.Text_IO.Put_Line
+                          (File, "stop" & K'Image & " of" & Count'Image & " reading "
+                           & Driver.Log.Image (Driver.Robot.Hand.Views.Reading (V, Channel), 1) & " beats"
+                           & V.From'Image & V.To'Image & " lobe" & L'Image & " anchored "
+                           & (if At_Low then "low" else "high") & " pixels" & Driver.Images.Count (Mine)'Image
+                           & (if Tips (L).Known
+                              then " tip " & Driver.Log.Image (Tips (L).Tip.U, 1) & " " & Driver.Log.Image (Tips (L).Tip.V, 1)
+                                   & " centre " & Driver.Log.Image (Tips (L).Centre.U, 1) & " "
+                                   & Driver.Log.Image (Tips (L).Centre.V, 1) & " pixels"
+                                   & Driver.Images.Count (Tips (L).Region)'Image
+                              else " not found"));
+                        --  And the picture of it: the pixels that changed from the anchored end (60), the anchored
+                        --  lobe's (120) and the region placed at the stop (255), a PGM a stop and lobe.
+                        declare
+                           Picture : Ada.Text_IO.File_Type;
+                           W       : constant Natural := Driver.Images.Width (Mine);
+                           H       : constant Natural := Driver.Images.Height (Mine);
+                        begin
+                           Ada.Text_IO.Create
+                             (Picture, Ada.Text_IO.Out_File,
+                              Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stop_c"
+                              & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & "_k"
+                              & Ada.Strings.Fixed.Trim (K'Image, Ada.Strings.Left) & "_l"
+                              & Ada.Strings.Fixed.Trim (L'Image, Ada.Strings.Left) & ".pgm");
+                           Ada.Text_IO.Put_Line (Picture, "P2" & W'Image & H'Image & " 255");
+                           for Y in 0 .. H - 1 loop
+                              for X in 0 .. W - 1 loop
+                                 Ada.Text_IO.Put
+                                   (Picture,
+                                    (if Tips (L).Known and then Driver.Images.Width (Tips (L).Region) = W
+                                       and then Driver.Images.Contains (Tips (L).Region, X, Y) then " 255"
+                                     elsif Driver.Images.Contains (Mine, X, Y) then " 120"
+                                     elsif Driver.Images.Width (Compared.Changed) = W
+                                       and then Driver.Images.Contains (Compared.Changed, X, Y) then " 60"
+                                     else " 0"));
+                              end loop;
+                              Ada.Text_IO.New_Line (Picture);
+                           end loop;
+                           Ada.Text_IO.Close (Picture);
+                        end;
+                     end;
+                  end loop;
+                  Ada.Text_IO.Close (File);
+               end;
+            end if;
             Now.Stops.Append
               (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,
                            Tips    => Tip_Holders.To_Holder (Tips)));
@@ -245,6 +351,11 @@ package body Driver.Robot.Hand.Sweep is
                Renew_Stops (S, C, Motion);
             end if;
          elsif Status (S, C) = Measured
+           --  Only while the ends are seen: a reading that moved starts an end's view again, and until it has two
+           --  frames there is no end to place a stop between (Stops is 0 then, not what was seen) — R3 on the Pi,
+           --  10-13: hand b's lobes placed, its ends started again after a push, and Renew_Stops asked for the low
+           --  end that was not there; the driver died at beat 6166 on Low_End's precondition.
+           and then Driver.Robot.Hand.Views.Has_Ends (S.Views, C)
            and then Driver.Robot.Hand.Views.Stops (S.Views, C) /= S.Per_Channel.Constant_Reference.Element (C).Stops_Seen
          then
             Renew_Stops (S, C, Motion);
@@ -269,6 +380,13 @@ package body Driver.Robot.Hand.Sweep is
 
    function High_End (S : State; Channel : Positive) return Driver.Robot.Hand.Views.View is
      (Driver.Robot.Hand.Views.High_End (S.Views, Channel));
+
+   function End_Rest (S : State; Channel : Positive) return Real_Array is
+     (Driver.Robot.Hand.Views.Low_Rest (S.Views, Channel));
+
+   function End_Reading (S : State; Channel : Positive; High : Boolean) return Real is
+     (if High then S.Per_Channel.Constant_Reference.Element (Channel).High_At
+      else S.Per_Channel.Constant_Reference.Element (Channel).Low_At);
 
    function Lobes_Of (S : State; Channel : Positive) return Driver.Robot.Hand.Lobes.Lobe_Vectors.Vector is
      (S.Per_Channel.Constant_Reference.Element (Channel).Located.Lobes);
@@ -319,6 +437,28 @@ package body Driver.Robot.Hand.Sweep is
       Pixels_Text : constant String :=
         Natural'Image (Here.Changed) & " pixels changed, beyond " & Driver.Log.Image (Here.Beyond, 1)
         & " levels of a spread of " & Driver.Log.Image (Here.Spread, 2);
+      --  How far each lobe's lead goes at each end before it meets a still pixel (Lobes.Lead_Gaps): what the
+      --  closing is told by against the robot's still pixels, said where it is not told.
+      function Leads_Text return String is
+         Text : Ada.Strings.Unbounded.Unbounded_String;
+         K    : Natural := 0;
+      begin
+         for L of Here.Located.Lobes loop
+            declare
+               At_Low, At_High, Never : Real;
+            begin
+               K := K + 1;
+               Driver.Robot.Hand.Lobes.Lead_Gaps (L, Here.Located.Still, At_Low, At_High, Never);
+               Ada.Strings.Unbounded.Append
+                 (Text, "; lobe" & K'Image & "'s lead meets one "
+                  & (if At_Low = Never then "never" else "after " & Driver.Log.Image (At_Low, 1) & " px")
+                  & " at the low end, "
+                  & (if At_High = Never then "never" else "after " & Driver.Log.Image (At_High, 1) & " px")
+                  & " at the high end");
+            end;
+         end loop;
+         return Ada.Strings.Unbounded.To_String (Text);
+      end Leads_Text;
    begin
       case Here.Status is
          when Waiting =>
@@ -329,8 +469,9 @@ package body Driver.Robot.Hand.Sweep is
             return "half of this eye's picture or more changes between its ends, so what moved cannot be told from what did not";
          when Unlocated =>
             return "the arm has not moved the eye against its surroundings at either end's readings (seen from"
-              & Here.Poses_Low'Image & " poses at the low reading,"
-              & Here.Poses_High'Image & " at the high one; two are needed): " & Pixels_Text;
+              & Here.Poses_Low'Image & " poses at the low reading, " & Driver.Log.Image (Here.Low_At, 6) & ","
+              & Here.Poses_High'Image & " at the high one, " & Driver.Log.Image (Here.High_At, 6)
+              & "; two are needed): " & Pixels_Text;
          when Unplaced =>
             return (case Here.Located.How is
                        when Driver.Robot.Hand.Lobes.Unseparated =>
@@ -352,8 +493,10 @@ package body Driver.Robot.Hand.Sweep is
                  elsif Known (Here.Change)
                  then "closing direction not significant: their distances changed by "
                       & Driver.Log.Image (Here.Change.Value, 3) & " +- " & Driver.Log.Image (Here.Change.Sigma, 3)
-                      & " pixels between the ends"
-                 else "closing direction not known: there is nothing to compare their distances with")
+                      & " pixels between the ends" & Leads_Text
+                 else "closing direction not known: there is nothing to compare their distances with ("
+                      & Driver.Images.Count (Here.Located.Still)'Image & " of the robot's pixels did not change"
+                      & Leads_Text & ")")
               & " (" & Pixels_Text & ";" & Here.Located.Here'Image & " given to the low end,"
               & Here.Located.There'Image & " to the high end," & Here.Located.Unassigned'Image & " to neither, of doubt "
               & Driver.Log.Image (Here.Located.Doubt, 0) & " pixels, after" & Here.Located.Rounds'Image & " rounds; its parts:"
@@ -362,6 +505,9 @@ package body Driver.Robot.Hand.Sweep is
               & Here.Located.Against_Motion'Image
               & (if Here.Located.Turned
                  then ": the robot's look gave each end the other's pixels, and the closer's own motion turned them"
+                 else "")
+              & (if Here.Located.Joined > 0
+                 then ";" & Here.Located.Joined'Image & " lobes joined into others the closer moves the same way"
                  else "")
               & ")";
       end case;

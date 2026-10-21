@@ -79,13 +79,14 @@ package Driver.Action.Plants is
       Beats   : Natural := 0;
    end record;
 
-   type Lesson_Kind is (Friction_Learned, Touched_At);
+   type Lesson_Kind is (Friction_Learned, Touched_At, Held_In);
 
    type Lesson (Kind : Lesson_Kind := Friction_Learned) is record
       Thing : Thing_Id;
       case Kind is
          when Friction_Learned => Bounds : Friction_Bounds;
          when Touched_At       => Point  : Driver.Uncertain.Point_Estimate;
+         when Held_In          => Hand   : Hand_Id;   --  its closer stopped short of closed on the thing
       end case;
    end record;
 

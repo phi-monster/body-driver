@@ -80,7 +80,7 @@ procedure Align_Study is
    function Padded (N : Natural) return String is
       S : constant String := Img (N);
    begin
-      return (1 .. 4 - S'Length => '0') & S;
+      return [1 .. 4 - S'Length => '0'] & S;
    end Padded;
 
    function Fixed (X : Real; Aft : Natural := 3) return String is
@@ -93,7 +93,7 @@ procedure Align_Study is
          return (if X < 0.0 then "-" else "") & Img (Whole);
       end if;
       return (if X < 0.0 and then Rounded > 0.0 then "-" else "") & Img (Whole) & "."
-        & (1 .. Aft - Digits_Text'Length => '0') & Digits_Text;
+        & [1 .. Aft - Digits_Text'Length => '0'] & Digits_Text;
    end Fixed;
 
    function Percent (Part, Whole : Natural) return String is

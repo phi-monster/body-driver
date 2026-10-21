@@ -36,8 +36,26 @@ package Driver.Robot.Motion is
      (M       : in out Model;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
-      Stop    : access function return Boolean := null);
+      Stop    : access function return Boolean := null;
+      Land    : Boolean := False);
    --  Sends the targets, waits until the body settles, and judges the step.
+   --  With Land, the step is a positioning: its first sending adds every
+   --  targeted channel's steady error where the group last landed on a target
+   --  (Group_Stream.Landing), and a step that reached is sent again, moved by
+   --  the error of its landing, for every targeted channel that reads off its
+   --  target by more than the noise of a difference of two readings tells, as
+   --  long as each landing comes nearer than the one before: a servo holding
+   --  a load settles a few units short of its goal, the same few at the same
+   --  pose (the kiwi's arms, R4 on the Pi, 10-13: 4 to 7 units off the hold
+   --  after every push, so that no keyframe turned one joint alone). The
+   --  report's beats count the sendings again, its detail names them; what a
+   --  sending again meets changes nothing of what the step reached. Without
+   --  Land, the step is a push whose answer is what is measured (a probe, the
+   --  recognition's pushes, a press): it is sent once, as asked, and its
+   --  episode is the latest of the group (robot.probe.droop: a sending again
+   --  of a probe's push by a reading short of its target by a hundred
+   --  thousandth was an episode of no length, and the probe read it as the
+   --  joint's end).
    --  Stop, when given, is asked at every beat of the wait (between Next and
    --  Send, so it may read the latest observation): once it holds, every
    --  targeted group is held where it was read at that beat, the push ends as
@@ -79,27 +97,34 @@ package Driver.Robot.Motion is
    --  Holds the body for one beat and brings the estimates up to date between the beat and the hold
    --  (Estimate_Now): a round of the sweep is measured before the next round is moved.
 
-   procedure Hold_While_Matching (M : in out Model);
-   --  Holds the body until the instrument has answered every match the
-   --  estimators asked of it (the kinematics' keyframes).
-
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id);
    --  Holds the body still until the arm's still twin of its reference has
    --  its match answered or refused (Kinematics.Twin_Answered), so the
    --  matcher's noise is known before the arm is swept; an arm that carries
    --  no eye is not held.
 
+   function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real;
+   --  The least turn of a joint of the arm the fit counts: the turn it counts
+   --  from the reference (Kinematics.Counted_Turn), what the readings' noise
+   --  can take off a turn asked of exactly it, and what the landing and the
+   --  reference's own landing can lose, the dead band each. Zero while the arm
+   --  has no step (Kinematics.Step_Of).
+
    function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real;
-   --  The smallest turn of a joint of the arm that moves its eye's view by
-   --  what both the view and the matcher can tell: Z times the larger of
-   --  the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
+   --  The first level of the sweep's ladder for a joint of the arm: the
+   --  largest turn whose keyframe the aligner follows from the reference by
+   --  itself, half a patch of its eye's view (Kinematics.Follow_Step), and
+   --  never less than the least turn a keyframe counts: Z times the larger
+   --  of the cells' displacement noise (Lockin.Cell_Noise) and the matcher's
    --  (Kinematics.Match_Noise, from the still twin), over how far the view
-   --  moves per reading unit of the joint (Lockin.Shift), the keyframe step,
-   --  plus what the readings' noise can take off a turn (Z of the noise of a
-   --  difference of two readings), so that the turn lands at the step or
-   --  beyond; a keyframe that moves less tells the kinematics nothing, and
-   --  A9's showed it makes the fit worse. Zero when the arm carries no eye or
-   --  the shift or the cells' noise is not measured.
+   --  moves per reading unit of the joint (Kinematics.Pixels_Per_Unit, from
+   --  the keyframes that turned it alone), the keyframe step, plus what the
+   --  readings' noise can take off a turn (Z of the noise of a difference of
+   --  two readings), so that the turn lands at the step or beyond; a keyframe
+   --  that moves less tells the kinematics nothing, and A9's showed it makes
+   --  the fit worse. While no keyframe has turned the joint alone, the least
+   --  turn by the step the eye can see (Channels.Visible_Step). Zero when the
+   --  arm carries no eye or neither step is measured.
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id);
    --  Holds the body until the arm can give its kinematics a keyframe: its
@@ -176,6 +201,8 @@ package Driver.Robot.Motion is
       Seen       : Boolean := False;   --  some eye saw the channel move
       Excursion  : Real := 0.0;        --  how far it was taken, in reading units, when seen
       Seen_Sense : Sense := Increasing;   --  which way, when seen
+      First_Seen : Real := 0.0;        --  the least amount an eye saw it move at, confirmed by the lock-in or not; 0
+                                       --  when none did
       Answered   : Real := 0.0;        --  the smallest amount at which its reading first followed, either way; 0 when never
       Levels     : Sense_Counts := [others => 0];    --  how many levels each way was asked
       At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
@@ -221,6 +248,10 @@ package Driver.Robot.Motion is
    type Pose_Goal is record
       Pose          : Rigid;
       Position_Only : Boolean := False;   --  orientation free
+      Free_About    : Vec3 := [0.0, 0.0, 0.0];
+      --  A direction of the tool frame, not nought: where it points is the goal's, and the turn about it is the goal's
+      --  where the arm reaches the whole goal, else the nearest pose's that points it (Kinematics.Solve_Pose; a press
+      --  aims a lobe's line of sight down, and an arm of five joints reaches few turns about the way down).
    end record;
 
    type Plan_Status is (Planned, Unreachable, Unmeasured);
@@ -302,7 +333,8 @@ package Driver.Robot.Motion is
    --  what planning cost, whether it ended Planned or Unreachable.
 
    function Stray
-     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False;
+      Free_About : Vec3 := [0.0, 0.0, 0.0])
       return Real
      with Pre => Q0'Length = Q1'Length and then Q0'First = Q1'First;
    --  How far the tool strays from the straight path from From to To (straight

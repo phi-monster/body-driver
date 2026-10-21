@@ -41,9 +41,10 @@ with Driver.Numerics;
 with Driver.Observations;
 private with Driver.Alignment.Keyframes;
 private with Driver.Pixels;
-private with Driver.Services;
 with Driver.Uncertain;
 
+with Driver.Bytes;
+with Driver.Recording;
 package Driver.Robot is
 
    use Driver.Numerics;
@@ -84,6 +85,10 @@ package Driver.Robot is
    --  holds included). Estimators only; never sends anything.
 
    procedure Estimate_Now (M : in out Model);
+
+   procedure Replay_Sweep (M : in out Model; Kind : Driver.Recording.Record_Kind; Data : Driver.Bytes.Byte_Array);
+   --  Applies the boot's word to the kinematics as the run said it (a recording's kind G, "arm N", or Q,
+   --  "arm N asked 0 1 ...": Kinematics.Begin_Anew, Kinematics.Asking); anything else is ignored.
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
    --  minutes, during which the robot holds. The call goes into the
@@ -118,7 +123,8 @@ package Driver.Robot is
    --  group's push does to each eye (the lock-in), the body's graph (roles,
    --  arms, mounts) and the kinematics with their lenses.
    type Stored is
-     (Stored_Noise, Stored_Travel, Stored_Ends, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Kinematics);
+     (Stored_Noise, Stored_Travel, Stored_Ends, Stored_Steps, Stored_Lags, Stored_Responses, Stored_Graph, Stored_Shifts,
+      Stored_Kinematics);
 
    procedure Load_Body
      (M   : in out Model;
@@ -172,6 +178,28 @@ package Driver.Robot is
    function Ray (M : Model; E : Eye_Id; O : Observation; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The line of sight through a pixel, in the world frame.
 
+   function Ray_In_Eye (M : Model; E : Eye_Id; U, V : Real) return Vec3;
+   --  The unit line of sight through a pixel of the eye, in its own frame, by its measured lens: an arm's eye's
+   --  fitted with the arm, a fixed eye's fitted where it was placed; zero when the lens is not measured.
+
+   procedure Project_In_Eye (M : Model; E : Eye_Id; P : Vec3; U, V : out Real; In_Front : out Boolean);
+   --  Where a point of the eye's own frame lands in its picture by its measured lens, inside the picture or not; not
+   --  In_Front behind the eye or when the lens is not measured.
+
+   function Eye_Noise (M : Model; E : Eye_Id) return Real;
+   --  How far the aligner errs on the eye's pictures, in pixels: what the keyframes of the arm it rides on measured
+   --  (Kinematics.Match_Noise), or what its placing left of its sightings (a fixed eye); 0 when not measured.
+
+   function Sweep_Views (M : Model; E : Eye_Id) return Natural;
+   --  How many still pictures of eye E the sweep of the arm that carries it kept (Kinematics: the arm's keyframes,
+   --  the first its reference), once the arm is fitted; 0 before, and for an eye no arm carries.
+
+   function Sweep_View (M : Model; E : Eye_Id; K : Positive; Like : Observation) return Observation
+     with Pre => K <= Sweep_Views (M, E) and then Natural (E) <= Natural (Like.Images.Length)
+                 and then Natural (Like.Readings.Length) = Group_Count (M);
+   --  The K-th, as an observation: Like's, with the arm's readings and eye E's picture as they were then, and no
+   --  other picture.
+
    function Eye_Ray (M : Model; E : Eye_Id; Px : Driver.Images.Pixel) return Ray_Estimate;
    --  The same line of sight in the eye's own frame (from its centre of
    --  projection), carrying only the lens's uncertainty: with Eye_In_Tool it
@@ -205,12 +233,21 @@ package Driver.Robot is
    --  uncertain only by the arm's own fit; known once the arm is fitted,
    --  placed in the world or not. Tool_Pose is this, placed.
 
+   function Tool_Step_In_Arm (M : Model; A : Arm_Id; From, To : Real_Array) return Point_Estimate;
+   --  How far the last link moved from the arm's readings From to the readings To, in the arm's own frame, uncertain
+   --  by the arm's fit as a displacement (Kinematics.Step_Covariance), not as two places; unknown until the arm is
+   --  fitted.
+
    function Up_In_Arm (M : Model; A : Arm_Id) return Direction_Estimate;
    --  Away from gravity in the arm's own frame: the normal of the table its
    --  eye saw (Table_In_Arm), its sigma the tilt's along the direction it is
    --  least sure of. Up is the first arm's.
 
    function Table_In_Arm (M : Model; A : Arm_Id) return Driver.Geometry.Plane_Estimate;
+
+   function World_Table (M : Model) return Driver.Geometry.Plane_Estimate;
+   --  The table in the world: the first arm's, as its eye saw it (the world is that arm's frame); its normal
+   --  towards what rests on it. Not Known until that arm is fitted with a table.
    --  The table the arm's eye saw at its reference keyframe, in the arm's own
    --  frame, its normal towards that eye: the plane most of the eye's tracked
    --  points lie on, uncertain by their scatter about it, by what the fit
@@ -294,6 +331,9 @@ package Driver.Robot is
    --  the group's push.
 
    function Resting_Motion (M : Model; G : Group_Id; E : Eye_Id) return Real;
+   function Rest_Pull (M : Model; G : Group_Id; E : Eye_Id) return Real;
+   --  How significantly the eye's cells that do not respond to the group are pulled along its pushes together
+   --  (Eye_Effect.Rest_Pull): a far part of the view moved by less than any one cell can tell.
    --  How many sigmas the cells that did not respond to the group's push move together: the inverse-variance sum
    --  of their displacement energies over the root of the sum of their weights. Each cell's energy is an unbiased
    --  estimate of the motion it shows, however little (a cell that moves a tenth of what it takes to respond
@@ -365,10 +405,17 @@ private
    pragma Suppress (Tampering_Check);
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
+   type Channel_Flags is array (Positive range <>) of Boolean;   --  per channel of a group
    type Luma_Access is access Real_Array;
    --  A frame's luma (Driver.Images.Luma), on the heap: two per eye, swapped
    --  every beat, never on a stack.
    package Count_Vectors is new Ada.Containers.Vectors (Natural, Natural);
+   package Rigid_Vectors is new Ada.Containers.Vectors (Natural, Driver.Numerics.Rigid);
+
+   type Joint_Pair is record
+      Earlier, Later : Positive;   --  two joints by their readings, Earlier before Later along the arm as fitted
+   end record;
+   package Joint_Pair_Lists is new Ada.Containers.Vectors (Positive, Joint_Pair);
 
    --  The extreme a quantity of a push has reached (Driver.Robot.Steps.Follow), and the quantity at the beats since,
    --  that one included: their count, mean and the sum of the squares of their deviations from it (Welford's).
@@ -377,6 +424,9 @@ private
       Followed : Natural := 0;
       Mean     : Real := 0.0;
       Spread   : Real := 0.0;
+      Last     : Real := 0.0;       --  the quantity at the latest beat counted
+      Turned   : Boolean := False;  --  since the extreme it went back the way it had come at some beat, by a step the
+                                    --  one test of motion sees: the group moves about (Driver.Robot.Steps)
    end record;
 
    --  One push of a group and how it went (Driver.Robot.Steps).
@@ -384,6 +434,8 @@ private
       Start     : Natural := 0;       --  the beat its target changed
       Moved     : Boolean := False;
       Moved_At  : Natural := 0;       --  the first beat its reading moved
+      Born_Moving : Boolean := False; --  its group was still moving from the push before at the beat it started: its
+                                      --  first motion is that push's answer, not its own, and tells nothing of the delay
       Ended     : Boolean := False;
       End_At    : Natural := 0;       --  the first still beat, or where it was given up or cut short
       Settled   : Boolean := False;   --  judged: not cut short by the next push
@@ -426,20 +478,45 @@ private
    type Group_Stream is record
       Size        : Natural := 0;
       Commandable : Boolean := False;
+      Held        : Real_Vectors.Vector;   --  per channel: the pose a step last sent the group to, as a reading
+                                           --  (Motion.Step; the command that lands it there may differ by what
+                                           --  the servo stands short of its goal); empty before any step
+      Landing     : Real_Vectors.Vector;   --  per channel: the command less the reading where the group last
+                                           --  landed on a step's target (the servo's steady error under its
+                                           --  load, Motion.Step); a step's first sending adds it; empty before
       Values      : Real_Vectors.Vector;   --  Size readings per beat
       Twin_Values : Real_Vectors.Vector;   --  Size values per beat of the other group of its command key's pair (the robot's
                                            --  echo of its command, Driver.Twins), kept to turn Values round with
+      Precisions  : Count_Vectors.Vector;  --  per beat: the significant bits of the float format the readings came in over
+                                           --  the wire, 0 when they came as integers (the last one's at a beat without)
+      Twin_Precisions : Count_Vectors.Vector;   --  the same for Twin_Values
       Present     : Flag_Vectors.Vector;   --  a reading arrived that beat
       Targets     : Real_Vectors.Vector;   --  Size targets per beat
       Targeted    : Flag_Vectors.Vector;   --  the command in effect carried a target
       Pushed      : Flag_Vectors.Vector;   --  per beat, once measured: moving because it was pushed
       Delay_Beats : Natural := 0;          --  the longest wait from a push to its first motion
       Delay_Known : Boolean := False;      --  some push was answered
+      Own_Push    : Boolean := False;
+      --  some push of it was its own: answered, and no other commandable group began one within the longest lag the
+      --  stream could tell of then (Graph.Derive)
+      Rider       : Eye_Id'Base := 0;
+      --  the eye last mounted on the group as an arm (Graph.Derive): it rides on it while it shows the group a patch
+      --  of its view or is undecided about it
+      Closer_Eye  : Eye_Id'Base := 0;
+      --  the eye on an arm that last showed the group a closer of that arm (Graph.Derive): it does while it tells
+      --  nothing against it (not measured, undecided, a patch)
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
+      Pause       : Natural := 0;          --  the most beats the group stood still within a push, short of its target,
+                                           --  and then went on toward it with no new ask (Driver.Robot.Steps)
+      Executed    : Real_Vectors.Vector;   --  per channel: the least ask of it a push moved it for (Driver.Robot.Steps:
+                                           --  the body executes asks that large; a servo stands still for one within
+                                           --  its dead band), Real'Last until one did; empty before any push
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
+      Seen_At     : Real_Vectors.Vector;   --  per channel: the turn at which the recognition's probe saw an eye move
+                                           --  with it (Boot), 0 where none did; empty before the groups are recognized
       Stopped_Low, Stopped_High : Real_Vectors.Vector;   --  per channel, the ends: where the body stopped a push of the
                                                          --  channel at the same reading from two poses, the furthest
                                                          --  down and up (End_Of); valid where the flags are
@@ -508,14 +585,29 @@ private
       Is_Still      : Boolean := False;      --  at the latest beat, once judged (Driver.Robot.Stillness)
       Has_Judged    : Boolean := False;      --  the latest frame was judged, not only added to the first run
       Judged        : Flag_Vectors.Vector;   --  per beat: the eye had a frame and was judged
-      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin)
+      Rest_Factor   : Real := 1.0;           --  a resting cell's displacement noise over its floor (Lockin): the
+                                             --  typical cell's, for a cell that never resolved one at rest
+      Rest_Factors  : Real_Vectors.Vector;   --  per cell, the same measured on that cell alone (Lockin.Measure_Rest_Noise);
+                                             --  empty until measured
+      Settling_Tail : Natural := 0;          --  how many beats the picture goes on settling after the body stops
+                                             --  moving (Lockin.Measure); 0 until measured
       Rest_Counts_Known  : Boolean := False; --  how many cells move at a beat when nothing is pushed (Lockin):
       Rest_Count_Max     : Natural := 0;     --  the most of them at any such beat,
+      Rest_Count_Level   : Real := 0.0;      --  the count a beat's moved cells must exceed to be motion: the rest
+                                             --  counts' median plus Z of their robust scatter (not their most: one
+                                             --  flickering frame among 116 at rest put the most at 273 of 525 cells
+                                             --  for the kiwi's wrist eye, and a jaw opening 1250 units moved 130 to
+                                             --  156 cells, unseen, R6 on 10-14)
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
+      Rest_Count_Above   : Natural := 0;     --  of those beats, how many counted more than the level: as often a
+                                             --  beat at rest is called motion
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)
    end record;
+
+   function Rest_Factor_Of (S : Eye_Stream; Cell : Natural) return Real;
+   --  The cell's displacement noise at rest over its floor: its own where measured, else the eye's typical.
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
 
@@ -526,15 +618,35 @@ private
       Textured   : Natural := 0;   --  cells that can show a displacement
       Fraction   : Estimate;       --  Responding / Textured, with its binomial sigma
       Resting    : Real := 0.0;    --  the motion of the cells that did not respond, together, in sigmas (Lockin)
+      Rest_Pull  : Real := 0.0;    --  how significantly the cells that did not respond are pulled along the push together:
+                                   --  their signed gains pooled, over the spread of the pool, in sigmas (Lockin); zero
+                                   --  when none
+      Could_Be_Whole : Boolean := True;
+      --  The most cells that may show the motion are significantly more than half the textured ones: the eye's view
+      --  may yet move whole with the group, so the eye may ride on it (Lockin.Judge's test of a whole view, at the
+      --  most); false when even the most could not make it whole
    end record;
 
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);
    --  Indexed (G - 1) * Eyes + E.
 
+   --  What one channel's push does to one eye: the effect of a group, for one of its channels alone (Driver.Robot.Lockin).
+   --  A group whose channels move different eyes (a humanoid's torso moves every eye, its neck the head's, an arm its
+   --  wrist's) is told apart by these.
+   type Channel_Effect is record
+      Group   : Group_Id;
+      Channel : Positive;
+      Effect  : Eye_Effect;
+   end record;
+
+   package Channel_Effect_Vectors is new Ada.Containers.Vectors (Positive, Channel_Effect);
+   package Eye_Channels_Vectors is new Ada.Containers.Vectors (Eye_Id, Channel_Effect_Vectors.Vector, Channel_Effect_Vectors."=");
+
    package Role_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Role);
    package Arm_Number_Vectors is new Ada.Containers.Vectors (Group_Id, Arm_Id'Base);
    package Clause_Vectors is new Ada.Containers.Vectors (Group_Id, Natural);
    package Arm_Group_Vectors is new Ada.Containers.Vectors (Arm_Id, Group_Id, Driver.Observations."=");
+   package Arm_Eye_Vectors is new Ada.Containers.Vectors (Arm_Id, Eye_Id'Base, Driver.Observations."=");
    package Mount_Vectors is new Ada.Containers.Vectors (Eye_Id, Mount);
    package Lag_Vectors is new Ada.Containers.Vectors (Eye_Id, Integer);
    package Eye_Flag_Vectors is new Ada.Containers.Vectors (Eye_Id, Boolean);
@@ -543,10 +655,13 @@ private
    --  eye, and what follows from that (Driver.Robot.Graph).
    type Body_Graph is record
       Effects : Effect_Vectors.Vector;
+      Channels : Eye_Channels_Vectors.Vector;   --  per eye, the effect of each channel the lock-in kept
       Roles   : Role_Vectors.Vector;
       Arm_Of  : Arm_Number_Vectors.Vector;   --  an Arm's own number, a Closer's arm, else 0
       Breach  : Clause_Vectors.Vector;
       Arms    : Arm_Group_Vectors.Vector;
+      Arm_Eye : Arm_Eye_Vectors.Vector;   --  per arm: the eye it is for when its group's channels move different eyes
+                                          --  (an arm of the group for each), else 0: the arm of a whole group
       Mounts  : Mount_Vectors.Vector;
       Carrier : Group_Id'Base := 0;
    end record;
@@ -556,36 +671,28 @@ private
       Beat     : Natural := 0;
       Readings : Real_Vectors.Vector;   --  the arm's readings, still
       Image    : Driver.Images.Image;    --  what its eye saw, still
+      Asked    : Flag_Vectors.Vector;    --  per channel: the sweep asked the joint to turn for this frame
+                                         --  (Kinematics.Asking); none for a frame no push of the sweep's asked for
    end record;
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
 
-   --  Where the reference keyframe's query points went in one keyframe, or
-   --  in another eye's view.
+   --  Where the reference keyframe's query points went in one keyframe of the arm's own eye.
    type Match_Set is record
       Frame    : Positive := 1;          --  the keyframe
-      Eye      : Natural := 0;           --  the other eye whose view it is; 0 for the arm's own keyframes
       To_U, To_V     : Real_Vectors.Vector;   --  per query point, where it went
       Back_U, Back_V : Real_Vectors.Vector;   --  and where that matched back to in the reference
-      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer (none from the instrument)
+      Sigma    : Real_Vectors.Vector;    --  and the standard deviation the aligner stated of the answer
       Freedom  : Count_Vectors.Vector;   --  and how many degrees of freedom that standard deviation rests on (0: it is known)
-      Found    : Flag_Vectors.Vector;    --  the aligner or the instrument gave an answer
+      Found    : Flag_Vectors.Vector;    --  the aligner gave an answer a fit may rest on (an own keyframe: from a
+                                         --  narrow window, Followed, within Z of the typical uncertainty)
+      Answered : Flag_Vectors.Vector;    --  the aligner gave an answer at all, from a window of any width (own keyframes)
       Stated   : Real := Real'Last;      --  an own keyframe: the median standard deviation its prediction stated
       Followed : Boolean := False;       --  and whether most of its answers came from a window no wider than a patch
       Wide     : Natural := 0;           --  and how many points it refused for that prediction's uncertainty
    end record;
 
    package Match_Set_Vectors is new Ada.Containers.Vectors (Positive, Match_Set);
-
-   type Pending_Match is record
-      Frame  : Positive := 1;
-      Eye    : Natural := 0;           --  as Match_Set has it
-      Points : Natural;                --  how many query points were asked: the answer's size (no default,
-                                       --  so no request can leave it out)
-      Ticket : Driver.Services.Ticket;
-   end record;
-
-   package Pending_Vectors is new Ada.Containers.Vectors (Positive, Pending_Match);
 
    --  An arm's kinematics and its eye's lens as last fitted (Driver.Robot.Kinematics.Fit).
    type Joint_Fit is record
@@ -615,6 +722,23 @@ private
       --  keyframe taken later refines every term and moves no length. 0 until
       --  the arm is fitted.
       Unit_Frames : Natural := 0;
+      --  Those keyframes' readings less the reference's, a row of the arm's channels each: the unit kept with the
+      --  fit, so that a body begun from its file, which keeps no keyframes, still has it (Kinematics.Unit_Sigma_Of,
+      --  Place_Covariance_In_Unit).
+      Unit_Changes : Real_Vectors.Vector;
+      --  The focal search's width and range of the fit that holds (Fit.Fit_Report), and the beat of the estimate it was
+      --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
+      Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
+      Profiled_Over : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Order_Told    : Boolean := False;   --  its joints' order is told by the sightings, not only the best (Fit_Report)
+      Untold        : Joint_Pair_Lists.Vector;   --  when not: the joints next to each other along it whose swap is not
+                                                 --  told (Fit_Report)
+      Untold_Turns  : Real_Vectors.Vector;       --  per pair of Untold, its two joints' turns that tell it (Fit_Report)
+      Untold_Orders : Count_Vectors.Vector;      --  when not: every order not told from Chain, one after another, as
+                                                 --  long as Chain each, by the readings' places (Fit_Report)
+      Slide_Turns   : Real_Vectors.Vector;       --  per joint, three numbers: the turn a slide is weighed against
+                                                 --  again (Fit_Report)
+      Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)
       --  The table its eye saw, in its reference frame (Table_In_Arm): the
@@ -623,18 +747,24 @@ private
       Table        : Driver.Geometry.Plane_Estimate;
       Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the same plane as its eye sees it (Fit.Sight_Plane)
       Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, its lens's lines of sight held
-      --  What the plane moves by with the fit's terms (the depths and the lens's lines of sight): 3 x Terms,
-      --  row by row; and the covariance of its points' scatter about it, which no term moves. A fixed eye
-      --  that sees points on the table carries them (Kinematics.Fixed).
-      Table_Response : Real_Vectors.Vector;
-      Table_Scatter  : Mat3 := [others => [others => 0.0]];
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
+      --  How Table_A moves with each of the fit's terms, as the table takes the fit's uncertainty (three rows of as
+      --  many as Covariance has terms, row by row: every depth together and the lens's lines of sight,
+      --  Kinematics.Table_Estimate), and what its points' scatter about it leaves it uncertain by alone: the arm's fit
+      --  moved along its covariance moves its table so (the arm's variants a fixed eye is placed with,
+      --  Flow_Eye.Arm_Variant).
+      Table_Response : Real_Vectors.Vector;
+      Table_Own      : Mat3 := [others => [others => 0.0]];
       --  Every track's point in its reference frame, three numbers each,
       --  where Track_Known holds (its depth is a depth: Fit.Depth_Known), at
       --  the depth the fit refined, its logarithm uncertain by Track_Sigmas.
       Tracks       : Real_Vectors.Vector;
       Track_Known  : Flag_Vectors.Vector;
       Track_Sigmas : Real_Vectors.Vector;
+      --  Per track, as many numbers as Covariance has terms: how the logarithm of its depth moves with each, the
+      --  other tracks' depths at their best (Fit.Fit_Report.Depth_Gains); Track_Sigmas is what is left of its
+      --  uncertainty with the terms held (Kinematics.Offer_Of).
+      Track_Gains  : Real_Vectors.Vector;
       --  Where its reference frame is in the world (Kinematics.In_World):
       --  X_world = Placement * (Scale * X). The world is the first arm's
       --  reference frame, so that arm is placed as it is.
@@ -642,38 +772,34 @@ private
       Placement    : Driver.Numerics.Rigid := Driver.Numerics.Identity;
       Scale        : Real := 1.0;
       Scale_Sigma  : Real := 0.0;
-      Placement_Covariance : Real_Vectors.Vector;   --  6 x 6, row by row: its turn (world frame), its centre
-      Placed_Px    : Real := 0.0;                  --  the noise of the link that placed it, in its eye's units
-      Placed_Points : Natural := 0;                --  the points that placed it
+      Placement_Covariance : Real_Vectors.Vector;   --  7 x 7, row by row: its turn (world frame), its centre, the
+                                                    --  logarithm of its scale
+      Placed_Px    : Real := 0.0;                  --  the noise of the fixed eye that placed it, in its pixels
+      Placed_Points : Natural := 0;                --  the sightings that eye's fit rested on
       Placed_Through : Natural := 0;               --  the eye that saw both it and the first arm
-      --  Per track, row by row: how the logarithm of its depth moves with each term of Covariance, the others'
-      --  depths at their best (Fit_Report.Depth_Gains): the share of every depth's uncertainty all of them have
-      --  in common, which a fixed eye placed from these points carries (Kinematics.Fixed).
-      Depth_Gains  : Real_Vectors.Vector;
    end record;
 
-   --  The lens and pose of an eye fixed in the world, measured from points the first arm's eye placed and the
-   --  answers it gave to where they are (Kinematics.Fixed): its camera in the world (the first arm's reference
-   --  frame, in that arm's unit) and its lens, with the covariance of both: 12 x 12, row by row, the lens's six
-   --  terms as an arm's fit has them (Kinematics.Fit.Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2; the
-   --  distortion terms zero when not kept), then the camera's turn about its own axes and its centre in the world.
-   --  Known only when the points determine them; Why says what they leave out when not.
+   --  The lens and pose of an eye fixed in the world, measured from the edge flow of the arms it watched turn
+   --  (Driver.Robot.Flows, Kinematics.Flow_Eye): its lens, and its camera in the reference frame of every arm it saw
+   --  (in that arm's unit), with the covariance of all of them (Joint, row by row): the lens's six terms as an arm's
+   --  fit has them (Kinematics.Fit.Lens_Terms: the logarithms of Fx and Fy, Cx, Cy, K1, K2; the distortion terms held
+   --  at nought), then per arm the camera's turn about its own axes and its centre. Arm, Pose and Covariance: the
+   --  first arm it saw and its camera in that arm's frame, the covariance of the lens and that pose (12 x 12), as
+   --  the fixed eye's users read them. Known only when the flow told the eye; Why says what it leaves out when not.
    type Fixed_Fit is record
       Known      : Boolean := False;
-      Arm        : Arm_Id'Base := 0;            --  the arm whose points measured it
+      Arm        : Arm_Id'Base := 0;            --  the arm whose frame Pose is in
       Lens       : Lens_Fit;
       Pose       : Driver.Numerics.Rigid := Driver.Numerics.Identity;
       Covariance : Real_Vectors.Vector;
-      Used       : Natural := 0;               --  the answers that fit
-      Offered    : Natural := 0;               --  the answers it was given
-      Sigma_Px   : Real := 0.0;                --  the noise they show
-      Distorted  : Boolean := False;           --  the distortion terms are kept
+      Arms       : Count_Vectors.Vector;        --  every arm the eye saw, in the order of Poses
+      Poses      : Rigid_Vectors.Vector;        --  the camera in each one's frame
+      Joint      : Real_Vectors.Vector;
+      Used       : Natural := 0;               --  the pixels the fit kept
+      Offered    : Natural := 0;               --  the pixels two joints or more moved
+      Sigma_Px   : Real := 0.0;                --  how far it leaves the arms' points in its picture
       Why        : Ada.Strings.Unbounded.Unbounded_String;
-      --  What it was measured from, so that it is measured again only when that changed: the world arm's fit
-      --  (its keyframes with matches) and the sets of its reference matched into other eyes.
-      Judged       : Boolean := False;
-      From_Matches : Natural := 0;
-      From_Sets    : Natural := 0;
+      Judged     : Boolean := False;           --  the flow was fitted (a restart does not capture it again)
    end record;
 
    package Fixed_Fit_Vectors is new Ada.Containers.Vectors (Eye_Id, Fixed_Fit);
@@ -684,24 +810,69 @@ private
       Eye      : Eye_Id'Base := 0;
       Frames   : Keyframe_Vectors.Vector;   --  the first is the reference
       Query_U, Query_V : Real_Vectors.Vector;   --  the reference's query points
+      Query_Responds : Flag_Vectors.Vector;
+      --  Per query point: the lock-in saw its cell follow the arm's pushes when the points were chosen (or had not
+      --  told yet). Before its keyframes tell which points ride with the eye (Still), these are the points that
+      --  tell the view's common motion (Keyframes.Add's Riding).
       Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
       Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
       Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
       Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
-      Unanswerable : Boolean := False;   --  the instrument can never answer (no address): ask no more
-      --  The first arm's reference view matched into this arm's, its query
-      --  points into this arm's reference image (Kinematics.Observe), and of
-      --  which reference of which group it was asked.
-      World_Pending   : Pending_Vectors.Vector;
-      World_Matches   : Match_Set_Vectors.Vector;
-      World_Asked     : Boolean := False;
-      World_Group     : Group_Id'Base := 0;
-      World_Reference : Natural := 0;
-      --  The reference's query points matched into every other eye's view at
-      --  the reference beat, one set per eye (Kinematics.Observe).
-      Eye_Pending     : Pending_Vectors.Vector;
-      Eye_Matches     : Match_Set_Vectors.Vector;
+      Shifts   : Real_Vectors.Vector;
+      --  Per channel: how far the eye's view moves per reading unit of it, in pixels, as the aligner measured it over
+      --  the keyframes (Kinematics.Measure_Shifts: per point, the displacements regressed on the changes of every
+      --  channel that moved; the median over the points); 0 while not measured. Measured by the aligner, whose
+      --  windows reach half the picture through its pyramid, not by the lock-in's flow of one beat: that flow locks
+      --  on what does not move with the scene (a near-textureless table under JPEG blocks, the jaws the camera
+      --  carries) and reads a still picture where the camera moved (R4 on the Pi, 10-13: its slope came out 50 to
+      --  300 times under what the keyframes showed, the sweep's first level was 1087 reading units, and every
+      --  prediction's window was sized by it). Kept when the chain begins anew, and in the body file.
+      Shift_Sigmas : Real_Vectors.Vector;
+      --  Per channel: the standard deviation of that measurement; Real'Last while the keyframes do not determine the
+      --  channel at all. A channel's measurement may be insignificant yet bound the lock-in's slope
+      --  (Kinematics.Pixels_Per_Unit).
+      Shift_Points : Count_Vectors.Vector;   --  per channel: how many points that measurement rests on
+      Shift_Seen   : Flag_Vectors.Vector;    --  per channel, once told: the view moves with it (the points that move
+                                             --  with it are not a patch of those told: Kinematics.Measure_Shifts);
+                                             --  False for a channel that moves a part of the body in the view
+      Shift_Told   : Count_Vectors.Vector;   --  per channel: how many points were told of it
+      Scatter      : Real := 0.0;
+      --  How far the aligner errs on the arm's eye's pictures (Driver.Alignment.Keyframes.Scatter) as the keyframes
+      --  last measured it: kept when the sweep begins anew and in the body file, the eye's error until the keyframes
+      --  measure it again (Kinematics.Match_Noise); 0 until measured. An arm begun from a body file keeps no keyframes,
+      --  and its eye's error was unknown: s58 (servo seed 6, 10-18) placed none of the 336 points of its scene, and its
+      --  eye could not look around (Driver.Robot.Look), every place judged with an error of 0.
+      Asking   : Flag_Vectors.Vector;   --  per channel: the sweep is turning it now (Kinematics.Asking), copied into
+                                        --  the keyframes taken meanwhile (Keyframe.Asked)
+      Sweeping : Boolean := False;   --  the arm's sweep has begun (Kinematics.Begin_Anew): its keyframes are taken
+                                     --  from then on, none before (the recognition's holds would give the aligner
+                                     --  a keyframe at every pose, minutes of work, for a measurement the sweep's
+                                     --  first level makes itself)
+      Still    : Flag_Vectors.Vector;   --  per query point, once its keyframes tell: it does not move with the view
+      Stood_Off, Moved_With : Count_Vectors.Vector;
+      --  per query point: the keyframes whose common motion it stood against, and moved with
+      --  (Keyframes.Stood_And_Moved)
+      Stand_Rate : Real := 0.0;
+      Patch_Noise, Patch_Error : Real_Vectors.Vector;
+      --  per query point: the mean difference of its patch's levels between the reference and a keyframe at the
+      --  reference's pose (the noise alone), and that mean's standard error; zero before such a keyframe
+      Patch_Stood, Patch_Moving : Count_Vectors.Vector;
+      --  per query point: the keyframes in which most points' patches changed beyond their noise (the view moved), and
+      --  of those, the ones in which its own did not (Kinematics.Patch_Evidence)
+      Patch_Rate : Real := 0.0;
+      --  how often a point's patch stood in such a keyframe, over every point (Laplace's: one more over two more)
+      --  how often a point of the world stood against its keyframe's common motion (Measure_Shifts); 0 before any
+      --  point was told of the world
+                                        --  (Kinematics.Measure_Shifts: fixed to the eye, as the hand's jaws in a
+                                        --  wrist eye's view are, or answered at its place by false peaks); nothing
+                                        --  is known of a point beyond its length
+      --  Per channel and query point (the channel's block of the query points, Kinematics.Measure_Shifts' lines): how
+      --  far the point moves across and down the picture per unit of the channel, and whether its keyframes tell it.
+      --  The fit's one-joint stages take a keyframe's points to where its own joint alone would have put them
+      --  (Refit: Fit.Sighting's Off_U, Off_V).
+      Point_Gu, Point_Gv : Real_Vectors.Vector;
+      Point_G_Told       : Flag_Vectors.Vector;
       Result   : Arm_Fit;
    end record;
 
@@ -709,15 +880,22 @@ private
 
    type Model is tagged limited record
       Beats          : Natural := 0;               --  observations seen
+      Stepping       : Boolean := False;           --  a step is under way (Motion.One_Step): no keyframe is taken in it
       Groups         : Group_Stream_Vectors.Vector;
       Eyes           : Eye_Stream_Vectors.Vector;
       Noise          : Real_Vectors.Vector;        --  per channel of every group, in group order
+      Measure_Rounds : Natural := 0;               --  the rounds of noise and pushes the last measurement took (Channels.Measure)
       Noise_Freedom  : Count_Vectors.Vector;       --  the degrees of freedom each noise rests on
+      Drift          : Real_Vectors.Vector;        --  per channel, as Noise: the readings' steady change a beat at
+                                                   --  rest (Channels.Drift), 0 where none stands out
       Lags           : Lag_Vectors.Vector;
       Lag_Known      : Eye_Flag_Vectors.Vector;    --  per eye: its lag stood out of every shift tried
+      Settling_Kept  : Lag_Vectors.Vector;         --  per eye: the longest it took to settle after a move, as the
+                                                   --  body file kept it (Longest_Settling); empty when none was
       Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
+      Lag_Evidence   : Natural := 0;               --  the beats the eyes' lags were last measured from (Recompute)
       Kinematics     : Arm_Evidence_Vectors.Vector;   --  per arm with an eye
       Fixed_Eyes     : Fixed_Fit_Vectors.Vector;     --  per eye: what is measured of it when it is fixed in the world
       Is_Booted      : Boolean := False;

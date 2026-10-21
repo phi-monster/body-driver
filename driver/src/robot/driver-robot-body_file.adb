@@ -6,6 +6,7 @@ with Driver.Json;
 with Driver.Log;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
+with Driver.Robot.Kinematics;
 
 package body Driver.Robot.Body_File is
 
@@ -40,6 +41,56 @@ package body Driver.Robot.Body_File is
       Append (T, "]");
       return To_String (T);
    end Reals;
+
+   --  Per channel of an arm, the standard deviation of how far the view moves per unit as its keyframes
+   --  measured it (Kinematics.Measure_Shifts), 0 where it is not measured, and which are.
+   function Shift_Sigmas_Of (R : Arm_Evidence) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      for S of R.Shift_Sigmas loop
+         V.Append (if S < Real'Last then S else 0.0);
+      end loop;
+      return V;
+   end Shift_Sigmas_Of;
+
+   function Shifts_Known_Of (R : Arm_Evidence) return Flag_Vectors.Vector is
+      V : Flag_Vectors.Vector;
+   begin
+      for S of R.Shift_Sigmas loop
+         V.Append (S < Real'Last);
+      end loop;
+      return V;
+   end Shifts_Known_Of;
+
+   --  Every channel's creep (Model.Drift), one for each noise: 0 where it was not measured.
+   function Drift_Of (M : Model) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      for K in 0 .. Natural (M.Noise.Length) - 1 loop
+         V.Append (if K < Natural (M.Drift.Length) then M.Drift (K) else 0.0);
+      end loop;
+      return V;
+   end Drift_Of;
+
+   --  Per channel of a group, the least ask a push moved it for (Group_Stream.Executed), 0 where none did yet,
+   --  and which did.
+   function Executed_Of (S : Group_Stream) return Real_Vectors.Vector is
+      V : Real_Vectors.Vector;
+   begin
+      for X of S.Executed loop
+         V.Append (if X < Real'Last then X else 0.0);
+      end loop;
+      return V;
+   end Executed_Of;
+
+   function Executed_Known_Of (S : Group_Stream) return Flag_Vectors.Vector is
+      V : Flag_Vectors.Vector;
+   begin
+      for X of S.Executed loop
+         V.Append (X < Real'Last);
+      end loop;
+      return V;
+   end Executed_Known_Of;
 
    function Counts (V : Count_Vectors.Vector) return String is
       T : Unbounded_String := To_Unbounded_String ("[");
@@ -79,6 +130,18 @@ package body Driver.Robot.Body_File is
       & Num (R (2, 1)) & ", " & Num (R (2, 2)) & ", " & Num (R (2, 3)) & ", "
       & Num (R (3, 1)) & ", " & Num (R (3, 2)) & ", " & Num (R (3, 3)) & "]");
 
+   --  Poses as a list of their rotations and centres.
+   function Poses (V : Rigid_Vectors.Vector) return String is
+      T : Unbounded_String := To_Unbounded_String ("[");
+   begin
+      for I in V.First_Index .. V.Last_Index loop
+         Append (T, (if I > V.First_Index then ", " else "") & "{""rotation"": " & Nine (V (I).Rotation)
+                 & ", ""centre"": " & Three (V (I).Translation) & "}");
+      end loop;
+      Append (T, "]");
+      return To_String (T);
+   end Poses;
+
    function Text (M : Model) return String is
       T : Unbounded_String;
 
@@ -102,7 +165,7 @@ package body Driver.Robot.Body_File is
 
       --  The readings' noise, every channel of every group in group order.
       Add (" ""noise"": {""method"": " & Int (Noise_Method) & ", ""sigma"": " & Reals (M.Noise)
-           & ", ""freedom"": " & Counts (M.Noise_Freedom) & "}," & LF);
+           & ", ""freedom"": " & Counts (M.Noise_Freedom) & ", ""drift"": " & Reals (Drift_Of (M)) & "}," & LF);
 
       --  The readings every channel has moved through.
       Add (" ""travel"": {""method"": " & Int (Travel_Method) & ", ""groups"": [");
@@ -125,13 +188,16 @@ package body Driver.Robot.Body_File is
       end loop;
       Add ("]}," & LF);
 
-      --  The step responses: the longest wait for an answer, and every free
-      --  push's shortfall.
+      --  The step responses: the longest wait for an answer, every free
+      --  push's shortfall, and per channel the least ask a push moved it for.
       Add (" ""steps"": {""method"": " & Int (Steps_Method) & ", ""groups"": [");
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""delay"": " & Int (M.Groups (G).Delay_Beats)
               & ", ""delay_known"": " & Flag (M.Groups (G).Delay_Known)
-              & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls) & "}");
+              & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls)
+              & ", ""pause"": " & Int (M.Groups (G).Pause)
+              & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
+              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G))) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -139,7 +205,8 @@ package body Driver.Robot.Body_File is
       Add (" ""lags"": {""method"": " & Int (Lag_Method) & ", ""eyes"": [");
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          Add (Separator (E = M.Eyes.First_Index) & "{""value"": " & Int (Image_Lag (M, E))
-              & ", ""known"": " & Flag (Lag_Known (M, E)) & "}");
+              & ", ""known"": " & Flag (Lag_Known (M, E))
+              & ", ""settling"": " & Int (Longest_Settling (M, E)) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -153,7 +220,9 @@ package body Driver.Robot.Body_File is
             Add (Separator (E = M.Eyes.First_Index) & LF & "  {""rest_factor"": " & Num (S.Rest_Factor)
                  & ", ""rest_counts_known"": " & Flag (S.Rest_Counts_Known)
                  & ", ""rest_count_max"": " & Int (S.Rest_Count_Max)
+                 & ", ""rest_count_level"": " & Num (S.Rest_Count_Level)
                  & ", ""rest_count_beats"": " & Int (S.Rest_Count_Beats)
+                 & ", ""rest_count_above"": " & Int (S.Rest_Count_Above)
                  & ", ""noise"": " & Reals (S.Noise)
                  & ", ""textured"": " & Flags (S.Textured)
                  & ", ""kept_groups"": " & Counts (S.Kept_Groups)
@@ -169,7 +238,8 @@ package body Driver.Robot.Body_File is
                   Add (Separator (G = M.Groups.First_Index) & "{""verdict"": " & Word (Eye_Response'Image (F.Verdict))
                        & ", ""responding"": " & Int (F.Responding) & ", ""textured"": " & Int (F.Textured)
                        & ", ""fraction"": " & Num (F.Fraction.Value) & ", ""sigma"": " & Num (F.Fraction.Sigma)
-                       & ", ""freedom"": " & Int (F.Fraction.Degrees_Of_Freedom) & "}");
+                       & ", ""freedom"": " & Int (F.Fraction.Degrees_Of_Freedom)
+                       & ", ""could_be_whole"": " & Int ((if F.Could_Be_Whole then 1 else 0)) & "}");
                end;
             end loop;
             Add ("]}");
@@ -182,11 +252,17 @@ package body Driver.Robot.Body_File is
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          Add (Separator (G = M.Groups.First_Index) & "{""role"": " & Word (Group_Role'Image (Role (M, G)))
               & ", ""arm"": " & Int (if G <= M.Graph.Arm_Of.Last_Index then Integer (M.Graph.Arm_Of (G)) else 0)
-              & ", ""breach"": " & Int (Contract_Breach (M, G)) & "}");
+              & ", ""breach"": " & Int (Contract_Breach (M, G))
+              & ", ""seen_at"": " & Reals (M.Groups (G).Seen_At) & "}");
       end loop;
       Add ("], ""arms"": [");
       for A in M.Graph.Arms.First_Index .. M.Graph.Arms.Last_Index loop
          Add (Separator (A = M.Graph.Arms.First_Index) & Int (Integer (M.Graph.Arms (A))));
+      end loop;
+      Add ("], ""arm_eyes"": [");
+      for A in M.Graph.Arms.First_Index .. M.Graph.Arms.Last_Index loop
+         Add (Separator (A = M.Graph.Arms.First_Index)
+              & Int (if A <= M.Graph.Arm_Eye.Last_Index then Integer (M.Graph.Arm_Eye (A)) else 0));
       end loop;
       Add ("], ""carrier"": " & Int (Integer (M.Graph.Carrier)) & ", ""mounts"": [");
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
@@ -209,6 +285,10 @@ package body Driver.Robot.Body_File is
          begin
             Add (Separator (K = M.Kinematics.First_Index) & LF & "  {""arm"": " & Int (Integer (R.Arm))
                  & ", ""group"": " & Int (Integer (R.Group)) & ", ""eye"": " & Int (Integer (R.Eye))
+                 & ", ""shifts"": " & Reals (R.Shifts) & ", ""shift_sigmas"": " & Reals (Shift_Sigmas_Of (R))
+                 & ", ""shifts_known"": " & Flags (Shifts_Known_Of (R)) & ", ""shift_points"": " & Counts (R.Shift_Points)
+                 & ", ""shifts_seen"": " & Flags (R.Shift_Seen) & ", ""shift_told"": " & Counts (R.Shift_Told)
+                 & ", ""match_noise"": " & Num (Kinematics.Match_Noise (M, R.Arm))
                  & ", ""fitted"": " & Flag (F.Fitted) & ", ""reference"": " & Reals (F.Reference)
                  & ", ""chain"": " & Counts (F.Chain) & ", ""joints"": [");
             for J in F.Joints.First_Index .. F.Joints.Last_Index loop
@@ -223,11 +303,13 @@ package body Driver.Robot.Body_File is
                  & ", ""sigma_px"": " & Num (F.Sigma_Px) & ", ""matches"": " & Int (F.Matches)
                  & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
                  & ", ""covariance"": " & Reals (F.Covariance)
+                 & ", ""unit_changes"": " & Reals (F.Unit_Changes)
                  & ", ""table"": {""centre"": " & Three (F.Table.Centre) & ", ""normal"": " & Three (F.Table.Normal)
                  & ", ""tangent"": " & Three (F.Table.Tangent_1) & ", ""offset_sigma"": " & Num (F.Table.Offset_Sigma)
                  & ", ""tilt"": [" & Num (F.Table.Tilt_11) & ", " & Num (F.Table.Tilt_12) & ", "
                  & Num (F.Table.Tilt_22) & "], ""points"": " & Int (F.Table.Points)
-                 & ", ""scatter"": " & Num (F.Table.Scatter) & "}"
+                 & ", ""scatter"": " & Num (F.Table.Scatter) & ", ""response"": " & Reals (F.Table_Response)
+                 & ", ""own"": " & Nine (F.Table_Own) & "}"
                  & ", ""placed"": " & Flag (F.Placed)
                  & ", ""placement"": {""rotation"": " & Nine (F.Placement.Rotation)
                  & ", ""centre"": " & Three (F.Placement.Translation)
@@ -255,9 +337,9 @@ package body Driver.Robot.Body_File is
                        & ", ""rotation"": " & Nine (F.Pose.Rotation) & ", ""centre"": " & Three (F.Pose.Translation)
                        & ", ""covariance"": " & Reals (F.Covariance) & ", ""used"": " & Int (F.Used)
                        & ", ""offered"": " & Int (F.Offered) & ", ""sigma_px"": " & Num (F.Sigma_Px)
-                       & ", ""distorted"": " & Flag (F.Distorted)
-                       & ", ""why"": " & Driver.Json.Quote (To_String (F.Why))
-                       & ", ""from_matches"": " & Int (F.From_Matches) & ", ""from_sets"": " & Int (F.From_Sets) & "}");
+                       & ", ""arms"": " & Counts (F.Arms) & ", ""poses"": " & Poses (F.Poses)
+                       & ", ""joint"": " & Reals (F.Joint)
+                       & ", ""why"": " & Driver.Json.Quote (To_String (F.Why)) & "}");
                   First := False;
                end if;
             end;
@@ -406,10 +488,11 @@ package body Driver.Robot.Body_File is
             N : constant Node := Field (Top, "noise");
          begin
             if Method_Is (N, Noise_Method) and then Size (Field (N, "sigma")) = Channels
-              and then Size (Field (N, "freedom")) = Channels
+              and then Size (Field (N, "freedom")) = Channels and then Size (Field (N, "drift")) = Channels
             then
                M.Noise := Reals_Of (Field (N, "sigma"));
                M.Noise_Freedom := Counts_Of (Field (N, "freedom"));
+               M.Drift := Reals_Of (Field (N, "drift"));
                Restored (Stored_Noise) := True;
             end if;
          end;
@@ -518,6 +601,17 @@ package body Driver.Robot.Body_File is
                      S.Delay_Beats := Natural'Max (0, Whole (Item (Gs, I), "delay"));
                      S.Delay_Known := Truth (Item (Gs, I), "delay_known");
                      S.Free_Shortfalls := Reals_Of (Field (Item (Gs, I), "free_shortfalls"));
+                     --  A body file written before pauses were measured has none: the group pauses as it is seen to.
+                     S.Pause := Natural'Max (0, Whole (Item (Gs, I), "pause"));
+                     declare
+                        Ex    : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), "executed"));
+                        Known : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), "executed_known"));
+                     begin
+                        S.Executed.Clear;
+                        for J in Ex.First_Index .. Ex.Last_Index loop
+                           S.Executed.Append (if J <= Known.Last_Index and then Known (J) then Ex (J) else Real'Last);
+                        end loop;
+                     end;
                   end;
                end loop;
                Restored (Stored_Steps) := True;
@@ -532,9 +626,11 @@ package body Driver.Robot.Body_File is
             if Restored (Stored_Noise) and then Method_Is (N, Lag_Method) and then Size (Es) = Eye_Count then
                M.Lags.Clear;
                M.Lag_Known.Clear;
+               M.Settling_Kept.Clear;
                for I in 1 .. Eye_Count loop
                   M.Lags.Append (Whole (Item (Es, I), "value"));
                   M.Lag_Known.Append (Truth (Item (Es, I), "known"));
+                  M.Settling_Kept.Append (Natural'Max (0, Whole (Item (Es, I), "settling")));
                end loop;
                Restored (Stored_Lags) := True;
             end if;
@@ -559,7 +655,9 @@ package body Driver.Robot.Body_File is
                      S.Rest_Factor := Value (Field (X, "rest_factor"));
                      S.Rest_Counts_Known := Truth (X, "rest_counts_known");
                      S.Rest_Count_Max := Natural'Max (0, Whole (X, "rest_count_max"));
+                     S.Rest_Count_Level := Value (Field (X, "rest_count_level"));
                      S.Rest_Count_Beats := Natural'Max (0, Whole (X, "rest_count_beats"));
+                     S.Rest_Count_Above := Natural'Max (0, Whole (X, "rest_count_above"));
                      S.Noise := Reals_Of (Field (X, "noise"));
                      S.Textured := Flags_Of (Field (X, "textured"));
                      S.Kept_Groups := Counts_Of (Field (X, "kept_groups"));
@@ -579,7 +677,10 @@ package body Driver.Robot.Body_File is
                                Fraction   => (Value              => Value (Field (Y, "fraction")),
                                               Sigma              => Value (Field (Y, "sigma")),
                                               Degrees_Of_Freedom => Natural'Max (0, Whole (Y, "freedom"))),
-                               Resting    => 0.0));
+                               Resting    => 0.0,
+                               Rest_Pull  => 0.0,
+                               --  Absent from a file written before it: as then, the eye may ride on the group.
+                               Could_Be_Whole => Whole (Y, "could_be_whole") /= 0));
                         end;
                      end loop;
                   end;
@@ -605,10 +706,17 @@ package body Driver.Robot.Body_File is
                   M.Graph.Roles.Append (Group_Role'Value (Driver.Json.Text (Doc, Field (Item (Gs, I), "role"))));
                   M.Graph.Arm_Of.Append (Arm_Id'Base (Natural'Max (0, Whole (Item (Gs, I), "arm"))));
                   M.Graph.Breach.Append (Natural'Max (0, Whole (Item (Gs, I), "breach")));
+                  M.Groups (Group_Id (I)).Seen_At := Reals_Of (Field (Item (Gs, I), "seen_at"));
                end loop;
                M.Graph.Arms.Clear;
+               M.Graph.Arm_Eye.Clear;
                for I in 1 .. Size (As) loop
                   M.Graph.Arms.Append (Group_Id (Whole (Item (As, I))));
+                  --  The eye an arm of a split group is for; none in a body file of before the split (and for every arm
+                  --  of a whole group).
+                  M.Graph.Arm_Eye.Append
+                    (if Size (Field (N, "arm_eyes")) = Size (As) then Eye_Id'Base (Natural'Max (0, Whole (Item (Field (N, "arm_eyes"), I))))
+                     else 0);
                end loop;
                M.Graph.Carrier := Group_Id'Base (Natural'Max (0, Whole (N, "carrier")));
                M.Graph.Mounts.Clear;
@@ -645,6 +753,23 @@ package body Driver.Robot.Body_File is
                      Js : constant Node := Field (X, "joints");
                      L  : constant Node := Field (X, "lens");
                   begin
+                     --  What its keyframes measured of how far the view moves per unit (Kinematics.Measure_Shifts),
+                     --  with its standard deviation, as it was.
+                     R.Shifts := Reals_Of (Field (X, "shifts"));
+                     R.Shift_Points := Counts_Of (Field (X, "shift_points"));
+                     R.Shift_Seen := Flags_Of (Field (X, "shifts_seen"));
+                     R.Shift_Told := Counts_Of (Field (X, "shift_told"));
+                     --  How far the aligner errs on its eye's pictures, as its keyframes measured it; absent from a
+                     --  file written before it was kept: not measured.
+                     R.Scatter := (if Is_Number (Field (X, "match_noise")) then Value (Field (X, "match_noise")) else 0.0);
+                     declare
+                        Sigmas : constant Real_Vectors.Vector := Reals_Of (Field (X, "shift_sigmas"));
+                        Known  : constant Flag_Vectors.Vector := Flags_Of (Field (X, "shifts_known"));
+                     begin
+                        for J in Sigmas.First_Index .. Sigmas.Last_Index loop
+                           R.Shift_Sigmas.Append (if J <= Known.Last_Index and then Known (J) then Sigmas (J) else Real'Last);
+                        end loop;
+                     end;
                      R.Result.Fitted := Truth (X, "fitted");
                      R.Result.Reference := Reals_Of (Field (X, "reference"));
                      R.Result.Chain := Counts_Of (Field (X, "chain"));
@@ -664,6 +789,7 @@ package body Driver.Robot.Body_File is
                      R.Result.Matches := Natural'Max (0, Whole (X, "matches"));
                      R.Result.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                      R.Result.Covariance := Reals_Of (Field (X, "covariance"));
+                     R.Result.Unit_Changes := Reals_Of (Field (X, "unit_changes"));
                      declare
                         T : constant Node := Field (X, "table");
                         P : constant Node := Field (X, "placement");
@@ -679,6 +805,15 @@ package body Driver.Robot.Body_File is
                         R.Result.Table.Tilt_22 := Value (Item (Tilt, 3));
                         R.Result.Table.Points := Natural'Max (0, Whole (T, "points"));
                         R.Result.Table.Scatter := Value (Field (T, "scatter"));
+                        R.Result.Table_Response := Reals_Of (Field (T, "response"));
+                        declare
+                           Own : constant Real_Vectors.Vector := Reals_Of (Field (T, "own"));
+                        begin
+                           if Natural (Own.Length) = 9 then
+                              R.Result.Table_Own :=
+                                [for I in 1 .. 3 => [for J in 1 .. 3 => Own (Own.First_Index + 3 * (I - 1) + J - 1)]];
+                           end if;
+                        end;
                         R.Result.Placed := Truth (X, "placed");
                         R.Result.Placement := (Rotation    => Nine_Of (Field (P, "rotation")),
                                                Translation => Three_Of (Field (P, "centre")));
@@ -721,11 +856,20 @@ package body Driver.Robot.Body_File is
                               F.Used := Natural'Max (0, Whole (X, "used"));
                               F.Offered := Natural'Max (0, Whole (X, "offered"));
                               F.Sigma_Px := Value (Field (X, "sigma_px"));
-                              F.Distorted := Truth (X, "distorted");
                               F.Why := To_Unbounded_String (Driver.Json.Text (Doc, Field (X, "why")));
                               F.Judged := True;
-                              F.From_Matches := Natural'Max (0, Whole (X, "from_matches"));
-                              F.From_Sets := Natural'Max (0, Whole (X, "from_sets"));
+                              F.Arms := Counts_Of (Field (X, "arms"));
+                              F.Joint := Reals_Of (Field (X, "joint"));
+                              declare
+                                 Ps : constant Node := Field (X, "poses");
+                              begin
+                                 for P in 1 .. Size (Ps) loop
+                                    F.Poses.Append
+                                      (Driver.Numerics.Rigid'
+                                         (Rotation    => Nine_Of (Field (Item (Ps, P), "rotation")),
+                                          Translation => Three_Of (Field (Item (Ps, P), "centre"))));
+                                 end loop;
+                              end;
                            end;
                         end if;
                      end;
@@ -751,10 +895,27 @@ package body Driver.Robot.Body_File is
                         end;
                      end if;
                   end loop;
+                  for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                     if (for some S of M.Kinematics (K).Shift_Sigmas => S < Real'Last) then
+                        Restored (Stored_Shifts) := True;
+                     end if;
+                  end loop;
                   if All_Fitted then
                      Restored (Stored_Kinematics) := True;
                   else
-                     M.Kinematics.Clear;
+                     --  The fits go; what the arms' keyframes measured of how far the view moves per unit of
+                     --  each joint stays: the recognition's keyframes measured it, the sweep's first levels are
+                     --  sized by it, and a boot that reloaded the graph without it began its sweep from turns
+                     --  of 2.4 units, which the servos did not execute (R5 on the Pi, 10-14).
+                     for K in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+                        declare
+                           R : Arm_Evidence renames M.Kinematics (K);
+                        begin
+                           R := (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => R.Shifts,
+                                 Shift_Sigmas => R.Shift_Sigmas, Shift_Points => R.Shift_Points,
+                                 Shift_Seen => R.Shift_Seen, Shift_Told => R.Shift_Told, others => <>);
+                        end;
+                     end loop;
                      M.Fixed_Eyes.Clear;
                   end if;
                end;
@@ -774,6 +935,7 @@ package body Driver.Robot.Body_File is
                when Stored_Lags       => "the image lags",
                when Stored_Responses  => "the eyes' responses",
                when Stored_Graph      => "the graph",
+               when Stored_Shifts     => "how far the view moves per unit of each joint",
                when Stored_Kinematics => "the kinematics");
       begin
          for Q in Stored loop

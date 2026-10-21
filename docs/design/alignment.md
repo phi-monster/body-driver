@@ -41,13 +41,62 @@ pixel). The cost is on the first fit: the arm's lens is known to about 2.5 % unt
 (A79 arm 1: focal sigma 9.8 px at the first fit, 1.9 px at the last); a sweep with a keyframe between 35 and 140 px would
 have the widest ones predicted narrow at once.
 
+## A fitted arm predicts each point at its own depth
+
+The fitted arm predicts every point it has a depth for (`Kinematics.Offer_Of`): where the eye at the keyframe's readings
+sees it, as uncertain as the fit leaves the eye's pose and the point's depth, and as the farthest untold order of the
+joints puts it. A point without a depth it does not predict.
+
+On w11 (servo seed 11 of the fake robot, 10-19, replayed and judged against the simulator's truth), arm 2 turned its
+joints 1 and 3 together by 100 and 308 units, four times (keyframes 75 to 78), and its view's points moved 112 to 126
+px. At each keyframe 10 to 40 points had the arm's prediction. Against the truth those points were off by a median 1.6
+to 2.6 px, where the arm stated 4.8 to 6.6. The keyframe's other points were extrapolated from the single-joint
+keyframes before, and were off by 100 to 116 px against the 44 to 71 they stated. No point stood with any of the
+four keyframes. The arm's points were asked from windows wider than a patch: 9, 2, 2 and 0 of them were answered,
+none from a narrow window and none where the keyframe's field agreed. The reasons:
+
+- the prediction chosen for a keyframe was the one whose median over all its points states least. The arm's is
+  unbounded where it has no depth, so the extrapolation won at every keyframe traced;
+- once the arm's prediction was taken point by point, its points were still handled as the rest of the keyframe. They
+  were checked against the view's common motion, which is one plane's motion, and asked again from the keyframe's
+  field, one smooth map of the picture. Neither holds what lies at other depths than the plane it follows.
+
+At half that turn (keyframes 114 to 117, the points moving 46 to 64 px), 19, 19, 25 and 17 points stood with the
+keyframes, every one of them the arm's and from a narrow window.
+
+So each point is asked from whichever prediction states less there. A point the arm predicted is asked where the arm
+puts it in every round, and it is taken at a place of its own on the common motion only inside the window the arm
+states for it. Once found there it stands with the keyframe, as a point at a place of its own does
+(`Keyframes.Predict`, `Supplied_At`; `Keyframes.Add`).
+
+Replayed so on u21 (servo seed 3, 10-19), 13 of its 22 keyframes of pairs still had no point stand (15 of 23 on its
+live run). At each, the arm's 36 to 102 points lay within 1 to 8 px of the truth on the median, but the arm stated 7 to
+15 px for them, because the farthest of its 12 untold orders put them that far, and every one was asked from a window
+wider than a patch. The pair to turn had been chosen for the two orders it told apart most, within the window those two
+need. A keyframe is searched in the window that reaches every untold order's places, so the turn is now chosen by that
+window: the median, over the points, of the farthest place an untold order puts each, within what a narrow window
+follows (`Kinematics.Fit`, the active planner's `Spread_Of`). While many orders are untold, the turns are small.
+
+The arm's own uncertainty was itself three times too wide. Its turn's and its place's were added as if apart, though a
+turn of the eye and a shift of it that move the view alike are told apart by little; the lens's was left out, and so was
+what each point's depth shares with the arm's terms. Replayed on u25 (servo seed 3, 10-19), the arm's points lay 0.51 px
+from the truth on the median of an axis and it stated 2.26 px for them, the untold orders' part 0.18 px of it. The
+prediction now carries the fit's whole covariance: every term moves the eye, the lens and the point's depth together
+(`Kinematics.Offer_Of`). It states 0.60 px, the error over it 0.67 on the median as the Gaussian's, though more often far
+out (3.55 at the 99th percentile for 2.58). The keyframes the arm predicted that found no point went from 12 of 29 to 3
+of 94, and the keyframes found a quarter more sightings, as close to the truth.
+
+A keyframe aligned again from the fitted arm (`Keyframes.Realign`) takes the arm's prediction at every point, and its
+points found narrowly where the arm put them stand, as in `Add`.
+
 ## The fit's last stage is chaotic on some data
 
 Perturbing the sightings of A23's arm 2 by 1e-9 px moved its focal length between 396.9 and 399.2 px (stated sigma
 0.8 px) in an earlier version of the alignment, and moves it between 397.8 and 398.25 px (stated sigma 0.68 px) in this one;
-the other five arms and every RoMa input do not move (under 0.05 px). The descent of the last stage goes down a
-curved narrow valley (the focal length against the distortion): the damping of its Levenberg-Marquardt steps swings between
-16 and 1e5 and the 53 rounds it is given are spent before it ends, where it ends depends on the rounding. Given 424 rounds
+the other five arms, and every fit on the answers RoMa gave (the instrument's matcher then, since removed), do not move
+(under 0.05 px). The descent of the last stage goes down a curved narrow valley (the focal length against the
+distortion): the damping of its Levenberg-Marquardt steps swings between 16 and 1e5 and the 53 rounds it is given are
+spent before it ends, where it ends depends on the rounding. Given 424 rounds
 it ends at 399.2 for every perturbation: that is the optimum of these sightings (their sigmas are too small for the far
 keyframes, whose true errors are twice what they state), 2.8 sigma from the truth; the 397.5 that 53 rounds reach is a
 state that has not converged. The pass loop that re-chooses the sightings now ends at a choice it has met (a fixed point
@@ -59,3 +108,35 @@ With the prediction the truth gives (error 0 px) the aligner finds 27 % of the p
 eye's at the same beat (22 % within a pixel; the head eye shows what a wrist eye shows at 0.33 to 0.56 of its size);
 with an error of 8 px, 10 %, almost all wrong. A prediction that is itself what is being measured cannot start the
 head eye: a matcher that does not need one (invariant to the scale and the view) has to.
+
+## A fixed eye that watches an arm (measured on A22 and A79, 10-10; not built)
+
+The head eye of the official rig sees both arms from about 0.4 m. Its picture changes little in a boot (the arm's holds move the
+hand 1 to 45 px in A22, much more in A79's later sweeps); what moves is the arm, not the eye. The lock-in already tells which cells
+those are (A22, last map: group 1 responds in 69 cells of which 44 are at least 30 % on the left arm, the truth's left arm covers
+46 cells; group 3 likewise 67, 47 and 46: recall about 95 %, precision about 65 %, the rest are the table around the arm and its
+shadow). Measured with the aligner as it is (holds only: the arm still at a pose different from the rest pose's, both pictures of the
+head eye, the truth's rendering of where every arm point of the rest picture lands; A22: 151 poses, 2437 points on a 4 px grid):
+
+- With a prediction exact to the truth, the aligner finds the arm's points that moved 1-2 px in 97 %, 2-4 px 89 %, 4-8 px 80 %, 8-16 px 60 %,
+  16-32 px 34 %, over 32 px 19 %; within 1 px of the truth in 94 %, 83 %, 73 %, 51 %, 26 %, 15 % of all those asked; the median error of
+  the answers is 0.17, 0.23, 0.35, 0.47, 0.61, 0.67 px. Points whose whole patch lies on one link do better (4-8 px: 91 % found, 85 % within a
+  pixel). With the prediction a pixel off: 90 %, 91 %, 86 %, 74 % found for the same four classes. A79 (larger sweeps): 88 %, 75 %, 54 %, 44 %.
+- The answers' stated sigma is as honest as the arm's own eye's: median error over sigma 0.8 to 0.4 (a Gaussian's is 0.67); beyond
+  three sigmas 1 to 6 % of the axes; their tails are lighter than the far classes of the wrist eye.
+- A frame taken while the arm is moving is not a test of anything: the image trails the readings by a beat and the arm moves 2 px a beat in
+  a pulse (the first look, on the pairs of every eighth displaced beat, found 15 % of the moving points and was wrong for that reason).
+- A linear model of the joint readings fitted on the poses near the rest pose (what the lock-in's regression per cell is) predicts a
+  moved point to 0.1 px (moves of 2-4 px), 0.2-0.5 px (4-8), 0.8-1.1 px (8-16), 2.7 px (16-32) at the median (90 %: 0.3, 0.7-1.4, 2.1-2.4,
+  4.9 px): about a tenth of the move beyond 8 px, enough to align the next keyframe in a window the aligner can search.
+- The Cramer-Rao bound of the eye's lens (fx fy cx cy) and pose (6) from points tracked on the arm with depths unknown and the arm's
+  motion known exactly: 200 points over 150 poses, 0.3 px each: fx 0.13 px (0.04 %), centre 0.2 px, pose 0.03-0.04 deg and 0.2 mm; 40 poses:
+  fx 1 px (0.3 %); 10 poses: fx 4 px (1.4 %).
+- Bundle adjustment of the real answers (found, a prediction a pixel off) with the arm's motion from the truth: 50 to 400 points: fx -0.7 to
+  -0.2 %, centre 1-4 px, from poses start 60 deg and 200 mm off.
+- The same with the arm's motion from the arm's own fit (the joints of the final fit, composed as Eye_At does) and a start found by a
+  global search over the arm frame's rotation into the eye's (the translation, the depths linear for each rotation): see the numbers
+  in the commit that adds the module.
+
+The arm's pose error is what limits it: an extra 0.5 mm and 0.2 deg of random error in each pose's motion moved the fit's focal length
+by 11 % (synthetic, truth motion); the arm's real fit errors are systematic, not random, and the real test is above.

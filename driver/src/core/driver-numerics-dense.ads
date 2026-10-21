@@ -17,6 +17,16 @@ package Driver.Numerics.Dense with Preelaborate is
      with Pre => L'Length (1) = L'Length (2) and then B'Length = L'Length (1);
    --  Solves L * Transpose (L) * X = B for a factor from Cholesky.
 
+   procedure Small_Eigensystem (A : Real_Matrix; Values : out Real_Vector; Vectors : out Real_Matrix)
+     with Pre => A'Length (1) = A'Length (2) and then Values'Length = A'Length (1)
+                 and then Vectors'Length (1) = A'Length (1) and then Vectors'Length (2) = A'Length (1);
+   --  The eigenvalues of the symmetric A (its upper triangle read) and its eigenvectors, a column each, in no order:
+   --  cyclic Jacobi rotations on copies the caller's frame holds, with the hardware's square root. The standard
+   --  Eigensystem's arrays on the secondary stack and the software square root its Jacobi takes were a fifth of the
+   --  arm fit's stage 1, its four-by-four eigensystem asked for every direction scanned (10-20). An off-diagonal
+   --  entry that no longer changes either diagonal entry in the float is nought; the sweeps end when every one is,
+   --  as many sweeps at most as the float has bits.
+
    procedure Least_Squares
      (A         : Real_Matrix;
       B         : Real_Vector;

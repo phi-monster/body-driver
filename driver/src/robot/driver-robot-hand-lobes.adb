@@ -159,6 +159,137 @@ package body Driver.Robot.Hand.Lobes is
       return L;
    end Components;
 
+   procedure Tip_Of (Lobe_Mask, Seeds, Attached : Mask; Tip : out Pixel; Known : out Boolean);
+
+   procedure Moved_Lobe
+     (Before   : Mask;
+      Changed  : Mask;
+      Anchored : Driver.Pixels.View;
+      Now      : Driver.Pixels.View;
+      Region   : out Mask;
+      Centre   : out Pixel;
+      Tip      : out Pixel;
+      Known    : out Boolean)
+   is
+      W     : constant Natural := Width (Before);
+      H     : constant Natural := Height (Before);
+      Moved : Mask := Create (W, H);
+   begin
+      Region := Create (W, H);
+      Centre := (U => 0.0, V => 0.0);
+      Tip := (U => 0.0, V => 0.0);
+      Known := False;
+      if W = 0 or else H = 0 or else Width (Changed) /= W or else Height (Changed) /= H
+        or else Driver.Pixels.Width (Anchored) /= W or else Driver.Pixels.Height (Anchored) /= H
+        or else Driver.Pixels.Width (Now) /= W or else Driver.Pixels.Height (Now) /= H
+        or else Driver.Pixels.Frames (Anchored) = 0 or else Driver.Pixels.Frames (Now) = 0
+      then
+         return;
+      end if;
+      declare
+         Was    : Real_Access := new Real_Array (1 .. W * H);
+         Is_Now : Real_Access := new Real_Array (1 .. W * H);
+         Inside, Around : Real_Access;
+         In_Count, Around_Count : Natural := 0;
+         Half_Contrast : Real;
+
+         --  The pixel is not the lobe's and touches one of its pixels.
+         function Touches (C, R : Natural) return Boolean is
+         begin
+            if Contains (Before, C, R) then
+               return False;
+            end if;
+            for Dr in -1 .. 1 loop
+               for Dc in -1 .. 1 loop
+                  if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1 and then Contains (Before, C + Dc, R + Dr) then
+                     return True;
+                  end if;
+               end loop;
+            end loop;
+            return False;
+         end Touches;
+      begin
+         Driver.Pixels.Means (Anchored, Was.all);
+         Driver.Pixels.Means (Now, Is_Now.all);
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R) then
+                  In_Count := In_Count + 1;
+               elsif Touches (C, R) then
+                  Around_Count := Around_Count + 1;
+               end if;
+            end loop;
+         end loop;
+         if In_Count = 0 or else Around_Count = 0 then
+            Free (Was);
+            Free (Is_Now);
+            return;
+         end if;
+         Inside := new Real_Array (1 .. In_Count);
+         Around := new Real_Array (1 .. Around_Count);
+         In_Count := 0;
+         Around_Count := 0;
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R) then
+                  In_Count := In_Count + 1;
+                  Inside (In_Count) := Was (R * W + C + 1);
+               elsif Touches (C, R) then
+                  Around_Count := Around_Count + 1;
+                  Around (Around_Count) := Was (R * W + C + 1);
+               end if;
+            end loop;
+         end loop;
+         Half_Contrast := abs (Driver.Stats.Median (Inside.all) - Driver.Stats.Median (Around.all)) / 2.0;
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (Before, C, R)
+                 /= (Contains (Changed, C, R) and then abs (Is_Now (R * W + C + 1) - Was (R * W + C + 1)) > Half_Contrast)
+               then
+                  Include (Moved, C, R);
+               end if;
+            end loop;
+         end loop;
+         Free (Was);
+         Free (Is_Now);
+         Free (Inside);
+         Free (Around);
+      end;
+      declare
+         L      : constant Labels := Components (Moved);
+         Shared : array (1 .. L.Count) of Natural := [others => 0];
+         Best   : Natural := 0;
+         Most   : Natural := 0;
+         Su, Sv : Real := 0.0;
+         N      : Natural := 0;
+      begin
+         for P in 0 .. W * H - 1 loop
+            if L.Of_Pixel (P) > 0 and then Contains (Before, P mod W, P / W) then
+               Shared (L.Of_Pixel (P)) := Shared (L.Of_Pixel (P)) + 1;
+            end if;
+         end loop;
+         for K in Shared'Range loop
+            if Shared (K) > Most then
+               Most := Shared (K);
+               Best := K;
+            end if;
+         end loop;
+         if Best = 0 then
+            return;
+         end if;
+         for P in 0 .. W * H - 1 loop
+            if L.Of_Pixel (P) = Best then
+               Include (Region, P mod W, P / W);
+               Su := Su + Real (P mod W) + 0.5;
+               Sv := Sv + Real (P / W) + 0.5;
+               N := N + 1;
+            end if;
+         end loop;
+         Centre := (U => Su / Real (N), V => Sv / Real (N));
+         Tip_Of (Region, Region, Create (0, 0), Tip, Known);
+      end;
+   end Moved_Lobe;
+
    function Label_At (L : Labels; P : Pixel) return Natural is
       Column, Row : Natural;
    begin
@@ -168,7 +299,6 @@ package body Driver.Robot.Hand.Lobes is
       return L.Of_Pixel (Index (L.Width, Column, Row));
    end Label_At;
 
-   procedure Tip_Of (Lobe_Mask, Seeds, Attached : Mask; Tip : out Pixel; Known : out Boolean);
    --  The seed of the lobe farthest along the lobe from where it is attached
    --  (shortest paths through the lobe, steps of 1 and sqrt 2): a pixel that
    --  passed only the single test may be a still one next to the lobe.
@@ -261,6 +391,49 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
       end;
    end Tip_Of;
+
+   procedure Part_Of (Region : Mask; Seed : Pixel; Part : out Mask; Centre, Tip : out Pixel; Known : out Boolean) is
+      W      : constant Natural := Width (Region);
+      H      : constant Natural := Height (Region);
+      Column, Row : Natural;
+      Stack  : Natural_Vectors.Vector;
+      Su, Sv : Real := 0.0;
+      N      : Natural := 0;
+   begin
+      Part := Create (W, H);
+      Centre := (U => 0.0, V => 0.0);
+      Tip := (U => 0.0, V => 0.0);
+      Known := False;
+      if W = 0 or else H = 0 or else not Pixel_Of (Seed, W, H, Column, Row) or else not Contains (Region, Column, Row) then
+         return;
+      end if;
+      Include (Part, Column, Row);
+      Stack.Append (Index (W, Column, Row));
+      while not Stack.Is_Empty loop
+         declare
+            P : constant Natural := Stack.Last_Element;
+            C : constant Integer := P mod W;
+            R : constant Integer := P / W;
+         begin
+            Stack.Delete_Last;
+            Su := Su + Real (C) + 0.5;
+            Sv := Sv + Real (R) + 0.5;
+            N := N + 1;
+            for Dr in -1 .. 1 loop
+               for Dc in -1 .. 1 loop
+                  if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1
+                    and then Contains (Region, C + Dc, R + Dr) and then not Contains (Part, C + Dc, R + Dr)
+                  then
+                     Include (Part, C + Dc, R + Dr);
+                     Stack.Append (Index (W, C + Dc, R + Dr));
+                  end if;
+               end loop;
+            end loop;
+         end;
+      end loop;
+      Centre := (U => Su / Real (N), V => Sv / Real (N));
+      Tip_Of (Part, Part, Create (0, 0), Tip, Known);
+   end Part_Of;
 
    procedure Summarize (M : Mask; Count : out Natural; Centre : out Pixel);
 
@@ -1172,7 +1345,9 @@ package body Driver.Robot.Hand.Lobes is
       end loop;
    end Keep_Large;
 
-   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean);
+   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean;
+                        Anchor : out Pixel; Anchored : out Boolean; Given : Pixel := (U => 0.0, V => 0.0);
+                        Is_Given : Boolean := False);
    --  The tip of a lobe attached to the image's border or to the robot's
    --  pixels that did not change: the pixel farthest along the lobe's reach,
    --  the way from where it is attached to where its pixels are. The farthest
@@ -1181,9 +1356,14 @@ package body Driver.Robot.Hand.Lobes is
    --  keyboard pixels along the bottom of the picture, 143 pixels from the
    --  left border where the wedge's own apex was 118, and the strip was its tip.
    --  Along the reach that strip is 110 pixels from where the lobe is
-   --  attached and the apex 157.
+   --  attached and the apex 157. Anchor is the centre of the lobe's attached
+   --  pixels (Anchored, when it has any); a lobe with none reaches from Given
+   --  when Is_Given: the anchor of the same lobe at the other end, whose part
+   --  it was attached through (Lobes_Of_Sets).
 
-   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean) is
+   procedure Reach_Tip (Lobe_Mask, Attached : Mask; Tip : out Pixel; Known : out Boolean;
+                        Anchor : out Pixel; Anchored : out Boolean; Given : Pixel := (U => 0.0, V => 0.0);
+                        Is_Given : Boolean := False) is
       W : constant Natural := Width (Lobe_Mask);
       H : constant Natural := Height (Lobe_Mask);
       Has_Attached : constant Boolean := Width (Attached) = W and then Height (Attached) = H;
@@ -1209,6 +1389,8 @@ package body Driver.Robot.Hand.Lobes is
    begin
       Tip := (U => 0.0, V => 0.0);
       Known := False;
+      Anchor := (U => 0.0, V => 0.0);
+      Anchored := False;
       for R in 0 .. H - 1 loop
          for C in 0 .. W - 1 loop
             if Contains (Lobe_Mask, C, R) then
@@ -1224,10 +1406,17 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
       end loop;
       if Anchors = 0 then
-         return;
+         if not Is_Given or else Pixels = 0 then
+            return;
+         end if;
+         Au := Given.U;
+         Av := Given.V;
+      else
+         Au := Au / Real (Anchors);
+         Av := Av / Real (Anchors);
+         Anchor := (U => Au, V => Av);
+         Anchored := True;
       end if;
-      Au := Au / Real (Anchors);
-      Av := Av / Real (Anchors);
       Cu := Cu / Real (Pixels);
       Cv := Cv / Real (Pixels);
       declare
@@ -1256,6 +1445,77 @@ package body Driver.Robot.Hand.Lobes is
          end loop;
       end;
    end Reach_Tip;
+
+   function Tip_Track (Lobe_Mask : Mask; Centre, Tip : Pixel) return Pixel is
+      Cap    : constant Mask := Tip_Cap (Lobe_Mask, Centre, Tip);
+      Su, Sv : Real := 0.0;
+      N      : Natural := 0;
+   begin
+      for R in 0 .. Height (Cap) - 1 loop
+         for C in 0 .. Width (Cap) - 1 loop
+            if Contains (Cap, C, R) then
+               Su := Su + Real (C) + 0.5;
+               Sv := Sv + Real (R) + 0.5;
+               N := N + 1;
+            end if;
+         end loop;
+      end loop;
+      return (if N = 0 then Tip else (U => Su / Real (N), V => Sv / Real (N)));
+   end Tip_Track;
+
+   function Tip_Outline (Cap : Mask) return Pixel_Vectors.Vector is
+      --  Of each column the region holds, its top and bottom pixel: a column's middle pixels lie inside the hull.
+      Ends : Pixel_Vectors.Vector;
+      Hull : Pixel_Vectors.Vector;
+      function Turn (O, A, B : Pixel) return Real is ((A.U - O.U) * (B.V - O.V) - (A.V - O.V) * (B.U - O.U));
+   begin
+      for C in 0 .. Width (Cap) - 1 loop
+         declare
+            Top    : Integer := -1;
+            Bottom : Integer := -1;
+         begin
+            for R in 0 .. Height (Cap) - 1 loop
+               if Contains (Cap, C, R) then
+                  if Top < 0 then
+                     Top := R;
+                  end if;
+                  Bottom := R;
+               end if;
+            end loop;
+            if Top >= 0 then
+               Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Top) + 0.5));
+               if Bottom /= Top then
+                  Ends.Append (Pixel'(U => Real (C) + 0.5, V => Real (Bottom) + 0.5));
+               end if;
+            end if;
+         end;
+      end loop;
+      if Natural (Ends.Length) < 3 then
+         return Ends;
+      end if;
+      --  The monotone chain: the ends come by column and, within one, by row; the lower chain forward, the upper
+      --  back, each keeping only turns one way.
+      for P of Ends loop
+         while Natural (Hull.Length) >= 2 and then Turn (Hull (Hull.Last_Index - 1), Hull.Last_Element, P) <= 0.0 loop
+            Hull.Delete_Last;
+         end loop;
+         Hull.Append (P);
+      end loop;
+      declare
+         Lower : constant Natural := Natural (Hull.Length) + 1;
+      begin
+         for I in reverse Ends.First_Index .. Ends.Last_Index - 1 loop
+            while Natural (Hull.Length) >= Lower
+              and then Turn (Hull (Hull.Last_Index - 1), Hull.Last_Element, Ends (I)) <= 0.0
+            loop
+               Hull.Delete_Last;
+            end loop;
+            Hull.Append (Ends (I));
+         end loop;
+      end;
+      Hull.Delete_Last;
+      return Hull;
+   end Tip_Outline;
 
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask is
       W       : constant Natural := Width (Lobe_Mask);
@@ -1332,6 +1592,58 @@ package body Driver.Robot.Hand.Lobes is
                Kept_Here    : Natural := 0;
                Kept_There   : Natural := 0;
             begin
+               --  A part of one end beside an attached part of the other end is attached too: a jaw that moves little
+               --  between its ends changes the pixels along its edges only, a sliver at each end side by side with the
+               --  other end's, and one of the two may reach the picture's border while the other stops short of it (s43,
+               --  servo seed 6 of the fake robot, 10-17: the closer's three slivers at its low end reached the border, the
+               --  three beside them at its high end did not, 942 to 967 pixels each, and no hand was made of it).
+               declare
+                  procedure Attach_Through (Parts : Part_Access; Ls : Labels; Other : Part_Access; Other_Ls : Labels) is
+                  begin
+                     for R in 0 .. H - 1 loop
+                        for C in 0 .. W - 1 loop
+                           declare
+                              K : constant Natural := Ls.Of_Pixel (Index (W, C, R));
+                           begin
+                              if K > 0 and then not Parts (K).Attached then
+                                 for Dr in -1 .. 1 loop
+                                    for Dc in -1 .. 1 loop
+                                       if C + Dc in 0 .. W - 1 and then R + Dr in 0 .. H - 1 then
+                                          declare
+                                             O : constant Natural := Other_Ls.Of_Pixel (Index (W, C + Dc, R + Dr));
+                                          begin
+                                             if O > 0 and then Other (O).Attached then
+                                                Parts (K).Attached := True;
+                                             end if;
+                                          end;
+                                       end if;
+                                    end loop;
+                                 end loop;
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                  end Attach_Through;
+
+                  --  The kept parts numbered again: the attached ones that hold more pixels than the doubt (Parts_Of).
+                  procedure Number (Parts : Part_Access) is
+                     Kept : Natural := 0;
+                  begin
+                     for P of Parts.all loop
+                        if P.Attached and then Real (P.Count) > Doubt then
+                           Kept := Kept + 1;
+                           P.Kept := Kept;
+                        else
+                           P.Kept := 0;
+                        end if;
+                     end loop;
+                  end Number;
+               begin
+                  Attach_Through (There_Parts, There_Labels, Here_Parts, Here_Labels);
+                  Attach_Through (Here_Parts, Here_Labels, There_Parts, There_Labels);
+                  Number (Here_Parts);
+                  Number (There_Parts);
+               end;
                --  Of the parts that are attached and above the doubt, those of the
                --  size of the lobes: the size distribution of both ends parts the
                --  fragments from them.
@@ -1474,8 +1786,18 @@ package body Driver.Robot.Hand.Lobes is
                      Summarize (L.There, L.Count_There, L.Centre_There);
                      if L.Count_Here > 0 and then L.Count_There > 0 then
                         --  Every pixel of a lobe changed, so any may be its tip: the one farthest along its reach.
-                        Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here);
-                        Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There);
+                        declare
+                           Anchor_Here, Anchor_There : Pixel;
+                           Anchored_Here, Anchored_There : Boolean;
+                        begin
+                           Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here);
+                           Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There, Anchor_There, Anchored_There,
+                                      Given => Anchor_Here, Is_Given => Anchored_Here);
+                           if not Anchored_Here and then Anchored_There then
+                              Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here,
+                                         Given => Anchor_There, Is_Given => True);
+                           end if;
+                        end;
                         L.Bordered_Here := On_Border (L.Here);
                         L.Bordered_There := On_Border (L.There);
                         Result.Append (L);
@@ -1586,6 +1908,9 @@ package body Driver.Robot.Hand.Lobes is
          declare
             Here_Set  : Mask := Create (W, H);
             There_Set : Mask := Create (W, H);
+            --  Did not change, still over the poses, of the robot's brightness as given; and of the world's.
+            Robot_Like : Mask := Create (W, H);
+            World_Like : Mask := Create (W, H);
          begin
             for J in 1 .. Total loop
                declare
@@ -1612,6 +1937,57 @@ package body Driver.Robot.Hand.Lobes is
             end loop;
             Result.Here := Count (Here_Set);
             Result.There := Count (There_Set);
+            --  What did not change, told by the poses as a seed is and by the brightness the two kinds have where
+            --  it changed (Still): the robot's look and the world's as the pixels were given, each way round, a
+            --  pixel the kind whose look its brightness is the likelier of. The poses have already left only what
+            --  every pose sees alike, the robot and the world's plain stretches; brightness tells those two apart
+            --  as a classification, not as a test of a difference, and asked to be Z squared the likelier (a ratio
+            --  of 90) the robot's still jaw on the kiwi-like fake came out robot in one placing and in none at all
+            --  in the next of the same ends, its 256 levels' counts a few dozen each (a08 replayed, 10-16), and its
+            --  closing was not told.
+            declare
+               type Bins is array (0 .. 255) of Real;
+               Robot_Bins, World_Bins : Bins := [others => 1.0];
+               Robot_Sum, World_Sum   : Real := Real (Bins'Length);
+               function Bin (Level : Real) return Natural is
+                 (Natural (Real'Max (0.0, Real'Min (Real (Bins'Last), Real'Rounding (Level)))));
+               procedure Add (Robot, World : Real) is
+               begin
+                  Robot_Bins (Bin (Robot)) := Robot_Bins (Bin (Robot)) + 1.0;
+                  World_Bins (Bin (World)) := World_Bins (Bin (World)) + 1.0;
+                  Robot_Sum := Robot_Sum + 1.0;
+                  World_Sum := World_Sum + 1.0;
+               end Add;
+            begin
+               for J in 1 .. Total loop
+                  case Given (J) is
+                     when Anchored_End => Add (Robot => Anchored_Level (J), World => Other_Level (J));
+                     when Other_End    => Add (Robot => Other_Level (J), World => Anchored_Level (J));
+                     when Neither      => null;
+                  end case;
+               end loop;
+               for R in 0 .. H - 1 loop
+                  for C in 0 .. W - 1 loop
+                     if not Contains (Changed, C, R)
+                       and then 0.5 * Log (Driver.Pixels.Variance (Anchor, C, R)) < Cut
+                     then
+                        declare
+                           Level : constant Natural :=
+                             Bin (if Anchored_At_Here then Here_Mean (Index (W, C, R) + 1)
+                                  else There_Mean (Index (W, C, R) + 1));
+                           Ratio : constant Real :=
+                             2.0 * (Log (Robot_Bins (Level) / Robot_Sum) - Log (World_Bins (Level) / World_Sum));
+                        begin
+                           if Ratio > 0.0 then
+                              Include (Robot_Like, C, R);
+                           elsif Ratio < 0.0 then
+                              Include (World_Like, C, R);
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+               end loop;
+            end;
             Release;
             Result.Lobes := Lobes_Of_Sets (Here_Set, There_Set, Attached, Result.Doubt, Result.Parts_Here, Result.Parts_There);
             --  The way each lobe goes from Here to There against the way the closer moves the picture there, the
@@ -1661,6 +2037,170 @@ package body Driver.Robot.Hand.Lobes is
                   end if;
                end;
             end if;
+            --  Lobes the closer moves the same way are one: the parts of a finger move together, and fingers that
+            --  close on each other move opposite ways. The way is the closer's motion over a lobe's pixels; two groups
+            --  of lobes join when every lobe of one goes within a right angle of every lobe of the other (the sign of
+            --  their motions' product, as for the ends above), the two whose least agreement is the most first. A ribbed
+            --  finger changes in stripes as it moves, and each stripe was a lobe: d3 (seed 3 of the fake robot, with
+            --  servos, 10-18) saw its one moving jaw as six lobes and as five, and none of its nine presses found a tip.
+            if Motion /= null and then Natural (Result.Lobes.Length) > 1 then
+               declare
+                  N      : constant Natural := Natural (Result.Lobes.Length);
+                  Mu, Mv : Real_Array (1 .. N) := [others => 0.0];
+                  Group  : array (1 .. N) of Positive;
+                  function Agreement (I, J : Positive) return Real is
+                     Size : constant Real := Sqrt ((Mu (I) ** 2 + Mv (I) ** 2) * (Mu (J) ** 2 + Mv (J) ** 2));
+                  begin
+                     return (if Size > 0.0 then (Mu (I) * Mu (J) + Mv (I) * Mv (J)) / Size else 0.0);
+                  end Agreement;
+               begin
+                  for I in 1 .. N loop
+                     Group (I) := I;
+                     declare
+                        Here_I  : constant Mask := Result.Lobes (Result.Lobes.First_Index + I - 1).Here;
+                        There_I : constant Mask := Result.Lobes (Result.Lobes.First_Index + I - 1).There;
+                        U, V    : Real;
+                     begin
+                        for R in 0 .. H - 1 loop
+                           for C in 0 .. W - 1 loop
+                              if Contains (Here_I, C, R) or else Contains (There_I, C, R) then
+                                 Motion (C, R, U, V);
+                                 Mu (I) := Mu (I) + U;
+                                 Mv (I) := Mv (I) + V;
+                              end if;
+                           end loop;
+                        end loop;
+                     end;
+                  end loop;
+                  loop
+                     declare
+                        Best       : Real := 0.0;
+                        Into, From : Natural := 0;
+                     begin
+                        for A in 1 .. N loop
+                           for B in A + 1 .. N loop
+                              if Group (A) = A and then Group (B) = B then
+                                 declare
+                                    Least : Real := Real'Last;
+                                 begin
+                                    for I in 1 .. N loop
+                                       if Group (I) = A then
+                                          for J in 1 .. N loop
+                                             if Group (J) = B then
+                                                Least := Real'Min (Least, Agreement (I, J));
+                                             end if;
+                                          end loop;
+                                       end if;
+                                    end loop;
+                                    if Least > Best then
+                                       Best := Least;
+                                       Into := A;
+                                       From := B;
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                        end loop;
+                        exit when Into = 0;
+                        for I in 1 .. N loop
+                           if Group (I) = From then
+                              Group (I) := Into;
+                           end if;
+                        end loop;
+                        Result.Joined := Result.Joined + 1;
+                     end;
+                  end loop;
+                  if Result.Joined > 0 then
+                     declare
+                        Merged : Lobe_Vectors.Vector;
+                     begin
+                        for G in 1 .. N loop
+                           if Group (G) = G then
+                              declare
+                                 L : Lobe;
+                                 Anchor_Here, Anchor_There : Pixel;
+                                 Anchored_Here, Anchored_There : Boolean;
+                              begin
+                                 L.Here := Create (W, H);
+                                 L.There := Create (W, H);
+                                 for K in 1 .. N loop
+                                    if Group (K) = G then
+                                       declare
+                                          Here_K  : constant Mask := Result.Lobes (Result.Lobes.First_Index + K - 1).Here;
+                                          There_K : constant Mask := Result.Lobes (Result.Lobes.First_Index + K - 1).There;
+                                       begin
+                                          for R in 0 .. H - 1 loop
+                                             for C in 0 .. W - 1 loop
+                                                if Contains (Here_K, C, R) then
+                                                   Include (L.Here, C, R);
+                                                end if;
+                                                if Contains (There_K, C, R) then
+                                                   Include (L.There, C, R);
+                                                end if;
+                                             end loop;
+                                          end loop;
+                                       end;
+                                    end if;
+                                 end loop;
+                                 Summarize (L.Here, L.Count_Here, L.Centre_Here);
+                                 Summarize (L.There, L.Count_There, L.Centre_There);
+                                 Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here);
+                                 Reach_Tip (L.There, Attached, L.Tip_There, L.Tip_Known_There, Anchor_There, Anchored_There,
+                                            Given => Anchor_Here, Is_Given => Anchored_Here);
+                                 if not Anchored_Here and then Anchored_There then
+                                    Reach_Tip (L.Here, Attached, L.Tip_Here, L.Tip_Known_Here, Anchor_Here, Anchored_Here,
+                                               Given => Anchor_There, Is_Given => True);
+                                 end if;
+                                 L.Bordered_Here := On_Border (L.Here);
+                                 L.Bordered_There := On_Border (L.There);
+                                 Merged.Append (L);
+                              end;
+                           end if;
+                        end loop;
+                        Result.Lobes := Merged;
+                     end;
+                  end if;
+               end;
+            end if;
+            --  Each lobe's way: the closer's motion of the picture summed over its pixels at both ends.
+            if Motion /= null then
+               for L of Result.Lobes loop
+                  declare
+                     U, V : Real;
+                  begin
+                     L.Way_U := 0.0;
+                     L.Way_V := 0.0;
+                     for R in 0 .. H - 1 loop
+                        for C in 0 .. W - 1 loop
+                           if Contains (L.Here, C, R) or else Contains (L.There, C, R) then
+                              Motion (C, R, U, V);
+                              L.Way_U := L.Way_U + U;
+                              L.Way_V := L.Way_V + V;
+                           end if;
+                        end loop;
+                     end loop;
+                     L.Way_Known := L.Way_U /= 0.0 or else L.Way_V /= 0.0;
+                  end;
+               end loop;
+            end if;
+            --  The robot's own pixels that did not change: of the robot's brightness as the ends now stand, in
+            --  parts larger than the doubt.
+            declare
+               L     : constant Labels := Components (if Result.Turned then World_Like else Robot_Like);
+               Sizes : array (1 .. L.Count) of Natural := [others => 0];
+            begin
+               Result.Still := Create (W, H);
+               for P in 0 .. W * H - 1 loop
+                  if L.Of_Pixel (P) > 0 then
+                     Sizes (L.Of_Pixel (P)) := Sizes (L.Of_Pixel (P)) + 1;
+                  end if;
+               end loop;
+               for P in 0 .. W * H - 1 loop
+                  if L.Of_Pixel (P) > 0 and then Real (Sizes (L.Of_Pixel (P))) > Result.Doubt then
+                     Include (Result.Still, P mod W, P / W);
+                  end if;
+               end loop;
+            end;
             Result.How := (if Result.Lobes.Is_Empty then One_Sided else Placed);
          end;
       end;
@@ -1689,50 +2229,138 @@ package body Driver.Robot.Hand.Lobes is
       function Share (Count : Natural) return Real is (if Averaged then 1.0 / Real (Count) else 1.0);
       Change   : Real := 0.0;
       Variance : Real := 0.0;
+      Terms    : Natural := 0;   --  the pairs and the lobes' leads that were compared
+      Still    : constant Boolean :=   --  still pixels to close against (an empty mask has no width)
+        not Lobes.Is_Empty and then Width (Attached) > 0
+        and then Width (Attached) = Width (Lobes (Lobes.First_Index).Here)
+        and then Height (Attached) = Height (Lobes (Lobes.First_Index).Here)
+        and then Count (Attached) > 0;
    begin
-      if Natural (Lobes.Length) >= 2 then
-         for I in Lobes.First_Index .. Lobes.Last_Index loop
-            for J in I + 1 .. Lobes.Last_Index loop
-               declare
-                  Li : constant Lobe := Lobes (I);
-                  Lj : constant Lobe := Lobes (J);
-                  Here  : constant Real := Sqrt ((Li.Centre_Here.U - Lj.Centre_Here.U) ** 2
-                                                 + (Li.Centre_Here.V - Lj.Centre_Here.V) ** 2);
-                  There : constant Real := Sqrt ((Li.Centre_There.U - Lj.Centre_There.U) ** 2
-                                                 + (Li.Centre_There.V - Lj.Centre_There.V) ** 2);
-               begin
-                  Change := Change + (There - Here);
-                  Variance := Variance + Pixel_Variance * (Share (Li.Count_Here) + Share (Lj.Count_Here)
-                                                           + Share (Li.Count_There) + Share (Lj.Count_There));
-               end;
-            end loop;
-         end loop;
-      elsif Natural (Lobes.Length) = 1 and then Width (Attached) > 0 and then Count (Attached) > 0 then
-         --  One lobe closes against what it is attached to: the distance from
-         --  its centre to the nearest still pixel of the robot.
-         declare
-            L : constant Lobe := Lobes (Lobes.First_Index);
-            function Nearest (P : Pixel) return Real is
-               Best : Real := Real'Last;
+      --  The lobes come nearer each other, and each nearer the robot's still pixels ahead of it, at the closed end: one
+      --  sum of both. Two fingers that close on each other are told by their distance; a jaw that closes onto a fixed
+      --  one by its lead's gap to the fixed jaw's still pixels. One jaw can be two lobes: h02 (10-17) found its moving
+      --  jaw as a part of 9202 pixels and a part of 107 where the fixed jaw hid its middle; the two parts' distance
+      --  changed by -0.855 +- 0.577 pixels between the ends, as the parts of one rigid jaw do, and with the pairs alone
+      --  the closing was not told and no hand was made.
+      for I in Lobes.First_Index .. Lobes.Last_Index loop
+         for J in I + 1 .. Lobes.Last_Index loop
+            declare
+               Li : constant Lobe := Lobes (I);
+               Lj : constant Lobe := Lobes (J);
+               Here  : constant Real := Sqrt ((Li.Centre_Here.U - Lj.Centre_Here.U) ** 2
+                                              + (Li.Centre_Here.V - Lj.Centre_Here.V) ** 2);
+               There : constant Real := Sqrt ((Li.Centre_There.U - Lj.Centre_There.U) ** 2
+                                              + (Li.Centre_There.V - Lj.Centre_There.V) ** 2);
             begin
-               for R in 0 .. Height (Attached) - 1 loop
-                  for C in 0 .. Width (Attached) - 1 loop
-                     if Contains (Attached, C, R) then
-                        Best := Real'Min (Best, Sqrt ((Real (C) + 0.5 - P.U) ** 2 + (Real (R) + 0.5 - P.V) ** 2));
-                     end if;
-                  end loop;
-               end loop;
-               return Best;
-            end Nearest;
-         begin
-            Change := Nearest (L.Centre_There) - Nearest (L.Centre_Here);
-            Variance := Pixel_Variance * (Share (L.Count_Here) + Share (L.Count_There));
-         end;
-      else
+               Change := Change + (There - Here);
+               Variance := Variance + Pixel_Variance * (Share (Li.Count_Here) + Share (Lj.Count_Here)
+                                                        + Share (Li.Count_There) + Share (Lj.Count_There));
+               Terms := Terms + 1;
+            end;
+         end loop;
+      end loop;
+      if Still then
+         --  A lobe closes against the robot's still pixels at the end where its leading side meets them. At each end
+         --  the lobe arrived along the way between its centres (from the other end); from every pixel of it there
+         --  that leads that way, the way on meets a still pixel after so many pixels, or never before the picture's
+         --  border. The end whose lead meets them sooner is the closed one: the change is the gap at the other view
+         --  less the gap at the first, a gap that never closes counted as the picture's diagonal, and nothing to
+         --  compare when it closes at neither. Only what lies ahead counts. The lobe's own still pixels (where it
+         --  overlaps itself between the ends, at its root) and what lies beside it are as near it at both ends: a jaw
+         --  swung on a pivot onto a fixed one (the kiwi's SO-101, 10-15) overlaps itself near the pivot, and its
+         --  centre was as near that at both ends as to the fixed jaw at the closed one. The lead's gap is its side's:
+         --  the median over the pixels that lead of how far each goes on before it meets one, not the nearest pixel's:
+         --  a speck of two still pixels inside the open jaw's place met its lead at once, the gap was nought at both
+         --  ends, and the jaw's closing was not told (f16o and f16p on 10-15; 185 of the closed jaw's 194 leading
+         --  pixels lay against the fixed jaw, 1 of the open one's 143 against the speck). A gap is one pixel's place
+         --  at each end.
+         for L of Lobes loop
+            declare
+               At_Here, At_There, Never : Real;
+            begin
+               Lead_Gaps (L, Attached, At_Here, At_There, Never);
+               if At_There /= Never or else At_Here /= Never then
+                  Change := Change + (At_There - At_Here);
+                  Variance := Variance + 2.0 * Pixel_Variance;
+                  Terms := Terms + 1;
+               end if;
+            end;
+         end loop;
+      end if;
+      if Terms = 0 then
          return Unknown;
       end if;
       return (Value => Change, Sigma => Sqrt (Variance), Degrees_Of_Freedom => Degrees_Of_Freedom);
    end Change_Of;
+
+   --  The way the lobe went from the first view to the other: the closer's own motion of the picture over its pixels
+   --  where that was measured, and the way between its centres where not. Its centres move as its changed pixels do:
+   --  a ribbed finger moved by less than a rib changes in a band each side of every rib, the bands at the two ends
+   --  interleaved, and their centres moved either way (servo seed 3 of the fake robot, 10-18, its jaw shut at the high
+   --  reading: u5 told it shut at the low one, and u4 did not tell it, its lead meeting none of the fixed jaw's ribs
+   --  at either end).
+   procedure Lead_Gaps (L : Lobe; Attached : Mask; At_Here, At_There, Never : out Real) is
+      W     : constant Natural := Width (Attached);
+      H     : constant Natural := Height (Attached);
+      Du    : constant Real := (if L.Way_Known then L.Way_U else L.Centre_There.U - L.Centre_Here.U);
+      Dv    : constant Real := (if L.Way_Known then L.Way_V else L.Centre_There.V - L.Centre_Here.V);
+      Size  : constant Real := Sqrt (Du * Du + Dv * Dv);
+      Far   : constant Real := Sqrt (Real (W * W + H * H));
+      --  Over the pixels of M that lead along (Su, Sv), a unit step, the median of how many pixels lie between
+      --  each and a still pixel straight ahead of it, Far for one with none ahead; Far when none leads.
+      function Gap (M : Mask; Su, Sv : Real) return Real is
+         type Reals is array (Positive range <>) of Real;
+         type Reals_Access is access Reals;
+         procedure Free is new Ada.Unchecked_Deallocation (Reals, Reals_Access);
+         Gaps  : Reals_Access := new Reals (1 .. Natural'Max (1, W * H));
+         Led   : Natural := 0;
+         Least : Real := Far;
+         function Ahead (C, R, K : Natural; Column, Row : out Integer) return Boolean is
+         begin
+            Column := Integer (Real'Floor (Real (C) + 0.5 + Real (K) * Su));
+            Row := Integer (Real'Floor (Real (R) + 0.5 + Real (K) * Sv));
+            return Column in 0 .. W - 1 and then Row in 0 .. H - 1;
+         end Ahead;
+      begin
+         for R in 0 .. H - 1 loop
+            for C in 0 .. W - 1 loop
+               if Contains (M, C, R) then
+                  declare
+                     Nc, Nr : Integer;
+                  begin
+                     if not (Ahead (C, R, 1, Nc, Nr) and then Contains (M, Nc, Nr)) then
+                        Least := Far;
+                        for K in 1 .. Natural (Real'Ceiling (Far)) loop
+                           exit when not Ahead (C, R, K, Nc, Nr);
+                           if Contains (Attached, Nc, Nr) then
+                              Least := Real (K - 1);
+                              exit;
+                           end if;
+                        end loop;
+                        Led := Led + 1;
+                        Gaps (Led) := Least;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end loop;
+         declare
+            Side : constant Real :=
+              (if Led = 0 then Far else Driver.Stats.Median (Real_Array (Gaps (1 .. Led))));
+         begin
+            Free (Gaps);
+            return Side;
+         end;
+      end Gap;
+   begin
+      Never := Far;
+      At_Here := Far;
+      At_There := Far;
+      if Size > 0.0 then
+         At_There := Gap (L.There, Du / Size, Dv / Size);
+         At_Here := Gap (L.Here, -Du / Size, -Dv / Size);
+      end if;
+   end Lead_Gaps;
 
    --  The matcher's noise and the pixel grid (a uniform square of side one).
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate is

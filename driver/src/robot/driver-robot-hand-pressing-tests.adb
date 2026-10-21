@@ -114,19 +114,27 @@ package body Driver.Robot.Hand.Pressing.Tests is
             R.Covariance.Append (if Row /= Column then 0.0 elsif Row <= Fit.Lens_Terms then 1.0e-8 else 9.0e-8);
          end loop;
       end loop;
+      --  The unit's keyframes (Arm_Fit.Unit_Changes): each joint turned a little from the reference alone.
+      for F in Truth'Range loop
+         for K in Truth'Range loop
+            R.Unit_Changes.Append (if K = F then 0.05 else 0.0);
+         end loop;
+      end loop;
       R.Table := Table_Of (A);
       R.Placed := A = 1 or else How /= Unplaced;
       if A = 1 then
-         for I in 1 .. 36 loop
+         for I in 1 .. 49 loop
             R.Placement_Covariance.Append (0.0);
          end loop;
       else
          R.Placement := Placement_2;
          R.Scale := Unit_2;
          R.Scale_Sigma := 1.0e-2;
-         for Row in 1 .. 6 loop
-            for Column in 1 .. 6 loop
-               R.Placement_Covariance.Append (if Row /= Column then 0.0 elsif Row <= 3 then 1.0e-6 else 1.0e-4);
+         --  Its turn, its centre and the logarithm of its scale.
+         for Row in 1 .. 7 loop
+            for Column in 1 .. 7 loop
+               R.Placement_Covariance.Append
+                 (if Row /= Column then 0.0 elsif Row <= 3 then 1.0e-6 elsif Row <= 6 then 1.0e-4 else 1.0e-4);
             end loop;
          end loop;
          if How = Misplaced then
@@ -225,7 +233,8 @@ package body Driver.Robot.Hand.Pressing.Tests is
                Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
                           Direction => (Unit_Vector => Unit (Tips_True (L, W)), Sigma => 2.5e-4)),
                Spread => 0.0,
-               Pitch  => 0.0);
+               Pitch  => 0.0,
+               Face   => <>);
          end loop;
       end loop;
       Adopt (H, Group_Id (2 + A), Arm_Id (A), Eye_Id (A), [1 => 1.0], [1 => 0.0], Rows);
@@ -236,9 +245,11 @@ package body Driver.Robot.Hand.Pressing.Tests is
    --  Presses of every lobe at both openings, fed to the hand beat by beat as
    --  the body would judge them: still above the table, blocked, still on it.
    --  Made is how many were made, First_Tip how many had been when the first
-   --  lobe's tip at the open opening was first known (0: never).
+   --  lobe's tip at the open opening was first known (0: never). Pushed is the
+   --  share of its travel the closer stands off its opening on the table, as
+   --  the press's load pushed it towards the other.
    procedure Press_Everything
-     (H : in out Hands; M : Model; A : Positive; Made : out Natural; First_Tip : out Natural)
+     (H : in out Hands; M : Model; A : Positive; Made : out Natural; First_Tip : out Natural; Pushed : Real := 0.0)
    is
       Beat : Natural := 0;
       Id   : constant Hand_Id := 1;
@@ -260,18 +271,19 @@ package body Driver.Robot.Hand.Pressing.Tests is
                   Start, Rest : Real_Array (1 .. Joint_Count);
                   Leads  : Boolean;
                   Closer : constant Real := (if W = Open then 1.0 else 0.0);
+                  Loaded : constant Real := (if W = Open then Closer - Pushed else Closer + Pushed);
                   Idle   : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
-                  function At_Beat (Q : Real_Array) return Observation is
-                    (if A = 1 then Observed (Beat, Q, Idle, Closer) else Observed (Beat, Idle, Q, Closer));
+                  function At_Beat (Q : Real_Array; C : Real := Closer) return Observation is
+                    (if A = 1 then Observed (Beat, Q, Idle, C) else Observed (Beat, Idle, Q, C));
                begin
                   Contact (A, P, Pushed_Back, Start, Rest, Leads);
                   if Leads then
                      Beat := Beat + 1;
                      Press_Beat (H, Id, M, At_Beat (Start), Is_Blocked => False, Is_Still => True);
                      Beat := Beat + 1;
-                     Press_Beat (H, Id, M, At_Beat (Rest), Is_Blocked => True, Is_Still => False);
+                     Press_Beat (H, Id, M, At_Beat (Rest, Loaded), Is_Blocked => True, Is_Still => False);
                      Beat := Beat + 1;
-                     Press_Beat (H, Id, M, At_Beat (Rest), Is_Blocked => False, Is_Still => True);
+                     Press_Beat (H, Id, M, At_Beat (Rest, Loaded), Is_Blocked => False, Is_Still => True);
                      Made := Made + 1;
                      if First_Tip = 0 and then Known (Tip_In_Tool (H, Id, 1, Open)) then
                         First_Tip := Made;
@@ -359,6 +371,39 @@ package body Driver.Robot.Hand.Pressing.Tests is
          end;
       end loop;
    end Tips_Free_Of_Placement;
+
+   --  Every press pushes the closer off the opening it is made at by three per cent of its travel, thirty times its
+   --  readings' noise, as a jaw held open is pressed shut by the table its tip meets (f16y on 10-16, two per cent):
+   --  the presses are the openings' all the same, and fix every tip as presses that leave the closer where it stood
+   --  do. Judged by the closer's reading at the press alone, none was at either opening, and no tip was known.
+   procedure Pushed_Closer_Presses_At_Its_Opening is
+      Z     : constant Real := Threshold (Vector_Gate (3));
+      M     : Model;
+      H     : Hands;
+      Made  : Natural;
+      Early : Natural;
+   begin
+      Build (M, Placed);
+      Give_Hand (H, 2);
+      Press_Everything (H, M, 2, Made, Early, Pushed => 30.0 * Closer_Noise);
+      Check (Made >= 40, "the second arm's hand was pressed only" & Made'Image & " times");
+      Check (Early in 1 .. 4, "the first lobe's tip was known after" & Early'Image & " presses, not after its first few");
+      for L in 1 .. 2 loop
+         for W in Opening loop
+            declare
+               T    : constant Point_Estimate := Tip_In_Tool (H, 1, L, W);
+               What : constant String := "lobe" & L'Image & " at " & W'Image;
+            begin
+               Check (Known (T), What & ": no tip of presses that pushed the closer off its opening");
+               if Known (T) then
+                  Check (Mahalanobis (T, Tips_True (L, W)) <= Z,
+                         What & ": off by" & Real'Image (abs (T.Mean - Tips_True (L, W))) & ", which is"
+                         & Real'Image (Mahalanobis (T, Tips_True (L, W))) & " of its sigma");
+               end if;
+            end;
+         end loop;
+      end loop;
+   end Pushed_Closer_Presses_At_Its_Opening;
 
    --  Aimed and lowered in the arm's own frame: the way down is into the table
    --  its own eye saw (not the first arm's), the plans exist with the arm not
@@ -927,6 +972,74 @@ package body Driver.Robot.Hand.Pressing.Tests is
       end;
    end The_Aim_Turns_About_The_Way_Down;
 
+   --  Of the eight aims about the way down that reach, the one taken is where the arm's fit places the tool most
+   --  surely (the least push there), the least rotation of those as sure. Each turning joint's axis is moved off the
+   --  eye by the fit's least sure term in turn, so that the aims that turn it farther stand less surely; the old first
+   --  that reaches took the least rotation however unsure its pose (f16u: a joint turned 273 units for 47 swept).
+   procedure Surest_Aim_Is_Taken is
+      Idle    : constant Real_Array (1 .. Joint_Count) := [others => 0.0];
+      Along   : constant Vec3 := Unit (Tips_True (1, Open));
+      O       : constant Observation := Observed (1, Idle, Idle, 0.0);
+      Turned_Away : Natural := 0;   --  cases whose surest aim is not the least rotation
+   begin
+      for J in 4 .. Joint_Count loop
+         declare
+            M        : Model;
+            Chosen   : Aimed;
+            Yawed    : Real;
+            Reaches, Unmeasured : Boolean;
+            Why      : Ada.Strings.Unbounded.Unbounded_String;
+            Least    : Real := Real'Last;
+            Least_At : Real := 0.0;
+            Any      : Boolean := False;
+         begin
+            Build (M, Placed);
+            declare
+               R     : Arm_Fit := M.Kinematics (1).Result;
+               Terms : constant Natural := Fit.Terms (Joint_Count);
+            begin
+               for T in Fit.Joint_Term range Fit.Point_1 .. Fit.Point_2 loop
+                  declare
+                     P : constant Positive := Fit.Term_Of (J, T);
+                  begin
+                     R.Covariance.Replace_Element (R.Covariance.First_Index + (P - 1) * Terms + P - 1, 1.0e-2);
+                  end;
+               end loop;
+               M.Kinematics.Replace_Element (1, (M.Kinematics (1) with delta Result => R));
+            end;
+            for K in 0 .. 7 loop
+               declare
+                  Yaw : constant Real := (if K mod 2 = 1 then 1.0 else -1.0) * Real ((K + 1) / 2) * (Ada.Numerics.Pi / 4.0);
+                  A   : Aimed;
+               begin
+                  Aim (M, 1, 1, O, Along, A, Yaw => Yaw);
+                  if A.Ok and then Motion.Status (A.Plan) = Motion.Planned then
+                     declare
+                        There : Observation := O;
+                     begin
+                        There.Readings.Replace_Element (1, Motion.Last_Readings (A.Plan));
+                        if not Any or else Least_Push (M, 1, There) < Least then
+                           Least := Least_Push (M, 1, There);
+                           Least_At := Yaw;
+                           Any := True;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+            Aim_Reaching (M, 1, 1, O, Along, (others => <>), (others => <>), Chosen, Yawed, Reaches, Unmeasured, Why);
+            Check (Any and then Reaches and then Yawed = Least_At,
+                   "joint" & J'Image & " least sure: the aim taken was turned" & Yawed'Image & " rad, the surest"
+                   & Least_At'Image);
+            if Yawed /= 0.0 then
+               Turned_Away := Turned_Away + 1;
+            end if;
+         end;
+      end loop;
+      Check (Turned_Away > 0, "no joint's unsure axis made an aim other than the least rotation the surest: the test"
+             & " tells nothing of the choice");
+   end Surest_Aim_Is_Taken;
+
    --  Under Measure, an aim that passes an end is turned about the way down until one does not, and a press none of
    --  whose aims is planned costs the arm no move. The first lobe's aim at the least rotation passes an end: the arm
    --  is taken to the aim turned another way, and the decider ends; every aim passes one: the arm is left where it
@@ -976,6 +1089,8 @@ package body Driver.Robot.Hand.Pressing.Tests is
                              A_Blocked_Aim_Is_Not_A_Press'Access);
       Driver.Tests.Register ("hand.measure.yaw", "an aim that passes an end is not turned about the way down to a pose that does not, "
                              & "or one that every turn passes moves the arm", The_Aim_Is_Turned_Past_An_End'Access);
+      Driver.Tests.Register ("hand.press.surest", "of the aims about the way down that reach, one where the arm's fit places "
+                             & "the tool less surely is taken", Surest_Aim_Is_Taken'Access);
       Driver.Tests.Register ("hand.press.yaw", "an aim turned about the way down keeps the line down and the eye, or an end a joint "
                              & "showed refuses the turn it lies between and not the other", The_Aim_Turns_About_The_Way_Down'Access);
       Driver.Tests.Register ("hand.press.turn",
@@ -987,6 +1102,9 @@ package body Driver.Robot.Hand.Pressing.Tests is
       Driver.Tests.Register ("hand.pressing.tips",
                              "a hand's presses measure its tips in the world's frame, which the arm's placement "
                              & "moves, or not at all with the arm not placed", Tips_Free_Of_Placement'Access);
+      Driver.Tests.Register ("hand.pressing.pushed",
+                             "a press that pushed the closer off the opening it was made at is refused, and no tip is "
+                             & "known", Pushed_Closer_Presses_At_Its_Opening'Access);
       Driver.Tests.Register ("hand.pressing.plan",
                              "a press is aimed down into another arm's table, or planned in the world where an arm "
                              & "not placed in it cannot", Press_Planned_In_The_Arms_Frame'Access);

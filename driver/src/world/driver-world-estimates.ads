@@ -3,45 +3,44 @@
 --
 --  It takes the eyes as a provider of cameras (Driver.World.Cameras), so it
 --  runs the same on the body's measured eyes and on a self test's pinholes.
---  Every beat it feeds each thing's track in each eye; asks the instrument
---  for what the tracks want; matches each thing from every eye that sees it
---  into every other eye at the same instant, keeping the points both see
---  (Driver.World.Pairs) as the thing's samples and starting a track in an
---  eye that had none, segmented around where its pixels went; and reads
---  every reply on a later beat.
+--  Every beat it feeds each thing's track in each eye, keeps the eyes' still
+--  pictures as views (Driver.World.Sight), and says what the eyes are to place
+--  by themselves (Measure_Due); Measure places it, apart from the main loop.
 --
---  The scene itself is measured at a still beat when nothing is being
---  looked for again: at the start of an episode, and again whenever a
---  thing's region changed, since what moved may have carried a surface with
---  it (the surfaces mostly of that thing's own points are dropped at once).
---  A grid of each eye's image, less the pixels showing the robot, is
---  matched into every other eye, and the supports are found among all the
---  points that gives (Driver.World.Supports), each pair's grid kept apart
---  from the others'. The grid is as many pixels apart as the square root of
---  the image's shorter side, so it has as many rows as each row has pixels
---  between points. A surface measured before in the episode stands where a
---  new measurement neither finds it again nor sees through it (a line of
---  sight crossing it to a point beyond): eyes that look elsewhere now say
---  nothing of it. A thing's points are each pair's latest, less those that
---  fall outside it now in an eye that holds it where the brain pointed at
---  it (a region found here may be part of it); an eye that lost it says
---  nothing either. A new point is kept only when the scene and the thing's
---  other points bear it out, each at its own uncertainty: no surface the
---  first eye sees lies in front of it, and it lies within the thing as its
---  points from the other pairs and earlier beats place it (the thing is
---  still between pushes). A point of the scene that falls inside a thing's region
---  in an eye that holds it is the thing's own (on it, or hidden behind it),
---  so a thing never rests on its own top face; a thing's support is worked
---  out again only when its points or the surfaces change.
+--  The scene is measured at a still beat when nothing is being looked for
+--  again: at the start of an episode, and again whenever a thing's region
+--  changed, since what moved may have carried a surface with it (the surfaces
+--  mostly of that thing's own points are dropped at once). A grid of the
+--  picture of every eye that has views from more than one place, less the
+--  pixels showing the robot, is placed from the views (Sight.Place), the table
+--  among it, and the supports are found among all the points that gives
+--  (Driver.World.Supports), each eye's grid kept apart from the others'. The
+--  grid is as many pixels apart as the square root of the image's shorter
+--  side, so it has as many rows as each row has pixels between points. A
+--  surface measured before in the episode stands where a new measurement
+--  neither finds it again nor sees through it (a line of sight crossing it to
+--  a point beyond): eyes that look elsewhere now say nothing of it.
+--
+--  A thing's points are what the eyes that hold it place of their regions
+--  (Sight.Place, at the pixels of a grid of each region a patch's half width
+--  apart, those standing above the table): each region measured anew is placed
+--  again, and its eye's points replace that eye's earlier ones. An eye that
+--  holds no track of a thing whose points it sees starts one, segmented around
+--  where the points fall in its picture. A point of the scene that falls
+--  inside a thing's region in an eye that holds it is the thing's own (on it,
+--  or hidden behind it), so a thing never rests on its own top face; a thing's
+--  support is worked out again only when its points or the surfaces change.
 
 with Ada.Containers.Indefinite_Holders;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Containers.Vectors;
 with Driver.Clock;
 with Driver.Images;
 with Driver.Instrument;
 with Driver.Services;
 with Driver.World.Cameras;
-with Driver.World.Pairs;
+with Driver.World.Points;
+with Driver.World.Sight;
 with Driver.World.Supports;
 with Driver.World.Tracking;
 
@@ -69,19 +68,94 @@ private package Driver.World.Estimates is
    function No_Gap_Seen (S : State; T : Thing_Id) return Boolean;
    --  As Driver.World's: no support and Unknown before one is found.
 
+   function Measure_Due (S : State) return Boolean;
+   --  The eyes have something to place by themselves (the scene, a thing's region measured anew) or a track lost at a
+   --  still beat looks for its thing again: heavier than a beat allows, computed apart from the main loop
+   --  (Driver.Apart) at the robot's estimates' turn.
+
+   procedure Measure
+     (S         : in out State;
+      Eyes      : Natural;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class);
+   --  Does it, each part at the observation that made it due.
+
+   procedure Keep_View
+     (S         : in out State;
+      E         : Eye_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      O         : Observation);
+   --  Eye E's picture at O, kept as a view the eyes place from (Driver.World.Sight.Keep_View): a still picture the
+   --  world did not see at a still beat of its own, as one of an arm's sweep.
+
+   function Scene_Pending (S : State) return Boolean;
+
+   procedure Seen_Anew (S : in out State);
+   --  As Driver.World.Seen_Anew: the scene is due.
+
+   function Views_Of (S : State; E : Eye_Id) return Natural;
+
+   function Free_Pixel (S : State; E : Eye_Id; Width, Height : Positive) return Driver.Images.Pixel;
+   --  The middle of the eye's picture, or where its latest scene showed the robot riding with it there, the middle of
+   --  the cell of its grid nearest it that did not: where a point the eye is turned to is to be seen.
+   --  How many views of the eye are kept (Driver.World.Sight.Views_Of).
+
    procedure Adopt (S : in out State; E : Eye_Id; O : Observation; Region : Driver.Images.Mask; Thing : out Thing_Id);
+   --  The region the eye shows the thing in at O, a track of it started; the points the eye places of it are placed
+   --  apart at the next still beat it holds the thing at (Measure), unless the points are given (Place_Points).
    procedure New_Episode (S : in out State);
 
    function Thing_Count (S : State) return Natural;
    function Seen_In (S : State; T : Thing_Id; E : Eye_Id) return Boolean;
    function Region_In (S : State; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask;
 
-   function Points_Of (S : State; T : Thing_Id) return Driver.World.Pairs.Match_Vectors.Vector;
-   --  The latest points two eyes saw of it, with the pixels of the first eye
-   --  they were seen at.
+   function Points_Of (S : State; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector;
+   --  Its points, with the pixels of the eye that placed them.
 
    function Points_Eye (S : State; T : Thing_Id) return Eye_Id;
-   --  The eye those pixels are in.
+
+   package Normal_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+
+   procedure Place_Points
+     (S       : in out State;
+      T       : Thing_Id;
+      Points  : Driver.World.Points.Placed_Vectors.Vector;
+      Normals : Normal_Vectors.Vector;
+      Carried : Boolean := False)
+     with Pre => Natural (Points.Length) = Natural (Normals.Length);
+   --  Points an eye that holds the thing placed by itself (Driver.World.Sight), each with its normal (zero where not
+   --  told), in place of the ones that eye placed before (their First). Each was found along its line of sight in
+   --  views from elsewhere that bear one another out, so it needs nothing else to bear it out.
+   --  Carried: the points are the ones placed before, carried where the hand that holds the thing took them
+   --  (Driver.World.Holding), every beat it moves: the log says so when the hold begins and ends, not each beat.
+
+   procedure Place_Pixels
+     (S         : State;
+      E         : Eye_Id;
+      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
+                                             return Driver.World.Cameras.Camera'Class;
+      O         : Observation;
+      Region    : Driver.Images.Mask;
+      Points    : out Driver.World.Points.Placed_Vectors.Vector;
+      Normals   : out Normal_Vectors.Vector;
+      Asked     : out Natural;
+      Counts    : out Driver.Robot.Surfaces.Placing_Counts);
+   --  The points eye E's picture at O shows in the region that stand above the table, placed from the views kept
+   --  (Sight.Place) at a grid of the region's pixels a patch's half width apart, less the pixels showing the robot
+   --  (Asked of them): each with the pixel it was asked at and its normal.
+
+   function Placed_Of (S : State; T : Thing_Id) return Driver.World.Points.Placed_Vectors.Vector;
+   function Placed_Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector;
+   --  The points an eye placed by itself (Place_Points), and their normals, as they stand.
+
+   function Normals_Of (S : State; T : Thing_Id) return Normal_Vectors.Vector;
+   --  Per point of Points_Of, in order, the normal its eye placed it with.
+
+   procedure Note_Table (S : in out State; Plane : Driver.Geometry.Plane_Estimate);
+   --  The table an arm's eye measured, in the world frame, its normal towards what rests on it: a surface things
+   --  rest on beside the ones found among the scene's points, replaced when it is measured again; nothing while it
+   --  is not known.
 
    function Centre (S : State; T : Thing_Id) return Point_Estimate;
 
@@ -107,46 +181,34 @@ private package Driver.World.Estimates is
 
 private
 
-   package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.Instrument.Point_Array, Driver.Instrument."=");
+   use type Driver.Clock.Beat;
+
+   package Point_Holders is new Ada.Containers.Indefinite_Holders (Driver.World.Tracking.Point_Array, Driver.World.Tracking."=");
+   package Mask_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Driver.Images.Mask, Driver.Images."=");
    package Image_Holders is new Ada.Containers.Indefinite_Holders (Driver.Images.Image, Driver.Images."=");
    package Observation_Holders is new Ada.Containers.Indefinite_Holders (Observation, Driver.Observations."=");
    package Request_Holders is new Ada.Containers.Indefinite_Holders (String);
    package Point_Vectors is new Ada.Containers.Vectors (Positive, Point_Estimate);
 
-   --  A thing in one eye: its track, and the instrument's request out for it.
+   --  A thing in one eye: its track, and the instrument's request out for it (a segmentation).
    type Slot is record
-      Has     : Boolean := False;
-      Pointed : Boolean := False;   --  the region was given (the brain pointed at the thing here), not found
-      Track   : Driver.World.Tracking.Track;
-      Out_Now : Boolean := False;
-      Ticket  : Driver.Services.Ticket;
-      Points  : Point_Holders.Holder;   --  a match request's points
-      Outline : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
-                                        --  the thing; kept while the eye looks for it again
+      Has       : Boolean := False;
+      Pointed   : Boolean := False;   --  the region was given (the brain pointed at the thing here), not found
+      Track     : Driver.World.Tracking.Track;
+      Out_Now   : Boolean := False;
+      Ticket    : Driver.Services.Ticket;
+      Match_Due : Boolean := False;   --  lost at a still beat: its pixels are to be looked for in the latest picture
+      Asked     : Point_Holders.Holder;   --  those pixels (Tracks.Match_Points)
+      Tried_At  : Driver.Clock.Beat'Base := -1;   --  the thing's points it was last started from here (Start_Elsewhere)
+      Tried_Box    : Driver.Instrument.Box;         --  and the box and point it was asked about then
+      Tried_Prompt : Driver.Images.Pixel := (U => -1.0, V => -1.0);
+      Placed_At : Driver.Clock.Beat'Base := -1;   --  the measurement of its region the eye's points were placed from
+      Hulled_At : Driver.Clock.Beat'Base := -1;   --  and the one its outline last went into the thing's hull with
+      Outline   : Point_Vectors.Vector;   --  a pointed region, carried out to the depth of what is seen of
+                                          --  the thing; kept while the eye looks for it again
    end record;
 
    package Slot_Vectors is new Ada.Containers.Vectors (Eye_Id, Slot);
-
-   --  A thing matched from one eye into another at one instant.
-   type Cross is record
-      From, Into : Eye_Id;
-      Ticket     : Driver.Services.Ticket;
-      Points     : Point_Holders.Holder;
-      Own        : Natural := 0;
-      Seen       : Observation_Holders.Holder;   --  the observation of that instant
-      Inner      : Driver.Images.Pixel;           --  the region's inner point in From
-   end record;
-
-   package Cross_Vectors is new Ada.Containers.Vectors (Positive, Cross);
-
-   --  The measurement of the From eye's region a pair was last asked about,
-   --  so a pair is asked again only when that region was measured again.
-   type Asked_Pair is record
-      From, Into : Eye_Id;
-      Measured   : Driver.Clock.Beat := 0;
-   end record;
-
-   package Asked_Vectors is new Ada.Containers.Vectors (Positive, Asked_Pair);
 
    --  A track being started in an eye that had none.
    type Start is record
@@ -159,28 +221,14 @@ private
 
    package Start_Vectors is new Ada.Containers.Vectors (Positive, Start);
 
-   --  What one pair of eyes saw of a thing at one instant, the matcher's
-   --  error then (pixels, and the degrees of freedom it rests on), and the
-   --  observation it was seen at (without its images): the eyes as they were
-   --  then. A pair keeps its latest answer, and the last one before it that
-   --  saw the thing from another view.
-   type Pair_Seen is record
-      From, Into : Eye_Id;
-      Kept       : Driver.World.Pairs.Match_Vectors.Vector;
-      Error      : Real := Real'Last;
-      Freedom    : Natural := 0;
-      Then_Seen  : Observation_Holders.Holder;
-   end record;
-
-   package Pair_Seen_Vectors is new Ada.Containers.Vectors (Positive, Pair_Seen);
-
    type Thing_Record is record
       Eyes      : Slot_Vectors.Vector;
-      Crosses   : Cross_Vectors.Vector;
-      Asked     : Asked_Vectors.Vector;
       Starts    : Start_Vectors.Vector;
-      By_Pair   : Pair_Seen_Vectors.Vector;
-      Points    : Driver.World.Pairs.Match_Vectors.Vector;   --  every pair's, inside it in the eyes holding it
+      Points    : Driver.World.Points.Placed_Vectors.Vector;   --  every eye's that placed it
+      Normals   : Normal_Vectors.Vector;                     --  per point of Points, its placed normal (Place_Points)
+      Placed    : Driver.World.Points.Placed_Vectors.Vector;   --  the points an eye placed by itself (Place_Points)
+      Placed_Normals : Normal_Vectors.Vector;
+      Hull      : Driver.World.Points.Placed_Vectors.Vector;   --  from the outlines of two eyes or more (Hull)
       Points_In : Eye_Id := Eye_Id'First;
       Points_At : Driver.Clock.Beat := 0;
       Has_Points : Boolean := False;
@@ -192,35 +240,32 @@ private
 
    package Thing_Vectors is new Ada.Containers.Vectors (Thing_Id, Thing_Record);
 
-   procedure Keep_View
-     (R         : in out Thing_Record;
-      Answer    : Pair_Seen;
-      Camera_Of : not null access function (E : Eye_Id; Seen : not null access constant Observation)
-                                             return Driver.World.Cameras.Camera'Class);
-   --  A pair's answer that placed points of the thing, stored: it replaces
-   --  the pair's latest when it saw the thing from the same view, else the
-   --  latest becomes the earlier view, and an earlier one before it goes.
-
    package Place_Vectors is new Ada.Containers.Vectors (Place_Id, Point_Estimate);
 
-   --  A grid of one eye's image matched into another's at one still instant.
-   type Background is record
-      From, Into : Eye_Id;
-      Ticket     : Driver.Services.Ticket;
-      Points     : Point_Holders.Holder;
-      Stride     : Positive := 1;
-      Round      : Natural := 0;
-   end record;
-
-   package Background_Vectors is new Ada.Containers.Vectors (Positive, Background);
-
-   --  A point of the scene: where both eyes saw it, and its place in the grid
-   --  of the eye it was asked from.
+   --  A point of the scene: where the eye that asked it placed it (Sight), and its place in the grid of that eye.
    type Scene_Point is record
-      Point      : Point_Estimate;
-      Grid       : Driver.World.Supports.Grid_Point;
-      From, Into : Eye_Id := Eye_Id'First;   --  the two eyes that saw it
+      Point : Point_Estimate;
+      Grid  : Driver.World.Supports.Grid_Point;
+      Eye   : Eye_Id := Eye_Id'First;   --  the eye that asked it
+      Pixel : Driver.Images.Pixel;      --  where it asked it
    end record;
+
+   --  A region an eye holds, measured anew, to be placed: the thing, the eye, and the observation it was seen at.
+   type Place_Request is record
+      Thing : Thing_Id;
+      Eye   : Eye_Id;
+      Seen  : Observation_Holders.Holder;
+   end record;
+
+   package Place_Request_Vectors is new Ada.Containers.Vectors (Positive, Place_Request);
+
+   --  A thing two eyes or more hold at a beat, an outline of it measured anew: its hull to work out apart (Hull).
+   type Hull_Request is record
+      Thing : Thing_Id;
+      Seen  : Observation_Holders.Holder;
+   end record;
+
+   package Hull_Request_Vectors is new Ada.Containers.Vectors (Positive, Hull_Request);
 
    package Scene_Point_Vectors is new Ada.Containers.Vectors (Positive, Scene_Point);
 
@@ -231,14 +276,19 @@ private
       Scene_Round : Natural := 0;                 --  the measurement of the scene they came from
       Earlier     : Boolean := False;             --  the surfaces are an earlier episode's
       Due         : Boolean := True;              --  the scene is to be measured at the next still beat
-      Round       : Natural := 0;                 --  the latest measurement of the scene asked
-      Asking      : Background_Vectors.Vector;    --  its matches out now
-      Incoming    : Scene_Point_Vectors.Vector;   --  and the points they gave so far
-      Next_Column : Natural := 0;                 --  where the next pair's grid starts among them
-      Seen_From   : Vec3 := Zero3;                --  where an eye that saw them stands
-      Round_Seen  : Observation_Holders.Holder;   --  the observation they were asked at
+      Round       : Natural := 0;                 --  the latest measurement of the scene
+      Scene_Asked : Boolean := False;             --  it is due, to be measured apart (Measure)
+      Round_Seen  : Observation_Holders.Holder;   --  the observation it is measured at
+      Seen_From   : Vec3 := Zero3;                --  where an eye that placed its points stands
+      Views       : Driver.World.Sight.Bank;      --  the eyes' still pictures
+      Riding      : Mask_Vectors.Vector;
+      --  Per eye, the pixels its latest scene showed riding with it (Driver.Robot.Surfaces.Placed.Riding), the cells
+      --  of its grid there: the robot's own body in that eye, asked of nothing it places.
+      To_Place    : Place_Request_Vectors.Vector; --  the regions measured anew, to be placed apart
+      To_Hull     : Hull_Request_Vectors.Vector;  --  the things whose outlines are to meet apart
       Up          : Direction_Estimate;
       Places      : Place_Vectors.Vector;
+      Table       : Driver.Geometry.Plane_Estimate;   --  the table an arm's eye measured, as noted (Note_Table)
    end record;
 
 end Driver.World.Estimates;

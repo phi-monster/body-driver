@@ -59,7 +59,8 @@ package body Driver.Robot.Hand.Tips.Tests is
                                           Direction => (Unit_Vector => Line (L, O), Sigma => 1.0e-5)),
                                Spread => Spread,
                                Travel => Travel,
-                               Pitch  => Pitch)]]);
+                               Pitch  => Pitch,
+                               Face   => <>)]]);
 
    Down : constant Vec3 := [0.0, 0.0, -1.0];
 
@@ -90,6 +91,7 @@ package body Driver.Robot.Hand.Tips.Tests is
                 Arm      => <>,
                 Approach => (Unit_Vector => Transpose (R) * Down, Sigma => Turn_Sigma),
                 Closer   => Driver.Robot.Hand.Presses.Reading_Holders.To_Holder ([1 => (if O = Open then 1.0 else 0.0)]),
+                Before   => <>,
                 Beat     => 0);
    end Press_At;
 

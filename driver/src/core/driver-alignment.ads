@@ -57,17 +57,34 @@
 with Driver.Images;
 
 private with Ada.Containers.Vectors;
+with Driver.Uncertain;
 private with Ada.Finalization;
 private with System.Atomic_Counters;
 
 package Driver.Alignment is
 
    type Pyramid is private;
+
+   --  The aligner's work, phase by phase: the scan of a prediction's window
+   --  for candidates, the fits of the peaks found there, the fits down the
+   --  levels to the pixels, and the variant fits the covariance rests on.
+   type Work_Phase is (Scanning, Peak_Fitting, Level_Fitting, Variant_Fitting, Retrying);
+   --  Retrying: the alignments tried again with a patch twice as wide; its passes count the ones then found.
+
+   function Work_Report return String;
+   --  The work done since the last report, in whichever tasks: per phase how
+   --  many times it was done, how many cells were scanned or passes over a
+   --  patch were made, and the seconds it took; the counts start again.
    --  A picture's luma at the full size and at every
    --  halving of it that still holds a patch. Made once per picture and used
    --  for every point asked of it.
 
    function Pyramid_Of (I : Driver.Images.Image) return Pyramid;
+
+   function Pyramid_Of (Width, Height : Natural; Luma : Real_Array) return Pyramid
+     with Pre => Luma'Length = Width * Height;
+   --  The pyramid of a picture given by its luma, row after row as Driver.Images.Luma lays it out: a mean of
+   --  several frames (Driver.Pixels.Means) is compared as finely as it was averaged.
 
    function Levels (P : Pyramid) return Natural;
    --  The number of sizes, the full one included.
@@ -98,6 +115,19 @@ package Driver.Alignment is
    --  unit of v, v' by VU and VV.
 
    Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0.0, VU => 0.0, VV => 1.0);
+
+   --  What the second picture's warp bends by beyond its linear part, known from the scene and held, not fitted: the
+   --  place an offset (I, J) of the first picture's patch lands at moves by U_II I^2 + U_IJ I J + U_JJ J^2 across and
+   --  by the V's down, in the second picture's pixels per the first's squared. A plane seen at a slant bends every
+   --  patch of it the same way, and fitted as linear the bend's mean over the patch moves the place found: the fake's
+   --  fixed eyes' places of a table their arms' eyes saw erred along it by 1.7 to 2.5 times the bend's mean over a
+   --  patch (their correlation 0.08 to 0.42), and given it their robust error fell from 0.12-0.17 px to 0.07-0.11
+   --  (10-21).
+   type Bend_Part is record
+      U_II, U_IJ, U_JJ, V_II, V_IJ, V_JJ : Real := 0.0;
+   end record;
+
+   No_Bend : constant Bend_Part := (others => 0.0);
 
    type Place_Covariance is record
       UU, UV, VV : Real := 0.0;
@@ -132,7 +162,8 @@ package Driver.Alignment is
       Not_Solvable,       --  the normal equations of the refinement have no solution (the patch fixes too little)
       Not_Settled,        --  the refinement did not settle within the bits of precision there are
       Left_Window,        --  the refinement carried the place out of the window the prediction allows
-      Uninformative);     --  the pixels leave the place as wide as the patch
+      Uninformative,      --  the pixels leave the place as wide as the patch
+      Not_Asked);         --  not aligned: the field of its keyframe settled on the points before it (Keyframes)
 
    type Answer is record
       Verdict     : Alignment.Verdict := Not_Found;
@@ -156,8 +187,29 @@ package Driver.Alignment is
    end record;
    --  To, Cov and Linear are meaningful only when the verdict is Found.
 
-   function Align (First, Second : Pyramid; Query : Prediction) return Answer
+   Not_Asked_Answer : constant Answer := (Verdict => Not_Found, Because => Not_Asked, others => <>);
+
+   function Align
+     (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True; Bend : Bend_Part := No_Bend) return Answer
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  Widen: a point the usual patch cannot decide may be tried with one twice as wide (four times the
+   --  pixels); the caller allows that only while it has nothing else to stand on (Keyframes: no field yet).
+   --  R1 on the Pi: the wide retries found one point in twelve and were most of the aligner's time.
+   --  Bend: the warp's bend beyond Query's linear part, at the full sizes (Bend_Part); none, the warp linear.
+
+   function From_Level (P : Pyramid; Level : Natural) return Pyramid
+     with Pre => Level < Levels (P);
+   --  The picture at that level as a pyramid of its own, its sizes from that level down: a place at the level is the
+   --  full size's over Halving ** Level (corner-origin coordinates scale with the pixels).
+
+   function Align_At_Scale
+     (First, Second : Pyramid; Query : Prediction; Widen : Boolean := True; Bend : Bend_Part := No_Bend) return Answer
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  As Align, where the two pictures may show the place at very different scales (two eyes of different lenses, or
+   --  one eye near and far): the finer picture is compared at the size of it that is as fine as the other's full size
+   --  or less than a halving finer (its coarser levels stand in for it: a direction made smaller by more than a
+   --  halving would skip over the pictures' pixels, Bad_Warp), and the answer is given at the full sizes. The scale
+   --  is the prediction's warp's (Linear): the geometric mean of how far it stretches its two directions.
 
    function Largest_Window (First, Second : Pyramid) return Real
      with Pre => Levels (First) > 0 and then Levels (Second) > 0;
@@ -174,11 +226,48 @@ package Driver.Alignment is
    --  (Largest_Window less what a place on a grid of pixels cannot be known to beyond): the width of "anywhere
    --  the aligner can look".
 
+   function Window_Level (First, Second : Pyramid; Radius : Real) return Natural
+     with Pre => Levels (First) > 0 and then Levels (Second) > 0;
+   --  The size of the pyramids Align searches a window of this radius (pixels of the full size) at: the finest where
+   --  the window is no wider than a patch there; where it is wider than a patch at every size, the one where it is
+   --  the least wider than its patch.
+
    function Window_Radius (Sigma : Real) return Real;
+
+   function Sigma_Of_Window (Radius : Real) return Real;
+   --  The standard deviation, along both axes alike, of a prediction whose window has this radius (Window_Radius
+   --  turned round); zero for a radius no wider than the rounding of a place on a grid of pixels makes a window.
+
+   function Finest_Radius (Width, Height : Natural) return Real;
+   --  The widest radius of a window Align searches where pictures of this size are finest, and so answers Narrow:
+   --  the half patch, less the pixel a place on the grid is rounded to.
    --  The radius, in pixels, of the window of a prediction whose standard deviation is Sigma along both axes: as far
    --  as a vector of two dimensions is significant, and a place on a grid of pixels cannot be known to beyond.
 
+   function Half_Patch (Width, Height : Natural) return Natural;
+   --  Half the width of the patch Align matches a point by, in pictures of this size: the patch is as many pixels
+   --  wide as the geometric middle between a pixel and the picture's size (Driver.Robot.Flow's cells), half of it
+   --  either side of the point. A prediction's window no wider than a patch at the full size is searched where the
+   --  pictures are, and such a point is followed (Driver.Robot.Kinematics.Followed).
+
+   Quantization : constant Real := 1.0 / 12.0;
+   --  The variance of a uniform rounding to a whole unit: of a pixel's level, and of a place known to a pixel.
+
+   Window_Gate     : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+   Window_Multiple : constant Real := Driver.Uncertain.Threshold (Window_Gate);
+   --  How many standard deviations of a prediction a place may lie from it: the length of a two-dimensional
+   --  difference, significant at the tail probability Z has for one dimension. A prediction that may lie at
+   --  another place too reaches it at its window's edge when the difference enters its covariance divided by
+   --  this, squared (Driver.Robot.Kinematics' untold orders).
+
+   function Squared_Length (Du, Dv : Real; C : Place_Covariance) return Real;
+   --  The squared length of a displacement in the standard deviations of a covariance (its Mahalanobis length): a
+   --  place lies in a prediction's window when it is no more than Window_Multiple, squared.
+
 private
+
+   Finest : constant := 0;
+   --  The size of the pyramid that is the picture itself.
 
    --  An array of reals made once and read after by any number of alignments at once (Driver.Parallel_For). The
    --  levels that share it count themselves with an atomic counter, and reading it writes nothing. (A reference

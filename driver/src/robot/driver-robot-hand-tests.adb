@@ -14,7 +14,9 @@ with Driver.Robot.Hand.Lowering.Tests;
 with Driver.Robot.Hand.Presses.Tests;
 with Driver.Robot.Hand.Pressing.Tests;
 with Driver.Robot.Hand.Selfsight.Tests;
+with Driver.Robot.Hand.Hull.Tests;
 with Driver.Robot.Hand.Shape.Tests;
+with Driver.Robot.Hand.Follow.Tests;
 with Driver.Robot.Hand.Slide.Tests;
 with Driver.Robot.Hand.Tips.Tests;
 with Driver.Robot.Hand.Sweep.Tests;
@@ -137,6 +139,30 @@ package body Driver.Robot.Hand.Tests is
          Check (False, "a push whose view never forms is waited for without end, as A12's was for an hour");
    end Views_Never_Form;
 
+   procedure Way_Goes_On_Below_A_Pixel is
+      --  f16k's jaw (10-15): its first push, far below a pixel of its view, "showed" a few pixels, and the next two
+      --  nothing new; the way ended there, its two ends 0.003 units apart, and no hand was made. Here every push is
+      --  followed, the first shows something, every one after it nothing new, and a pixel is four first pushes: the
+      --  way goes on to the push that moves the view by a pixel beyond the one before (the fourth, 8 beyond 4) and
+      --  ends there (f16w's servo jaw ended at the push whose doubling first reached a pixel in all, half a pixel on).
+      Pushed : Natural := 0;
+      procedure Push (Offset : Real; Followed : out Boolean) is
+         pragma Unreferenced (Offset);
+      begin
+         Pushed := Pushed + 1;
+         Followed := True;
+      end Push;
+      function Shows return Showing is
+        (if Pushed = 1 then Something_New else Nothing_New);
+      Pushes, Unseen, Longest : Natural := 0;
+      Formed, Answered        : Boolean := False;
+   begin
+      Sweep_Way (-1.0, 1.0, 4.0, 1, Push'Access, Shows'Access, Pushes, Unseen, Longest, Formed, Answered);
+      Check (Formed and then Answered and then Pushes = 4,
+             "a way that showed something at its first push, below a pixel, ended after" & Pushes'Image
+             & " pushes, not at the fourth, the first to move its view by a pixel beyond the push before");
+   end Way_Goes_On_Below_A_Pixel;
+
    procedure Press_Overshoot is
       --  A tip pressed onto a stiff surface by a stiff position controller,
       --  the surface ten times as stiff: a step that would end below the
@@ -250,8 +276,10 @@ package body Driver.Robot.Hand.Tests is
       --  table when the steps pass the height of the eye above it. The eye is
       --  0.05 above the tip, the tip starts 0.2 above the table, the tool's
       --  Least is 0.001 and the eye's height is known to 0.001:
-      --  (a) no step takes the eye nearer the table than Z sigma of its height,
-      --      and the descent ends, Spent, when less than Least is left;
+      --  (a) no step takes the eye further than Z sigma of its height below it
+      --      (as far as the table can be: the owner's most aggressive option,
+      --      10-05, and h22 and h23 on 10-17, every press stopped short of the
+      --      table), and the descent ends, Spent, when less than Least is left;
       --  (b) the steps double up to the last, cut to what is left: the cut
       --      step is counted, and there is one;
       --  (c) with the eye's height unknown nothing caps the steps, which go on
@@ -288,8 +316,8 @@ package body Driver.Robot.Hand.Tests is
       Descend (Above'Access, Least, Lower'Access, Back'Access, Steps);
       Check (Steps.Spent, "the eye went on lowering past the table: " & Pushes'Image & " pushes, the eye at"
              & Real'Image (Lowest));
-      Check (Lowest >= Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", nearer the table than Z sigma");
-      Check (Lowest - Z * Sigma < Least, "the descent ended with" & Real'Image (Lowest - Z * Sigma) & " of the eye's room unused");
+      Check (Lowest >= -Z * Sigma - 1.0e-12, "a step took the eye to" & Real'Image (Lowest) & ", past where the table can be");
+      Check (Lowest + Z * Sigma < Least, "the descent ended with" & Real'Image (Lowest + Z * Sigma) & " of the eye's room unused");
       Check (Steps.Capped = 1 and then Total (Steps) = Pushes and then Steps.Blind = Total (Steps),
              "the last step was not the one cut to the room left: capped" & Steps.Capped'Image & " of" & Pushes'Image);
       Known_Eye := False;
@@ -641,7 +669,8 @@ package body Driver.Robot.Hand.Tests is
                   Ray    => (Origin    => (Mean => Zero3, Covariance => [others => [others => 0.0]]),
                              Direction => (Unit_Vector => Rays, Sigma => 2.5e-4)),
                   Spread => 0.0,
-                  Pitch  => 0.0);
+                  Pitch  => 0.0,
+                  Face   => <>);
             end loop;
             Adopt (H, 2, 1, 1, [1 => 0.04], [1 => 0.0], Rows);
          end;
@@ -805,9 +834,12 @@ package body Driver.Robot.Hand.Tests is
                              & "beat and was left unswept", Wait_For_A_View_Is_The_Longest_Known'Access);
       Driver.Tests.Register ("hand.measure.unformed", "a push whose view never forms is waited for without end (A12)",
                              Views_Never_Form'Access);
+      Driver.Tests.Register ("hand.measure.subpixel", "a closer's way ends on a push that shows nothing new below a "
+                             & "pixel of its view, after a first push that showed something (f16k's jaw)",
+                             Way_Goes_On_Below_A_Pixel'Access);
       Driver.Tests.Register ("hand.measure.press", "a press overshoots the surface by more than the least push, or is "
                              & "not made from where its descent began", Press_Overshoot'Access);
-      Driver.Tests.Register ("hand.measure.room", "a step lowers the eye below the table its arm's own eye saw",
+      Driver.Tests.Register ("hand.measure.room", "a step lowers the eye past as far as the table its arm's own eye saw can be",
                              Eye_Room_Caps_The_Steps'Access);
       Driver.Tests.Register ("hand.measure.stall", "a hand the arm follows and that stops going down is pushed on to the "
                              & "end of its room, or is not a press", Stalled_Descent'Access);
@@ -828,8 +860,10 @@ package body Driver.Robot.Hand.Tests is
       Driver.Robot.Hand.Presses.Tests.Register;
       Driver.Robot.Hand.Pressing.Tests.Register;
       Driver.Robot.Hand.Slide.Tests.Register;
+      Driver.Robot.Hand.Follow.Tests.Register;
       Driver.Robot.Hand.Touch.Tests.Register;
       Driver.Robot.Hand.Tips.Tests.Register;
+      Driver.Robot.Hand.Hull.Tests.Register;
       Driver.Robot.Hand.Shape.Tests.Register;
    end Register;
 

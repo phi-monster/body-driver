@@ -1,0 +1,79 @@
+import os, sys, numpy as np
+
+# 🔴 单目出深度:真机只有 RGB,这里把 RGB 现算的深度图顶替观测里的 depth 通道。
+# 身体那一侧一行没改 —— 它看到的就是"一台深度相机"。BL_MDE_OFF=1 关掉。
+_MDE_OFF = os.environ.get("BL_MDE_OFF", "0") != "0"
+_MDE_DUMP = [0]
+
+def _fill_depth(obs):
+    if _MDE_OFF or not isinstance(obs, dict):
+        return obs
+    vis = obs.get("vision")
+    if not isinstance(vis, dict):
+        return obs
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
+    try:
+        from monodepth import depth_from_rgb
+    except Exception as e:
+        print("[单目深度] 载不进来:", e, flush=True)
+        return obs
+    for k, c in vis.items():
+        if not isinstance(c, dict):
+            continue
+        col = c.get("color")
+        if col is None:
+            continue
+        if _MDE_DUMP[0] < 1:
+            od = c.get("depth")
+            print("[单目深度] 原 depth:", type(od).__name__,
+                  getattr(od, "dtype", None), getattr(od, "shape", None),
+                  "| color", getattr(col, "dtype", None), getattr(col, "shape", None), flush=True)
+            _MDE_DUMP[0] += 1
+        # 🔴 算不出来就把这一格【清空】,绝不许退回仿真自带的真深度 —— 那等于偷偷用了深度相机。
+        try:
+            d = depth_from_rgb(col, k)
+        except Exception as e:
+            print("[单目深度] 算不出来,这一帧交空:", e, flush=True)
+            d = None
+        import numpy as _np
+        if d is None:
+            sh = getattr(col, "shape", None)
+            d = _np.zeros((sh[0], sh[1]), dtype=_np.float32) if sh else None
+        if d is not None:
+            c["depth"] = d
+    return obs
+
+
+# l3_link:把 RoboDojo 的评测循环接到零机体假设驱动(bl-calibrate)上。
+# 契约照抄上游样板(XPolicyLab/policy/Pi_0/deploy.py):
+#   model_client.call(func_name=...) 打到 ws 策略服务器(就是驱动),TASK_ENV 负责步进。
+# 与样板的唯一区别:驱动一次只回一个动作(它是闭环的,每拍都要看新观测),
+# 所以 get_action 的返回按"可能是单个动作、也可能是动作块"两种都兼容。
+def eval_one_episode(TASK_ENV, model_client):
+    model_client.call(func_name="reset")
+
+    while not TASK_ENV.is_episode_end():
+        obs = _fill_depth(TASK_ENV.get_obs())
+        model_client.call(func_name="update_obs", obs=obs)
+        actions = model_client.call(func_name="get_action")
+
+        if actions is None:
+            break
+        # 单个动作 ⇒ 包一层;动作块 ⇒ 原样。判据是"第一个元素是不是序列",不假设维度。
+        if len(actions) == 0:
+            break
+        first = actions[0]
+        if not hasattr(first, "__len__"):
+            actions = [actions]
+
+        for action_idx, action in enumerate(actions):
+            TASK_ENV.take_action(action)
+            if TASK_ENV.is_episode_end() or action_idx + 1 == len(actions):
+                break
+            obs = _fill_depth(TASK_ENV.get_obs())
+            model_client.call(func_name="update_obs", obs=obs)
+
+
+def eval_one_episode_batch(TASK_ENV, model_client):
+    raise NotImplementedError("l3_link 只跑单环境(deploy.yml 里 eval_batch: false)")

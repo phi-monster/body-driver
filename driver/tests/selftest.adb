@@ -11,6 +11,7 @@ with Driver.Distributions.Tests;
 with Driver.Geometry.Tests;
 with Driver.Instrument.Tests;
 with Driver.Lanes_Tests;
+with Driver.Observations.Tests;
 with Driver.Parallel_For_Tests;
 with Driver.Shared_For_Tests;
 with Driver.Pixels.Tests;
@@ -20,6 +21,7 @@ with Driver.Services;
 with Driver.Tests;
 with Driver.Twins.Tests;
 with Driver.Replies.Tests;
+with Driver.Round_Trips.Tests;
 with Driver.World.Tests;
 
 procedure Selftest is
@@ -31,9 +33,11 @@ begin
    Driver.Shared_For_Tests.Register;
    Driver.Lanes_Tests.Register;
    Driver.Distributions.Tests.Register;
+   Driver.Round_Trips.Tests.Register;
    Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;
    Driver.Twins.Tests.Register;
+   Driver.Observations.Tests.Register;
    Driver.Replies.Tests.Register;
    Driver.Pixels.Tests.Register;
    Driver.Instrument.Tests.Register;

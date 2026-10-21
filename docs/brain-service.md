@@ -48,7 +48,7 @@ Anything else the service needs per request belongs here too, for example
 
 - Not set: nothing is merged and the service samples by its own defaults.
 - Not one JSON object, or setting a member the driver writes itself
-  (`model`, `messages`, `stream`, `structured_outputs`, `response_format`):
+  (`model`, `messages`, `stream`, `structured_outputs`, `grammar`, `response_format`):
   it is not used at all.
 
 Either way the first question logs once what happened:
@@ -75,14 +75,18 @@ Either way the first question logs once what happened:
 
 - `structured_outputs.grammar` is this round's keyboard as a GBNF grammar
   (the `structured_outputs` member of vLLM 0.10 and later, with its xgrammar
-  backend). The service must decode under it: the brain can then type only
+  backend). The same grammar is also the top-level member `grammar`, which
+  is where llama.cpp's `llama-server` reads one; each server ignores the
+  other's member. The service must decode under it: the brain can then type only
   what this body can do now. The grammar is rebuilt every round from what the
   body measured; the prompt prints the same keyboard for the brain to read
   ([`language.md`](language.md), section 2). A service that ignores the
   grammar still works, but its programs may contain lines the driver refuses.
 - The picture is one 24-bit BMP, base64 in a data URL. On top, at full size,
-  the eye the brain looks through this round (the first round: the first eye
-  fixed in the scene). Below it, one strip with every other eye that has a
+  the eye the brain looks through this round (the first round: of the eyes
+  fixed in the scene, the one that saw the most of the body's arms move when
+  the body was measured, the first of equals; with no eye fixed in the scene,
+  the first eye with a picture). Below it, one strip with every other eye that has a
   picture this beat, left to right in camera order, each scaled to an equal
   share of the width and keeping its own proportions. Nothing is drawn on
   any picture: drawn marks were measured to hurt the model's sight.
@@ -263,3 +267,18 @@ which the driver does not allow.
 driver/bin/fake_brain 8090 &
 driver/bin/body_driver --listen 9080 --eye 127.0.0.1:8090 --inst 127.0.0.1:8077
 ```
+
+With a folder as its second argument, a person is the brain:
+
+```
+driver/bin/fake_brain 8090 asked/ &
+```
+
+Question N is written into the folder as `N.ask`, the question's text (its
+first line says which of the two questions it is), and `N.bmp`, its
+picture; the service then waits for `N.answer`, however long it takes: the
+program for question one, written as the brain would write it, and for
+question two the JSON object of section 4. Write the answer under another
+name and move it to `N.answer`, so that it is never read half written. The
+folder must be empty when the service starts: an answer left in it would be
+read as the answer to a new question.

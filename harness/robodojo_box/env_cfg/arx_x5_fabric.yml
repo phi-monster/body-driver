@@ -1,0 +1,21 @@
+# Development runs only (10-09): the official arx_x5 robot, scene, cameras, rates and CPU physics, the
+# physics results kept in fabric (sim_fabric). Exam and acceptance runs keep arx_x5.
+config_name: arx_x5
+
+config:
+  sim: sim_fabric
+  scene: default
+  robot: dual_x5
+  camera: camera_config
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true

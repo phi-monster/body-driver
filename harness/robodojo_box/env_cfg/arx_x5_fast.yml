@@ -1,0 +1,22 @@
+# Development runs only (10-09): the official arx_x5 robot and scene, observed and commanded 5 times a
+# second of robot time (200 ms a beat) instead of 25, one picture a beat (sim_fast: render_interval 50 at
+# dt 0.004): the same motions in a fifth of the beats. Exam and acceptance runs keep arx_x5.
+config_name: arx_x5
+
+config:
+  sim: sim_fast
+  scene: default
+  robot: dual_x5
+  camera: camera_config
+
+observation:
+  collect_freq: 5
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true

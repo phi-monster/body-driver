@@ -3,7 +3,6 @@ with Ada.Containers;
 with Ada.Containers.Ordered_Maps;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
-with Driver.Distributions;
 with Driver.Stats;
 
 package body Driver.Robot.Channels is
@@ -51,10 +50,13 @@ package body Driver.Robot.Channels is
               and then Natural (S.Twin_Values.Length) = Natural (S.Values.Length)
             then
                declare
-                  Kept : constant Real_Vectors.Vector := S.Values;
+                  Kept      : constant Real_Vectors.Vector := S.Values;
+                  Kept_Bits : constant Count_Vectors.Vector := S.Precisions;
                begin
                   S.Values := S.Twin_Values;
                   S.Twin_Values := Kept;
+                  S.Precisions := S.Twin_Precisions;
+                  S.Twin_Precisions := Kept_Bits;
                end;
                S.Low_Seen.Clear;
                S.High_Seen.Clear;
@@ -77,14 +79,21 @@ package body Driver.Robot.Channels is
                end loop;
                M.Due := True;
             end if;
+            --  The wire format of a reading that did not come this beat is the last one's.
             if G <= O.Echoes.Last_Index and then O.Echoes.Element (G)'Length = S.Size then
                for V of O.Echoes.Element (G) loop
                   S.Twin_Values.Append (V);
                end loop;
+               S.Twin_Precisions.Append (Driver.Observations.Echo_Precision_Of (O, G));
             else
                S.Twin_Values.Append (0.0, Ada.Containers.Count_Type (S.Size));
+               S.Twin_Precisions.Append
+                 (if S.Twin_Precisions.Is_Empty then Real'Machine_Mantissa else S.Twin_Precisions.Last_Element);
             end if;
             S.Present.Append (Have);
+            S.Precisions.Append
+              (if Have then Driver.Observations.Precision_Of (O, G)
+               elsif S.Precisions.Is_Empty then Real'Machine_Mantissa else S.Precisions.Last_Element);
             if Have then
                for V of O.Readings.Element (G) loop
                   S.Values.Append (V);
@@ -167,32 +176,33 @@ package body Driver.Robot.Channels is
       return N;
    end First_Channel;
 
-   function Mad_Degrees_Of_Freedom (N : Natural) return Natural is
-      Half : constant Real := 0.5;
-      C    : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (Half);
-      Phi  : constant Real := Exp (-C * C / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);
-   begin
-      --  Rounding a handful of samples down to none would call the sigma known.
-      return (if N < 2 then 0 else Natural'Max (1, Natural (Real'Floor (8.0 * C * C * Phi * Phi * Real (N)))));
-   end Mad_Degrees_Of_Freedom;
+   function Mad_Degrees_Of_Freedom (N : Natural) return Natural renames Driver.Stats.Mad_Degrees_Of_Freedom;
 
    --  Whether the change into Beat is one of a resting reading: the beat and
-   --  the one before have readings, and for a commanded group no push of it was
-   --  under way. A target that changed is no push unless it asked for motion
-   --  (Asked): a group the driver never commanded is held by its own reading,
-   --  sent again every beat, and that target changes at every beat by the
-   --  reading's creep.
+   --  the one before have readings, and no push of any commanded group was
+   --  under way. A reading moves as a reaction to a push of something else
+   --  too (a sensor of what the arms do: the rig's sum of two joints), and
+   --  the beats of other groups' pushes are its motion, not its rest: counted
+   --  as rest, a long sweep was the latest regime of such a reading and its
+   --  reactions became its noise, so nothing it did was visible any more
+   --  (robot.roles, 10-12). A target that changed is no push unless it asked
+   --  for motion (Asked): a group the driver never commanded is held by its
+   --  own reading, sent again every beat, and that target changes at every
+   --  beat by the reading's creep.
    function At_Rest (M : Model; G : Group_Id; Beat : Natural) return Boolean is
      (Beat > 0 and then Has_Reading (M, G, Beat) and then Has_Reading (M, G, Beat - 1)
-      and then (not M.Groups (G).Commandable
-                or else not Pushed (M, G, Beat)));
+      and then (for all H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                  not M.Groups (H).Commandable or else not Pushed (M, H, Beat)));
 
    --  One channel's noise from its rest changes. A resting reading either
    --  repeats exactly (a simulator between physics updates, a quantized or
    --  echoed value) or changes by its jitter; the changes that are not exact
    --  repeats measure the jitter. A channel that repeats exactly at every rest
-   --  beat has noise zero: any change of it is motion.
-   procedure Measure_Channel (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural) is
+   --  beat has no noise beyond its quantization (the floor below).
+   procedure Measure_Channel
+     (M : in out Model; G : Group_Id; Channel : Positive; Rest : Natural; Was_Noise : Real; Was_Freedom : Natural;
+      Was_Drift : Real)
+   is
       --  Every nonzero change at rest, and its negation: a change at rest has
       --  no sign of its own, so its scale is measured about zero. About their
       --  own median, two-valued changes (a reading whose last bit flips back
@@ -200,14 +210,85 @@ package body Driver.Robot.Channels is
       Moved : Real_Access := new Real_Array (1 .. 2 * Rest);
       K     : Natural := 0;
       Index : constant Natural := First_Channel (M, G) + Channel - 1;
+      --  Every change at rest in beat order, zeros included, to tell a reading
+      --  that drifts from one that rests: a resting reading's changes have no
+      --  trend; a joint still travelling (R0, 10-11: the sticky wrist servo
+      --  crawling 660 ticks towards a stale goal after torque came on, 25
+      --  beats into the boot's rest) shows a mean change significant against
+      --  the changes' scatter. The oldest half is dropped while a trend shows;
+      --  the noise is measured on the trend-free rest that remains, and is
+      --  unknown when none remains, so the boot holds still on.
+      All_Changes : Real_Access := new Real_Array (1 .. Rest);
+      Count       : Natural := 0;
+      Start       : Positive := 1;
+      Last        : constant Natural := Natural (M.Groups (G).Present.Length) - 1;
+      --  One step of the reading (Step_Unit): a rest change of one step is its rounding.
+      Unit        : constant Real := (if Has_Reading (M, G, Last) then Step_Unit (M, G, Last, Channel) else 0.0);
    begin
       for B in 1 .. Natural (M.Groups (G).Present.Length) - 1 loop
-         if At_Rest (M, G, B) and then Change (M, G, B, Channel) /= 0.0 then
-            K := K + 1;
-            Moved (K) := Change (M, G, B, Channel);
-            Moved (Rest + K) := -Change (M, G, B, Channel);
+         if At_Rest (M, G, B) then
+            Count := Count + 1;
+            All_Changes (Count) := Change (M, G, B, Channel);
          end if;
       end loop;
+      --  Rest is stationary: the older half of the rest changes and the newer
+      --  half have the same mean, within their scatter. A reading that drifts
+      --  at one rate for good (a sensor's creep, A15) is stationary too, and
+      --  its creep stays in its noise as before; a joint still travelling, or
+      --  one that stopped travelling, has halves that differ, and the older is
+      --  dropped until the rest that remains is one regime (Stats.Latest_Regime).
+      --  Too short to split, it is taken as it is: the boot compares the noise
+      --  across a doubling of the rest's beats before it trusts it.
+      if Count >= Start then
+         Start := Driver.Stats.Latest_Regime (All_Changes (Start .. Count));
+      end if;
+      if Count - Start + 1 < 2 and then Count >= 2 then
+         --  Trending to its last beats: nothing of this rest is measured yet. The noise an earlier rest measured
+         --  stands (a reading's jitter is its sensor's, not its joint's travel): it used to be dropped, and the
+         --  channel swept last, still settling when an estimate measured the noise, had none until the next one;
+         --  its changes, untested, were no motion (Significant_Change), and the arm's every beat of a push was
+         --  held still (Kinematics.Held_Still): s36 (servo seed 7 of the fake robot, 10-17) took 41 of its 204
+         --  keyframes within two beats of the one before, the arm turning 130 units a beat through them, the
+         --  hand's jaws stood for the view in them, and its second joint's view motion a unit fell from 0.11 px
+         --  to 0.0025. Unknown only where no rest has measured it yet: the boot holds still on.
+         M.Noise.Replace_Element (Index, Was_Noise);
+         M.Noise_Freedom.Replace_Element (Index, Was_Freedom);
+         M.Drift.Replace_Element (Index, Was_Drift);
+         Free (All_Changes);
+         Free (Moved);
+         return;
+      end if;
+      --  A change of one step is the reading's rounding (Step_Unit): a joint at rest between two of its values flips
+      --  to the other and back. The jitter is what rest does beyond it, and the floor below keeps the rounding.
+      --  Counted as jitter, the flips of a reading that steps by four set its noise at 4.19 units, a change had to
+      --  pass 17.8 units a beat to be motion, and a handful of them measured the noise on so few degrees of freedom
+      --  that no push passed at all: w11 (servo seed 11 of the fake robot, 10-19), arm 1's fourth channel at beat
+      --  2540, 24 rest changes of four units each, the joint flipping one tick and back in the truth; w12, the
+      --  same body, its estimate of beat 5940: 766 beats of the arm pushed in one round, none in the next, its
+      --  noise 4 to 12.6 units the round after, and the arm taken still while it turned 53 units a beat.
+      for I in Start .. Count loop
+         if abs All_Changes (I) > Unit then
+            K := K + 1;
+            Moved (K) := All_Changes (I);
+            Moved (Rest + K) := -All_Changes (I);
+         end if;
+      end loop;
+      --  The creep (Drift): the median change of this rest, where it stands Z of a median's standard error (the
+      --  changes' scatter about it over the root of their count) out of zero. A resting reading's changes have none;
+      --  a creeping one's are all its creep. The noise below is measured about zero, the creep in it, as before.
+      if Count >= Start then
+         declare
+            N      : constant Positive := Count - Start + 1;
+            Median : constant Real := Driver.Stats.Median (All_Changes (Start .. Count));
+            Spread : constant Real := Driver.Stats.Robust_Sigma (All_Changes (Start .. Count));
+         begin
+            M.Drift.Replace_Element
+              (Index, (if Driver.Uncertain.Significant (Median, Driver.Stats.Median_Sigma (Spread, N),
+                                                         Mad_Degrees_Of_Freedom (N))
+                       then Median else 0.0));
+         end;
+      end if;
+      Free (All_Changes);
       if K = 0 then
          M.Noise.Replace_Element (Index, 0.0);
          M.Noise_Freedom.Replace_Element (Index, 0);
@@ -216,11 +297,33 @@ package body Driver.Robot.Channels is
          M.Noise.Replace_Element (Index, Driver.Stats.Robust_Sigma (Moved (1 .. 2 * K)) / Sqrt (2.0));
          M.Noise_Freedom.Replace_Element (Index, Mad_Degrees_Of_Freedom (K));
       end if;
+      --  A reading that comes in whole units of its wire (an integer: a servo's ticks) is known no closer than
+      --  half a unit either way: its noise is at least that of rounding to the unit, the unit over the root of
+      --  twelve (the standard deviation of a uniform spread over one unit), however exactly it repeats at rest.
+      --  Without it a reading that repeated exactly had a noise of nothing, so any single-tick flip was motion,
+      --  asked for, or an answer: on the Pi (R3 and R4, 10-13) the held arm's ticks flipped when the other arm's
+      --  push shook the base, pushes were taken to be answered 194, 293 and 444 beats late, and every look
+      --  thereafter waited that long. A float's unit is its last bit: what repeats exactly there is kept exact
+      --  (the rules on Resolution in Steps and Smallest_Step tell such a reading from none).
+      --  The rounding of a reading that steps by more than its wire's unit is its own step's (Step_Unit).
+      if Last < Natural (M.Groups (G).Precisions.Length) and then M.Groups (G).Precisions (Last) = 0 then
+         declare
+            Quantum : constant Real := Unit / Sqrt (12.0);
+         begin
+            if M.Noise (Index) < Quantum then
+               M.Noise.Replace_Element (Index, Quantum);
+            end if;
+         end;
+      end if;
       Free (Moved);
    end Measure_Channel;
 
    procedure Measure_Noise (M : in out Model) is
       Total : Natural := 0;
+      --  What the last measure had, which a channel still settling keeps (Measure_Channel).
+      Was_Noise   : constant Real_Vectors.Vector := M.Noise;
+      Was_Freedom : constant Count_Vectors.Vector := M.Noise_Freedom;
+      Was_Drift   : constant Real_Vectors.Vector := M.Drift;
    begin
       for S of M.Groups loop
          Total := Total + S.Size;
@@ -229,6 +332,8 @@ package body Driver.Robot.Channels is
       M.Noise.Append (Real'Last, Ada.Containers.Count_Type (Total));
       M.Noise_Freedom.Clear;
       M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
+      M.Drift.Clear;
+      M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          declare
             Rest : Natural := 0;
@@ -240,7 +345,15 @@ package body Driver.Robot.Channels is
             end loop;
             if Rest > 0 then
                for C in 1 .. M.Groups (G).Size loop
-                  Measure_Channel (M, G, C, Rest);
+                  declare
+                     Index : constant Natural := First_Channel (M, G) + C - 1;
+                  begin
+                     Measure_Channel
+                       (M, G, C, Rest,
+                        Was_Noise   => (if Index < Natural (Was_Noise.Length) then Was_Noise (Index) else Real'Last),
+                        Was_Freedom => (if Index < Natural (Was_Freedom.Length) then Was_Freedom (Index) else 0),
+                        Was_Drift   => (if Index < Natural (Was_Drift.Length) then Was_Drift (Index) else 0.0));
+                  end;
                end loop;
             end if;
          end;
@@ -253,17 +366,48 @@ package body Driver.Robot.Channels is
       return (if K < Natural (M.Noise.Length) then M.Noise (K) else Real'Last);
    end Noise;
 
+   function Drift (M : Model; G : Group_Id; Channel : Positive) return Real is
+      K : constant Natural := First_Channel (M, G) + Channel - 1;
+   begin
+      return (if K < Natural (M.Drift.Length) then M.Drift (K) else 0.0);
+   end Drift;
+
    function Noise_Measured (M : Model; G : Group_Id) return Boolean is
      (First_Channel (M, G) + M.Groups (G).Size <= Natural (M.Noise.Length));
 
    function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real is
+      Bits  : constant Natural := M.Groups (G).Precisions (Beat);
       Scale : Real := 0.0;
    begin
+      if Bits = 0 then
+         --  An integer on the wire: it changes by one unit or not at all.
+         return 1.0;
+      end if;
       for C in 1 .. M.Groups (G).Size loop
          Scale := Real'Max (Scale, abs Reading (M, G, Beat, C));
       end loop;
-      return Real'Model_Epsilon * (if Scale > 0.0 then Scale else 1.0);
+      return Real'Scaling (1.0, Real'Exponent (if Scale > 0.0 then Scale else 1.0) - Bits);
    end Resolution;
+
+   function Step_Unit (M : Model; G : Group_Id; Beat : Natural; Channel : Positive) return Real is
+      Least : Real := Real'Last;
+   begin
+      if M.Groups (G).Precisions (Beat) /= 0 then
+         return Resolution (M, G, Beat);
+      end if;
+      for B in 1 .. Beat loop
+         if Has_Reading (M, G, B) and then Has_Reading (M, G, B - 1) then
+            declare
+               D : constant Real := abs Change (M, G, B, Channel);
+            begin
+               if D > 0.0 and then D < Least then
+                  Least := D;
+               end if;
+            end;
+         end if;
+      end loop;
+      return (if Least < Real'Last then Least else Resolution (M, G, Beat));
+   end Step_Unit;
 
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural is
       K : constant Natural := First_Channel (M, G) + Channel - 1;
@@ -280,16 +424,15 @@ package body Driver.Robot.Channels is
    --  (their squared deviations add to a chi-square), so a group of many
    --  channels raises no more false alarms than a single one. A channel
    --  whose noise is not measured yet gives no evidence.
-   --  The gate of a change of so many channels at so many degrees of freedom, searched once: a quantile is a pure
+   --  The gate of a change of so many channels, searched once: a quantile is a pure
    --  function of its arguments, and the search is an inversion of a tail that takes thousands of operations. The
    --  lock-in asks at every beat of every group when it marks the usable beats (12 000 beats, 7 groups, 3 eyes: the
    --  marks were most of a 14 s recompute on a fake body), the stillness watch at every beat. Kept under a lock:
    --  the callers run on many tasks.
    type Gate_Key is record
-      Tested, Freedom : Natural;
+      Tested : Natural;
    end record;
-   function "<" (A, B : Gate_Key) return Boolean is
-     (A.Tested < B.Tested or else (A.Tested = B.Tested and then A.Freedom < B.Freedom));
+   function "<" (A, B : Gate_Key) return Boolean is (A.Tested < B.Tested);
    package Gate_Maps is new Ada.Containers.Ordered_Maps (Gate_Key, Driver.Uncertain.Gate, "<", Driver.Uncertain."=");
    protected Gates_Known is
       procedure Get (Key : Gate_Key; Value : out Driver.Uncertain.Gate; Found : out Boolean);
@@ -312,23 +455,28 @@ package body Driver.Robot.Channels is
       end Keep;
    end Gates_Known;
 
-   function Change_Gate (Tested : Positive; Freedom : Natural) return Driver.Uncertain.Gate is
-      Key   : constant Gate_Key := (Tested, Freedom);
+   function Change_Gate (Tested : Positive) return Driver.Uncertain.Gate is
+      Key   : constant Gate_Key := (Tested => Tested);
       Value : Driver.Uncertain.Gate;
       Found : Boolean;
    begin
       Gates_Known.Get (Key, Value, Found);
       if not Found then
-         Value := Driver.Uncertain.Vector_Gate (Tested, Freedom);
+         Value := Driver.Uncertain.Vector_Gate (Tested);
          Gates_Known.Keep (Key, Value);
       end if;
       return Value;
    end Change_Gate;
 
+   --  The noise is taken as measured: its degrees of freedom do not widen the gate. Widened by the fewest of the
+   --  group's channels (the F quantile of so few), a noise one channel measured on two or three changes set the
+   --  whole group's gate at hundreds of sigmas, and no ask or step of the group was a change (w12, the estimate of
+   --  beat 5940: its second round, every channel's noise on 1 to 4 degrees of freedom, no beat of arm 1 pushed).
+   --  The rounding floors every noise of an integer reading (Measure_Channel), and a noise measured on few changes
+   --  beyond a step stands as their size.
    function Significant_Change (M : Model; G : Group_Id; D : Real_Array; Scale : Real) return Boolean is
       Q       : Real := 0.0;
       Tested  : Natural := 0;
-      Freedom : Natural := Natural'Last;
    begin
       for C in D'Range loop
          declare
@@ -341,13 +489,11 @@ package body Driver.Robot.Channels is
             elsif Sigma < Real'Last then
                Q := Q + (D (C) / (Sigma * Scale)) ** 2;
                Tested := Tested + 1;
-               Freedom := Natural'Min (Freedom, Noise_Freedom (M, G, C));
             end if;
          end;
       end loop;
       return Tested > 0
-        and then Driver.Uncertain.Significant
-          (Change_Gate (Tested, (if Freedom = Natural'Last then 0 else Freedom)), Sqrt (Q), 1.0);
+        and then Driver.Uncertain.Significant (Change_Gate (Tested), Sqrt (Q), 1.0);
    end Significant_Change;
 
    function Asked (M : Model; G : Group_Id; Beat : Natural) return Boolean is
@@ -374,6 +520,46 @@ package body Driver.Robot.Channels is
       end;
    end Asked;
 
+   --  Whether the change into Beat brings the group's readings nearer its target than they were the beat before, by
+   --  more than their noise explains: the step along the way that remained (the target less the readings before)
+   --  is positive, and significant against the noise along that way. A push's answer that comes in steps no eye can
+   --  tell from one beat to the next (Moving) is under way while it closes in, and its beats are no rest; a held
+   --  reading's jitter goes either way and does not keep closing in. With the noise zero (the first round of
+   --  Measure) any step nearer closes in. A group held where its readings are, or whose noise is not measured,
+   --  closes in on nothing.
+   function Closing_In (M : Model; G : Group_Id; Beat : Natural) return Boolean is
+      Way    : Real_Array (1 .. M.Groups (G).Size);
+      Length : Real := 0.0;
+      Along  : Real := 0.0;
+      Spread : Real := 0.0;
+   begin
+      if Beat = 0 or else not Has_Target (M, G, Beat) or else not Has_Reading (M, G, Beat)
+        or else not Has_Reading (M, G, Beat - 1)
+      then
+         return False;
+      end if;
+      for C in Way'Range loop
+         Way (C) := Target (M, G, Beat, C) - Reading (M, G, Beat - 1, C);
+         Length := Length + Way (C) ** 2;
+      end loop;
+      Length := Sqrt (Length);
+      if Length = 0.0 then
+         return False;
+      end if;
+      for C in Way'Range loop
+         declare
+            Sigma : constant Real := Noise (M, G, C);
+         begin
+            if Sigma = Real'Last then
+               return False;
+            end if;
+            Along := Along + Way (C) / Length * Change (M, G, Beat, C);
+            Spread := Spread + (Way (C) / Length * Sigma) ** 2;
+         end;
+      end loop;
+      return Along > 0.0 and then Driver.Uncertain.Significant (Along, Sqrt (2.0 * Spread));
+   end Closing_In;
+
    procedure Measure_Pushes (M : in out Model) is
    begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
@@ -387,49 +573,75 @@ package body Driver.Robot.Channels is
             Onset  : Natural := 0;
          begin
             if M.Groups (G).Commandable then
-               --  The response delay: the longest wait from a push's start to
-               --  its reading's first motion, over the pushes that were
-               --  answered before the next one started.
-               for B in 0 .. Beats - 1 loop
-                  if Asked (M, G, B) then
-                     for D in B .. Beats - 1 loop
-                        exit when D > B and then Asked (M, G, D);
-                        if Moving (M, G, D) then
-                           Delay_Beats := Natural'Max (Delay_Beats, D - B);
-                           Answered := True;
-                           exit;
-                        end if;
-                     end loop;
+               --  The response delay: the longest wait from a push's start to its reading's first motion, over
+               --  the pushes that delivered what they asked (Steps' episodes: answered, ended, not blocked, and
+               --  their delivered fraction significant). A push into a stop delivers nothing and may still see its
+               --  reading creep when the servo yields after seconds (R4 on the Pi, 10-13: arm a's joint 4 asked
+               --  29 ticks against its end moved after 75 beats; hand a's closed jaws after 77; hand b's after
+               --  865), and a tick's flip when the other arm shakes the base is no answer either (R3: 194, 444):
+               --  taken for responses, they made every look thereafter wait that long. The command's path is
+               --  measured where the body followed the command, from pushes that began with the group still: one
+               --  born moving (Episode.Born_Moving) is answered at its start by the push before it.
+               for E of M.Groups (G).Episodes loop
+                  if E.Moved and then not E.Born_Moving and then E.Ended and then not E.Blocked and then Known (E.Delivered)
+                    and then E.Delivered.Value > 0.0
+                    and then Driver.Uncertain.Significant (E.Delivered.Value, E.Delivered.Sigma, E.Delivered.Degrees_Of_Freedom)
+                    and then E.Moved_At >= E.Start
+                  then
+                     Delay_Beats := Natural'Max (Delay_Beats, E.Moved_At - E.Start);
+                     Answered := True;
                   end if;
                end loop;
-               if Answered and then (not M.Groups (G).Delay_Known or else Delay_Beats /= M.Groups (G).Delay_Beats) then
+               --  Logged when the longest wait grows (R0: a line every beat as the window slid over pushes of two to
+               --  eight beats).
+               if Answered and then (not M.Groups (G).Delay_Known or else Delay_Beats > M.Groups (G).Delay_Beats) then
                   Driver.Log.Line (Driver.Log.Robot, "group" & G'Image & " answers a push within" & Delay_Beats'Image
                                    & " beats, the longest wait of its pushes from their start to its readings' first motion");
                end if;
                M.Groups (G).Delay_Beats := Delay_Beats;
                M.Groups (G).Delay_Known := Answered;
             end if;
-            for B in 0 .. Beats - 1 loop
-               if M.Groups (G).Commandable and then Asked (M, G, B) then
-                  Active := True;
-                  Onset := B;
-                  Moved := Moving (M, G, B);
-               elsif Active then
-                  --  Until the reading first moves the push waits out the
-                  --  delay; after that its response lasts, overshoot and all,
-                  --  until the reading is still. A push that is not answered
-                  --  within the delay is over.
-                  if not Moved then
-                     Moved := Moving (M, G, B);
-                     if not Moved and then B - Onset >= Delay_Beats then
+            declare
+               --  The visible steps once per group and round, not once per beat: Steps_Of sums every eye's cells
+               --  for every channel, and asked at every beat of every round it was most of a measurement (R4 on
+               --  the Pi, 10-13: the channels' phase 389 s at 4467 beats; the lock-in takes the same table once,
+               --  item 2).
+               Steps : constant Real_Array := Steps_Of (M, G);
+            begin
+               for B in 0 .. Beats - 1 loop
+                  if M.Groups (G).Commandable and then Asked (M, G, B) then
+                     Active := True;
+                     Onset := B;
+                     Moved := Moving (M, G, B, Steps) or else Closing_In (M, G, B);
+                  elsif Active then
+                     --  Until the reading first moves the push waits out the
+                     --  delay; after that its response lasts, overshoot and all,
+                     --  until the reading is still: neither moving nor closing in
+                     --  on its target (Closing_In). A push that is not answered
+                     --  within the delay is over. Ended where its steps fell below
+                     --  what an eye can tell from one beat to the next, a push left
+                     --  the rest of its answer to the rest, and a reading that
+                     --  repeats exactly at rest had its noise measured from that
+                     --  answer alone: q7 (servo seed 7 of the fake robot, 10-19),
+                     --  arm 1, its visible steps 4.4 to 36 units, answered the push
+                     --  of beat 3204 by 5, 6, -5, 8, -4 and -5 units, then by 1, 3,
+                     --  -2, 4, -2 and -2, then by one or none; its six channels'
+                     --  noise came from those changes, 1.05 to 8.4 units on one
+                     --  degree of freedom, its pushes were no longer asked for
+                     --  (Asked) and their answers rest too, and the test of motion
+                     --  passed nothing until the next estimate.
+                     if not Moved then
+                        Moved := Moving (M, G, B, Steps) or else Closing_In (M, G, B);
+                        if not Moved and then B - Onset >= Delay_Beats then
+                           Active := False;
+                        end if;
+                     elsif not Moving (M, G, B, Steps) and then not Closing_In (M, G, B) then
                         Active := False;
                      end if;
-                  elsif not Moving (M, G, B) then
-                     Active := False;
                   end if;
-               end if;
-               Marks.Append (Active);
-            end loop;
+                  Marks.Append (Active);
+               end loop;
+            end;
             M.Groups (G).Pushed := Marks;
          end;
       end loop;
@@ -458,17 +670,18 @@ package body Driver.Robot.Channels is
       --  change for motion (noise zero), so a push lasts as long as its
       --  reading changes at all and the tail of a slow response is never
       --  taken for rest; the noise measured outside those pushes is then the
-      --  jitter alone, or zero where a reading has none. Each round can only
-      --  move push marks, so as many rounds as beats bound it. The rounds can
-      --  also alternate: a beat right after a push whose change is
+      --  jitter alone, or zero where a reading has none. From the second
+      --  round on a beat can only be released from the pushes, never taken
+      --  back: a change once judged jitter against a noise measured on more
+      --  rest stays jitter, the rest the noise is measured on only grows, and
+      --  the rounds end as soon as no beat is released. (Marks that could go
+      --  both ways alternated: a beat right after a push whose change is
       --  significant against the noise measured with it among the rest
-      --  beats, and not against the noise measured without it (with few
-      --  nonzero rest changes, their degrees of freedom move with it), is
-      --  rest one round and pushed the next, for good (A9's replay spent 540
-      --  s in such rounds at 1024 beats). When a round brings back the marks
-      --  of the round before the last, every beat either of the two marked
-      --  is taken as pushed, not as rest, and the noise is measured once more
-      --  outside them.
+      --  beats, and not against the noise measured without it, was rest one
+      --  round and pushed the next, for good; A9's replay spent 540 s in such
+      --  rounds at 1024 beats, R3 replayed 1489 rounds at 1488 beats, and R4
+      --  on the Pi, 10-13, 4468 rounds and 389 s at 4467 beats, the boot
+      --  waiting for the estimate throughout.)
       declare
          Total : Natural := 0;
       begin
@@ -479,40 +692,40 @@ package body Driver.Robot.Channels is
          M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));
          M.Noise_Freedom.Clear;
          M.Noise_Freedom.Append (0, Ada.Containers.Count_Type (Total));
+         M.Drift.Clear;
+         M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));
       end;
       declare
-         --  The marks of the round before, and of the one before that.
+         --  The marks of the round before.
          type Marks is array (M.Groups.First_Index .. M.Groups.Last_Index) of Flag_Vectors.Vector;
-         Before, Older : Marks;
+         Before : Marks;
       begin
          for Round in 0 .. Beats loop
+            M.Measure_Rounds := Round + 1;
             if Round > 0 then
                Measure_Noise (M);
             end if;
             declare
-               Same, Back : Boolean := True;
+               Same : Boolean := True;
             begin
                for G in Before'Range loop
-                  Older (G) := Before (G);
                   Before (G) := M.Groups (G).Pushed;
                end loop;
                Measure_Pushes (M);
-               for G in Before'Range loop
-                  Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
-                  Back := Back and then Flag_Vectors."=" (Older (G), M.Groups (G).Pushed);
-               end loop;
-               exit when Same and then Round > 0;
-               if Back and then Round > 1 then
+               if Round > 0 then
+                  --  A beat released from the pushes stays released.
                   for G in Before'Range loop
                      for B in 0 .. Natural (M.Groups (G).Pushed.Length) - 1 loop
-                        if B < Natural (Before (G).Length) and then Before (G) (B) then
-                           M.Groups (G).Pushed.Replace_Element (B, True);
+                        if B < Natural (Before (G).Length) and then not Before (G) (B) then
+                           M.Groups (G).Pushed.Replace_Element (B, False);
                         end if;
                      end loop;
                   end loop;
-                  Measure_Noise (M);
-                  exit;
                end if;
+               for G in Before'Range loop
+                  Same := Same and then Flag_Vectors."=" (Before (G), M.Groups (G).Pushed);
+               end loop;
+               exit when Same and then Round > 0;
             end;
          end loop;
       end;

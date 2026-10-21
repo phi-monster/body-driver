@@ -271,12 +271,15 @@ package body Driver.Distributions is
    end Student_T_Two_Sided_Tail;
 
    function Student_T_Quantile (Two_Sided_Tail : Real; Degrees_Of_Freedom : Positive) return Real is
+     (Student_T_Quantile (Two_Sided_Tail, Degrees_Of_Freedom, Gaussian_Two_Sided_Quantile (Two_Sided_Tail)));
+
+   function Student_T_Quantile (Two_Sided_Tail : Real; Degrees_Of_Freedom : Positive; Gaussian : Real) return Real is
       --  The tail is I_x (nu / 2, 1 / 2) with x = nu / (nu + t^2). Its bisection
       --  costs time in proportion to nu (the continued fraction near x = 1), so
       --  at large nu the Cornish-Fisher series about the Gaussian quantile
       --  (Abramowitz and Stegun 26.7.5) is used instead, wherever its last term
       --  is below the rounding of the result: there the two agree to rounding.
-      Z  : constant Real := Gaussian_Two_Sided_Quantile (Two_Sided_Tail);
+      Z  : constant Real := Gaussian;
       N  : constant Real := Real (Degrees_Of_Freedom);
       First  : constant Real := (Z ** 3 + Z) / 4.0;
       Second : constant Real := (5.0 * Z ** 5 + 16.0 * Z ** 3 + 3.0 * Z) / 96.0;

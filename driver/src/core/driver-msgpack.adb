@@ -31,6 +31,7 @@ package body Driver.Msgpack is
    Half_Exponent_Bits : constant := 5;
    Half_Exponent_All  : constant := 2 ** Half_Exponent_Bits - 1;
    Half_Bias          : constant := 2 ** (Half_Exponent_Bits - 1) - 1;
+   Half_Mantissa      : constant := Half_Fraction_Bits + 1;   --  its significant bits, with the hidden one
 
    function Half (H : Unsigned_64) return Real is
       Negative : constant Boolean := (H and 2 ** (Half_Fraction_Bits + Half_Exponent_Bits)) /= 0;
@@ -134,9 +135,11 @@ package body Driver.Msgpack is
                   R.Of_Kind := Extension_Value; Skip (Length, R);
                end;
             when 16#CA# =>
-               R.Of_Kind := Float_Value; R.Flt := Real (U32_To_F32 (Unsigned_32 (Take_Unsigned (4))));
+               R.Of_Kind := Float_Value; R.Bits := Float'Machine_Mantissa;
+               R.Flt := Real (U32_To_F32 (Unsigned_32 (Take_Unsigned (4))));
             when 16#CB# =>
-               R.Of_Kind := Float_Value; R.Flt := U64_To_F64 (Take_Unsigned (8));
+               R.Of_Kind := Float_Value; R.Bits := Real'Machine_Mantissa;
+               R.Flt := U64_To_F64 (Take_Unsigned (8));
             when 16#CC# | 16#CD# | 16#CE# =>
                R.Of_Kind := Integer_Value;
                R.Int := Long_Long_Integer (Take_Unsigned (if B = 16#CC# then 1 elsif B = 16#CD# then 2 else 4));
@@ -489,6 +492,38 @@ package body Driver.Msgpack is
          return Values;
       end;
    end Numbers;
+
+   function Precision (Doc : Document; N : Node) return Natural is
+      Fewest : Natural := Natural'Last;
+      Any    : Boolean := False;
+
+      procedure Visit (M : Node) is
+      begin
+         if Is_Number (Doc, M) then
+            Any := True;
+            Fewest := Natural'Min
+              (Fewest, (if Kind_Of (Doc, M) = Float_Value then Doc.Nodes (Positive (M)).Bits else 0));
+         else
+            for I in 1 .. Count (Doc, M) loop
+               Visit (Element (Doc, M, I));
+            end loop;
+         end if;
+      end Visit;
+   begin
+      if Is_Ndarray (Doc, N) then
+         declare
+            D : constant Dtype_Info := Parse_Dtype (Dtype (Doc, N));
+         begin
+            return (if D.Of_Kind /= 'f' then 0
+                    else (case D.Width is
+                             when 2      => Half_Mantissa,
+                             when 4      => Float'Machine_Mantissa,
+                             when others => Real'Machine_Mantissa));
+         end;
+      end if;
+      Visit (N);
+      return (if Any then Fewest else 0);
+   end Precision;
 
    procedure Put_Unsigned (B : in out Buffer; V : Unsigned_64; Width : Natural) is
    begin

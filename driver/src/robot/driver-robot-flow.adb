@@ -85,6 +85,10 @@ package body Driver.Robot.Flow is
          declare
             X0, X1, Y0, Y1 : Natural;
             Sxx, Sxy, Syy : Real := 0.0;
+            --  The template's own columns of the normal equations: a gain of the light multiplies the template and
+            --  an offset adds to it (Sxb, Syb: the gradients against the template; Sx1, Sy1: against one; Sbb, Sb1,
+            --  S11: the template and one against themselves).
+            Sxb, Syb, Sx1, Sy1, Sbb, Sb1, S11 : Real := 0.0;
             K : constant Integer := Du'First + Cell - 1;
          begin
             Bounds (G, Cell, X0, X1, Y0, Y1);
@@ -112,18 +116,42 @@ package body Driver.Robot.Flow is
                            Sxx := Sxx + Gx (I) * Gx (I);
                            Sxy := Sxy + Gx (I) * Gy (I);
                            Syy := Syy + Gy (I) * Gy (I);
+                           Sxb := Sxb + Gx (I) * At_Before (X, Y);
+                           Syb := Syb + Gy (I) * At_Before (X, Y);
+                           Sx1 := Sx1 + Gx (I);
+                           Sy1 := Sy1 + Gy (I);
+                           Sbb := Sbb + At_Before (X, Y) ** 2;
+                           Sb1 := Sb1 + At_Before (X, Y);
+                           S11 := S11 + 1.0;
                         end;
                      end loop;
                   end loop;
                   declare
-                     Det   : constant Real := Sxx * Syy - Sxy * Sxy;
-                     Trace : constant Real := Sxx + Syy;
+                     --  A change of the light that moves nothing (an exposure step, a shadow's interior) shifts a
+                     --  template whose gradients do not sum to zero when only a translation may explain it (R2 on
+                     --  the Pi, 10-13: a wrist eye's exposure stepped by four levels between two frames of a body
+                     --  at rest, and 524 of its 525 cells read as moved, which was then the most that ever moved at
+                     --  rest and left the eye blind to every push). So a gain and an offset of the light are
+                     --  fitted with the translation, as the aligner fits them (Driver.Alignment), and the
+                     --  translation is conditioned by what the gradients tell beyond them: the gradient tensor less
+                     --  its part the light's two columns explain (the Schur complement of the normal equations).
+                     Pdet : constant Real := Sbb * S11 - Sb1 * Sb1;   --  of the light's own block
+                     --  The light's block inverted, applied to the gradients' columns against it.
+                     Qxg : constant Real := (if Pdet > 0.0 then (S11 * Sxb - Sb1 * Sx1) / Pdet else 0.0);
+                     Qxo : constant Real := (if Pdet > 0.0 then (Sbb * Sx1 - Sb1 * Sxb) / Pdet else 0.0);
+                     Qyg : constant Real := (if Pdet > 0.0 then (S11 * Syb - Sb1 * Sy1) / Pdet else 0.0);
+                     Qyo : constant Real := (if Pdet > 0.0 then (Sbb * Sy1 - Sb1 * Syb) / Pdet else 0.0);
+                     Txx : constant Real := Sxx - (Qxg * Sxb + Qxo * Sx1);
+                     Txy : constant Real := Sxy - (Qxg * Syb + Qxo * Sy1);
+                     Tyy : constant Real := Syy - (Qyg * Syb + Qyo * Sy1);
+                     Det   : constant Real := Txx * Tyy - Txy * Txy;
+                     Trace : constant Real := Txx + Tyy;
                      U, V  : Real := 0.0;
                      Converged : Boolean := False;
                      Last_Step : Real := Real'Last;   --  the step before this one
                      Final     : Real := Real'Last;   --  the last step taken
                   begin
-                     if Det > 0.0 then
+                     if Pdet > 0.0 and then Det > 0.0 then
                         Condition (Condition'First + Cell - 1) :=
                           (Trace - Sqrt (Real'Max (0.0, Trace * Trace - 4.0 * Det))) / 2.0;
                         --  Gauss-Newton on the translation, with the gradient of
@@ -131,7 +159,7 @@ package body Driver.Robot.Flow is
                         --  one pass per pixel bounds a step count never reached.
                         for Pass in 1 .. Nx * Ny loop
                            declare
-                              Bx, By : Real := 0.0;
+                              Bx, By, Bg, Bo : Real := 0.0;   --  the residual against each column
                               Su, Sv : Real;
                            begin
                               for X in X0 .. X1 - 1 loop
@@ -158,12 +186,22 @@ package body Driver.Robot.Flow is
                                        begin
                                           Bx := Bx + Gx (I) * E;
                                           By := By + Gy (I) * E;
+                                          Bg := Bg + At_Before (X, Y) * E;
+                                          Bo := Bo + E;
                                        end;
                                     end loop;
                                  end;
                               end loop;
-                              Su := -(Syy * Bx - Sxy * By) / Det;
-                              Sv := -(Sxx * By - Sxy * Bx) / Det;
+                              --  The residual less what the light's gain and offset explain of it, then the
+                              --  translation's step from the conditioned tensor (the gain and offset themselves
+                              --  are not kept: they are solved afresh at every pass).
+                              declare
+                                 Rx : constant Real := Bx - (Qxg * Bg + Qxo * Bo);
+                                 Ry : constant Real := By - (Qyg * Bg + Qyo * Bo);
+                              begin
+                                 Su := -(Tyy * Rx - Txy * Ry) / Det;
+                                 Sv := -(Txx * Ry - Txy * Rx) / Det;
+                              end;
                               U := U + Su;
                               V := V + Sv;
                               Final := Sqrt (Su * Su + Sv * Sv);

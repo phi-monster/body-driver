@@ -83,7 +83,11 @@ package body Driver.World.Supports is
       Rank   : Index_Access := new Index_Array (Points'Range);
       Widest : Real := 0.0;
 
-      --  How many of the points left are level with each.
+      --  How many of the points left admit each one's height by their own spread. A point placed vaguely is level
+      --  with every other (their combined spread is its own) and says nothing of the height they share: counted by
+      --  the points level with it, the world test's one placed 4 cm off the table at a grazing edge, 1.4 cm
+      --  uncertain, was level with all but one of the scene's 284 points, was taken for the height most of them
+      --  share, and took the box's top away with the table.
       Near   : Count_Access := new Count_Array'(Points'Range => 0);
 
       procedure Release is
@@ -102,6 +106,9 @@ package body Driver.World.Supports is
       --  Two points at heights along Up their own uncertainties cannot tell apart.
 
       function Reach (I : Positive) return Real is (Z * Sqrt (Spread (I) ** 2 + Widest ** 2));
+
+      function Admits (J, I : Positive) return Boolean is (not Significant (Height (I) - Height (J), Spread (J)));
+      --  Point J's own spread does not tell point I's height from its own.
 
       procedure Walk (I : Positive; Within : Real; Visit : not null access procedure (J : Positive)) is
          --  Every point left whose height is within that of point I's.
@@ -136,7 +143,7 @@ package body Driver.World.Supports is
             declare
                procedure Uncount (I : Positive) is
                begin
-                  if Level (I, J) then
+                  if Admits (J, I) then
                      Near (I) := Near (I) - 1;
                   end if;
                end Uncount;
@@ -386,7 +393,7 @@ package body Driver.World.Supports is
          declare
             procedure Count_Level (J : Positive) is
             begin
-               if Level (I, J) then
+               if Admits (J, I) then
                   Near (I) := Near (I) + 1;
                end if;
             end Count_Level;

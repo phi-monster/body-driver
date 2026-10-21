@@ -1,4 +1,6 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Driver.Beats;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -7,6 +9,7 @@ with Driver.Log;
 with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Steps;
+with Driver.Robot.Stillness;
 with Driver.Robot.Lockin;
 with Driver.Robot.Kinematics;
 with Driver.Uncertain;
@@ -15,23 +18,113 @@ package body Driver.Robot.Motion is
 
    use Ada.Numerics.Long_Elementary_Functions;
 
-
    type Count_Array is array (Positive range <>) of Natural;
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
       B : Driver.Clock.Beat;
+      --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
+      --  picture had not settled (R5 on the Pi, 10-13: the rounds' settling between pushes grew to 24 s a push).
+      Groups : constant Natural := Group_Count (M);
+      Eyes   : constant Natural := Eye_Count (M);
+      Group_Beats : array (1 .. Groups) of Natural := [others => 0];
+      Eye_Beats   : array (1 .. Eyes) of Natural := [others => 0];
+      Period      : Natural := 0;   --  the beats of the cycle the body goes round, once one is seen
+
+      --  Whether the readings went round a cycle of P beats: each of the last P beats read where the beat P before
+      --  it read, every channel within what two readings of its noise tell apart, and some channel moved within
+      --  the P beats (a body whose readings stand still while an eye settles is waited for). A body that goes round
+      --  a cycle about where it was sent settles no further however long it is held: s31 (servo seed 7 of the fake
+      --  robot, 10-17), its hand pressed on the table, arm 1 and its closer went round four poses a beat apart from
+      --  beat 6409, and the boot held in Settle five thousand beats with nothing in its log.
+      function Cycle_Of (P : Positive) return Boolean is
+         Now   : constant Natural := M.Beats - 1;
+         Moved : Boolean := False;
+      begin
+         for K in 0 .. P - 1 loop
+            for G in 1 .. Groups loop
+               declare
+                  Gid : constant Group_Id := Group_Id (G);
+               begin
+                  if Driver.Robot.Channels.Has_Reading (M, Gid, Now - K)
+                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - K - P)
+                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - P + 1)
+                  then
+                     for C in 1 .. Group_Size (M, Gid) loop
+                        declare
+                           Noise : constant Real := Driver.Robot.Channels.Noise (M, Gid, C);
+                        begin
+                           if Noise >= Real'Last then
+                              return False;
+                           end if;
+                           if Driver.Uncertain.Significant
+                                (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
+                                 - Driver.Robot.Channels.Reading (M, Gid, Now - K - P, C), Noise * Sqrt (2.0))
+                           then
+                              return False;
+                           end if;
+                           Moved := Moved or else Driver.Uncertain.Significant
+                             (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
+                              - Driver.Robot.Channels.Reading (M, Gid, Now - P + 1, C), Noise * Sqrt (2.0));
+                        end;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Moved;
+      end Cycle_Of;
    begin
       Beats_Waited := 0;
       loop
          Driver.Beats.Next (B);
+         if not Still (M) and then M.Beats > 0 then
+            for P in 2 .. Beats_Waited / 2 loop
+               if M.Beats > 2 * P and then Cycle_Of (P) then
+                  Period := P;
+                  exit;
+               end if;
+            end loop;
+         end if;
          declare
-            Done : constant Boolean := Still (M);
+            Done : constant Boolean := Still (M) or else Period > 0;
          begin
+            if not Done and then M.Beats > 0 then
+               for G in 1 .. Groups loop
+                  if not Driver.Robot.Stillness.Group_Still (M, Group_Id (G), M.Beats - 1) then
+                     Group_Beats (G) := Group_Beats (G) + 1;
+                  end if;
+               end loop;
+               for E in 1 .. Eyes loop
+                  if not Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)) then
+                     Eye_Beats (E) := Eye_Beats (E) + 1;
+                  end if;
+               end loop;
+            end if;
             Driver.Beats.Send (Driver.Commands.Hold);
             exit when Done;
          end;
          Beats_Waited := Beats_Waited + 1;
       end loop;
+      if Beats_Waited > 0 then
+         declare
+            Text : Unbounded_String;
+         begin
+            for G in 1 .. Groups loop
+               if Group_Beats (G) > 0 then
+                  Append (Text, " group" & G'Image & " moving" & Group_Beats (G)'Image);
+               end if;
+            end loop;
+            for E in 1 .. Eyes loop
+               if Eye_Beats (E) > 0 then
+                  Append (Text, " eye" & E'Image & " unsettled" & Eye_Beats (E)'Image);
+               end if;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "motion: " & (if Period > 0 then "held" else "settled") & " after"
+                             & Beats_Waited'Image & " beats:" & To_String (Text)
+                             & (if Period > 0 then "; the body goes round a cycle of" & Period'Image
+                                   & " beats about where it was sent and settles no further" else ""));
+         end;
+      end if;
    end Settle;
 
    procedure Judge
@@ -80,11 +173,19 @@ package body Driver.Robot.Motion is
       Report.Outcome := (if not Blocked_Any then Reached elsif Moved_Some then Short else Blocked);
    end Judge;
 
-   procedure Step
+   --  One sending (Sent) of a step whose targets, as readings, are Targets; waited for and judged (Step). With
+   --  Hold_At, the targets are what the targeted groups are held at from now on (Group_Stream.Held): a step's own
+   --  targets, not a sending again of them. Where a channel reads its target when the sending has ended, the
+   --  command less the reading is the servo's steady error there, kept for the next step's first sending
+   --  (Group_Stream.Landing).
+   procedure One_Step
      (M       : in out Model;
+      Sent    : Driver.Commands.Command;
       Targets : Driver.Commands.Command;
       Report  : out Step_Report;
-      Stop    : access function return Boolean := null)
+      Stop    : access function return Boolean := null;
+      Hold_At : Boolean := False;
+      Land    : Boolean := False)
    is
       B : Driver.Clock.Beat;
    begin
@@ -132,8 +233,19 @@ package body Driver.Robot.Motion is
       begin
          for G in 1 .. Groups loop
             Before (G) := Steps.Episodes (M, Group_Id (G));
+            if Hold_At and then Targeted (Group_Id (G)) then
+               declare
+                  T : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+               begin
+                  M.Groups (Group_Id (G)).Held.Clear;
+                  for V of T loop
+                     M.Groups (Group_Id (G)).Held.Append (V);
+                  end loop;
+               end;
+            end if;
          end loop;
-         Driver.Beats.Send (Targets);
+         M.Stepping := True;
+         Driver.Beats.Send (Sent);
          --  The push starts at the beat whose observation was taken under the
          --  new targets; it is over when the step tracker has seen it end.
          loop
@@ -147,6 +259,41 @@ package body Driver.Robot.Motion is
                   Judge (M, Targets, Before, Waited, Report);
                   Report.Started := Started;
                   Report.Stopped := Stopped;
+                  --  The channels that read their target: what was sent for them, less what they read, is the
+                  --  servo's steady error there (Group_Stream.Landing); learned from positionings only.
+                  if Land and then not Stopped then
+                     declare
+                        O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+                     begin
+                        for G in 1 .. Groups loop
+                           if Targeted (Group_Id (G)) and then Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+                              declare
+                                 T : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+                                 C : constant Real_Array := Driver.Commands.Target (Sent, Group_Id (G));
+                                 R : constant Real_Array := O.Readings.Element (Group_Id (G));
+                                 L : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Landing;
+                              begin
+                                 while Natural (L.Length) < M.Groups (Group_Id (G)).Size loop
+                                    L.Append (0.0);
+                                 end loop;
+                                 for K in 1 .. Natural'Min (T'Length, Natural'Min (C'Length, R'Length)) loop
+                                    declare
+                                       Noise : constant Real := Channels.Noise (M, Group_Id (G), K);
+                                       Error : constant Real := T (T'First + K - 1) - R (R'First + K - 1);
+                                    begin
+                                       if Noise < Real'Last and then Noise > 0.0
+                                         and then not Driver.Uncertain.Significant
+                                                        (Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))
+                                       then
+                                          L.Replace_Element (K - 1, C (C'First + K - 1) - R (R'First + K - 1));
+                                       end if;
+                                    end;
+                                 end loop;
+                              end;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
                end if;
                if Halt then
                   Stopped := True;
@@ -157,7 +304,245 @@ package body Driver.Robot.Motion is
                exit when Finished;
             end;
          end loop;
+         M.Stepping := False;
       end;
+   end One_Step;
+
+   procedure Step
+     (M       : in out Model;
+      Targets : Driver.Commands.Command;
+      Report  : out Step_Report;
+      Stop    : access function return Boolean := null;
+      Land    : Boolean := False)
+   is
+      Groups : constant Natural := Group_Count (M);
+      Worst  : Real := Real'Last;   --  the largest error of the last landing, in deviations of what the readings tell
+
+      --  The first sending: every targeted channel's target plus the servo's steady error where the group last
+      --  landed on a target (Group_Stream.Landing), so that it lands on this one at the first sending where the
+      --  error is the same (R5 on the Pi, 10-14: 4 to 17 units, nearly the same at every landing; each sending
+      --  again is a step's wait).
+      function With_Landing return Driver.Commands.Command is
+         C : Driver.Commands.Command := Targets;
+      begin
+         for G in 1 .. Groups loop
+            if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
+              and then Natural (M.Groups (Group_Id (G)).Landing.Length) = M.Groups (Group_Id (G)).Size
+            then
+               declare
+                  T : Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+               begin
+                  for K in T'Range loop
+                     T (K) := T (K) + M.Groups (Group_Id (G)).Landing (K - T'First);
+                  end loop;
+                  Driver.Commands.Set_Target (C, Group_Id (G), T);
+               end;
+            end if;
+         end loop;
+         return C;
+      end With_Landing;
+      --  Where every group's readings stood when the step was sent: no sending again asks a channel farther than
+      --  the step itself asked it from there. The bound used to be the last push's length over all its channels,
+      --  and a step that brought the elbow back 157 units while asking the wrist 19.6 let the wrist's sendings
+      --  again ask 27, 46 and 70 units of a joint that was not following, until it stood 161 units off (R6's
+      --  thirteenth start, 10-14: the camera dropped out of its view for the rest of the sweep).
+      Began : array (1 .. Groups) of Real_Vectors.Vector;
+      procedure Read_Began is
+         O : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+      begin
+         for G in 1 .. Groups loop
+            Began (G).Clear;
+            if Driver.Observations.Has_Reading (O.all, Group_Id (G)) then
+               for V of O.Readings.Element (Group_Id (G)) loop
+                  Began (G).Append (V);
+               end loop;
+            end if;
+         end loop;
+      end Read_Began;
+   begin
+      if not Land then
+         One_Step (M, Targets, Targets, Report, Stop, Hold_At => True);
+         return;
+      end if;
+      Read_Began;
+      One_Step (M, With_Landing, Targets, Report, Stop, Hold_At => True, Land => True);
+      --  Landing where it was sent: a servo that holds a load with a proportional controller settles a few
+      --  units short of its goal, the same few units at the same pose (the kiwi's arms, R4 on the Pi, 10-13:
+      --  back from every push 4 to 7 units off the hold, so that no keyframe of the recognition turned one joint
+      --  alone and the fit had no joint's own keyframe). Where a targeted channel reads off its target by more
+      --  than the noise of a difference of two readings tells, the target is sent again moved by that error, as
+      --  long as each landing comes nearer than the one before: what does not come nearer is not the servo's
+      --  steady error (a joint on what stops it), and what was reached stands. The error is asked over the share
+      --  of the last sending the group delivered (R5 on the Pi: the servos deliver about a third of a small
+      --  change, and an error asked as it is took eight sendings to close; each sending is a step's wait).
+      loop
+         exit when Report.Outcome /= Reached or else Report.Stopped;
+         declare
+            O       : constant Driver.Beats.Observation_View := Driver.Beats.Latest;
+            Nudged  : Driver.Commands.Command := Driver.Commands.Hold;
+            Largest : Real := 0.0;
+            Any     : Boolean := False;
+            Off_By  : Ada.Strings.Unbounded.Unbounded_String;   --  the errors, per group and channel, for the log
+         begin
+            for G in 1 .. Groups loop
+               if Is_Commandable (M, Group_Id (G)) and then Driver.Commands.Has_Target (Targets, Group_Id (G))
+                 and then Driver.Observations.Has_Reading (O.all, Group_Id (G))
+               then
+                  declare
+                     Target  : constant Real_Array := Driver.Commands.Target (Targets, Group_Id (G));
+                     Reading : constant Real_Array := O.Readings.Element (Group_Id (G));
+                     Goal    : Real_Array := Target;
+                     Off     : Boolean := False;
+                     --  What the group delivered of the last sending: a servo that moves a fraction of a small
+                     --  change asked of it (the kiwi's, R5 on the Pi, 10-13: 0.33 to 0.38 of 6 to 27 units) is
+                     --  asked for the error over that fraction, so that the fraction it delivers is the error.
+                     --  All of it when the fraction is not measured, or is not below one.
+                     Share : Real := 1.0;
+                     --  How far the last sending asked the group to move, in all: no sending again asks a channel
+                     --  farther than that (R5 on the Pi, 10-13: a push of 314 units stopped 525 short against
+                     --  the head camera, was judged reached, and the sending again asked the error over a share
+                     --  of 0.16, then of 0.01: 3727 and 216445 units, the arm thrown against what stopped it).
+                     Farthest : Real := Real'Last;
+                     Stopped  : Boolean := False;   --  the last sending ended against something: no sending again
+                     Errors : Ada.Strings.Unbounded.Unbounded_String;
+                     --  The least turn of channel C that any arm of the group counts (Kinematics.Counted_Turn): a
+                     --  landing of an arm's joint off its target by less than that is no turn of it to the fit, which
+                     --  takes a keyframe's joints from their readings and counts a joint as turned only from that turn,
+                     --  so it changes nothing the sweep's keyframes are for and is not sent again (the eye's visible
+                     --  step alone let it be where the lock-in tells sub-pixel motion: a25, 10-16, a simulated arm in
+                     --  noise-free pictures, sent 172 landings again in its second pass, 663 of its 2186 beats, each
+                     --  error under a twentieth of a unit, where the matcher's steps were 0.04 to 0.28 units and the
+                     --  lock-in's 0.001 to 0.009); a group several arms share (a humanoid's torso is the joints of
+                     --  every arm) lands a joint within none of their turns.
+                     function Least_Counted (C : Positive) return Real is
+                        Result : Real := 0.0;
+                     begin
+                        for Other in 1 .. Arm_Count (M) loop
+                           if Natural (Arm_Group (M, Arm_Id (Other))) = G then
+                              declare
+                                 T : constant Real := Kinematics.Counted_Turn (M, Arm_Id (Other), C);
+                              begin
+                                 if T > 0.0 and then (Result = 0.0 or else T < Result) then
+                                    Result := T;
+                                 end if;
+                              end;
+                           end if;
+                        end loop;
+                        return Result;
+                     end Least_Counted;
+                     --  A landing the body cannot tell from its target is where it was sent: its error as a change
+                     --  of the readings is no motion by the body's one test (Channels.Visible), an eye seeing none
+                     --  of it. Judged against the readings' noise alone, a simulator's arm that repeats its readings
+                     --  to the last digit was off by millions of deviations at every landing, 0.00001 units no eye
+                     --  saw, and 309 steps of b01's boot (10-16) were sent again, seven beats each: two fifths of
+                     --  its sweep.
+                     Seen : constant Boolean :=
+                       Target'Length /= Group_Size (M, Group_Id (G)) or else Reading'Length /= Target'Length
+                       or else Channels.Visible
+                                 (M, Group_Id (G),
+                                  [for C in 1 .. Target'Length =>
+                                     Target (Target'First + C - 1) - Reading (Reading'First + C - 1)]);
+                  begin
+                     if Steps.Episodes (M, Group_Id (G)) > 0 then
+                        declare
+                           E : constant Episode := Steps.Latest (M, Group_Id (G));
+                           D : constant Estimate := E.Delivered;
+                        begin
+                           Stopped := E.Blocked;
+                           Farthest := E.Length;
+                           if Known (D) and then D.Value > 0.0 and then D.Value < 1.0
+                             and then Driver.Uncertain.Significant (D.Value, D.Sigma, D.Degrees_Of_Freedom)
+                           then
+                              Share := D.Value;
+                           end if;
+                        end;
+                     end if;
+                     for C in 1 .. (if Seen then Natural'Min (Target'Length, Reading'Length) else 0) loop
+                        declare
+                           Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
+                           Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
+                           --  An error smaller than the least ask the body is known to execute (Steps.Executed_Least)
+                           --  is not sent again: the body stands still for an ask within its dead band, and sending
+                           --  it bounced the kiwi's joints two or three units either side of their targets, a step
+                           --  sent again two to four times each, 340 times in a boot whose sweep then held still
+                           --  for no keyframe (R6's eighth start, 10-14).
+                           Least : constant Real := Steps.Executed_Least (M, Group_Id (G), C);
+                           Counted : constant Real := Least_Counted (C);
+                        begin
+                           if not Stopped and then Noise < Real'Last and then Noise > 0.0
+                             and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
+                             and then (Least = Real'Last or else abs Error >= Least)
+                             and then abs Error >= Counted
+                           then
+                              Off := True;
+                              Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));
+                              declare
+                                 Asked : constant Real := Error / Share;
+                                 --  This channel's own ask in the step, where its readings were read when it was sent;
+                                 --  the last push's length over every channel otherwise.
+                                 Own   : constant Real :=
+                                   (if C - 1 < Natural (Began (G).Length)
+                                    then abs (Target (Target'First + C - 1) - Began (G) (C - 1)) else Farthest);
+                                 Most  : constant Real := Real'Min (abs Asked, Real'Min (Own, Farthest));
+                              begin
+                                 Goal (Goal'First + C - 1) :=
+                                   Target (Target'First + C - 1) + (if Asked < 0.0 then -Most else Most);
+                              end;
+                              Append (Errors, " c" & C'Image & " " & Driver.Log.Image (Error, 1));
+                           end if;
+                        end;
+                     end loop;
+                     if Off then
+                        Any := True;
+                        Driver.Commands.Set_Target (Nudged, Group_Id (G), Goal);
+                        Append (Off_By, " group" & G'Image & ":" & To_String (Errors) & " over the share "
+                                & Driver.Log.Image (Share, 2) & ";");
+                     end if;
+                  end;
+               end if;
+            end loop;
+            exit when not Any or else Largest >= Worst;
+            Worst := Largest;
+            declare
+               Again : Step_Report;
+            begin
+               One_Step (M, Nudged, Targets, Again, Stop, Land => True);
+               Driver.Log.Line (Driver.Log.Robot, "motion: a step sent again by its landing's error of "
+                                & Driver.Log.Image (Largest, 1) & " deviations of what the readings tell (" & To_String (Off_By)
+                                & "), landed in" & Again.Beats'Image & " beats: " & To_String (Again.Detail));
+               Report.Beats := Report.Beats + Again.Beats;
+               Report.At_Rest := Again.At_Rest;
+               Report.Stopped := Again.Stopped;
+               Append (Report.Detail, "sent again by the landing's error (" & Driver.Log.Image (Largest, 1)
+                       & " deviations): " & To_String (Again.Detail));
+               --  A sending again that meets something changes nothing of what the step reached: the joint stands
+               --  where what stops it leaves it.
+               exit when Again.Outcome /= Reached;
+               --  Nor does one the body did not execute: no group it asked delivered a significant share of the ask.
+               --  Each landing came nearer than the one before by four of 1.7e9 deviations, the arm creeping on what
+               --  held it, and the step was sent again every six beats for 1700 beats, delivering 0.000 of 2.02 units
+               --  each time (f15m on 10-15, readings exact to 1e-9 units).
+               declare
+                  Executed : Boolean := False;
+               begin
+                  for G in 1 .. Groups loop
+                     if Driver.Commands.Has_Target (Nudged, Group_Id (G)) and then Steps.Episodes (M, Group_Id (G)) > 0 then
+                        declare
+                           D : constant Estimate := Steps.Latest (M, Group_Id (G)).Delivered;
+                        begin
+                           if Known (D) and then D.Value > 0.0
+                             and then Driver.Uncertain.Significant (D.Value, D.Sigma, D.Degrees_Of_Freedom)
+                           then
+                              Executed := True;
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  exit when not Executed;
+               end;
+            end;
+         end;
+      end loop;
    end Step;
 
    procedure Note_Stopped (M : in out Model; G : Group_Id; Noted : out Boolean) is
@@ -301,22 +686,62 @@ package body Driver.Robot.Motion is
       Note_Stopped (M, G, Ignored);
    end Note_Stopped;
 
-   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
-      Step  : constant Real := Kinematics.Keyframe_Step (M, A, Channel);
-      Noise : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
+   function Least_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      Step     : constant Real := Kinematics.Step_Of (M, A, Channel);
+      Turn     : constant Real := Kinematics.Counted_Turn (M, A, Channel);
+      Noise    : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
+      Executed : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
+      --  The turn the fit counts, and what the readings' noise can take off
+      --  a turn asked of exactly it (a keyframe counts as a joint's own, and
+      --  is kept at all, from the step on, and a turn of the step itself
+      --  lands below it half the time: fake body V6, arm 1, the first joint's
+      --  turns of its step, 38 units, left no keyframe through eleven rounds,
+      --  and the fit said the joint had none of its own).
+      Counted  : constant Real :=
+        (if Noise < Real'Last then Turn + Driver.Conventions.Z * Sqrt (2.0) * Noise else Turn);
    begin
-      --  The step, and what the readings' noise can take off a turn asked of
-      --  exactly it: a keyframe counts as a joint's own, and is kept at all,
-      --  from the step on, and a turn of the step itself lands below it half
-      --  the time (fake body V6, arm 1: the first joint's turns of its step,
-      --  38 units, left no keyframe through eleven rounds, and the fit said
-      --  the joint had none of its own).
-      return (if Step > 0.0 and then Noise < Real'Last then Step + Driver.Conventions.Z * Sqrt (2.0) * Noise else Step);
+      if Step <= 0.0 then
+         return 0.0;
+      end if;
+      --  And the least ask the body is known to execute (Steps.Executed_Least) on top: a turn asked within a
+      --  servo's dead band moves nothing, and a keyframe needs the joint to have turned (the kiwi's sweep, R5
+      --  on 10-14: first levels of 2.4 units, every one called blocked where it stood); and a turn that does
+      --  execute lands short by up to that dead band, so a level of the counted step alone lands within the
+      --  step of the pose it left as often as not and leaves no keyframe (R6's eleventh start, 10-14: first
+      --  levels of 4.9 units at a dead band of 4.9, the first pass of arm_a without one keyframe, its pushes
+      --  blocked or too small to count). And the fit counts a turn from the reference, itself a landing within
+      --  the dead band of where it was sent: the level is the counted turn plus what the two landings can lose,
+      --  the dead band each. s07's cells (10-16), from levels of the counted step plus one band, landed 16 units
+      --  from the reference where the fit counted from 19.6 (a band of 9.8), five joints of six counted none,
+      --  no keyframe moved two joints at once, and the arm was not fitted.
+      return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);
+   end Least_Turn;
+
+   function Sweep_Start (M : Model; A : Arm_Id; Channel : Positive) return Real is
+      Step  : constant Real := Kinematics.Step_Of (M, A, Channel);
+      Least : constant Real := Least_Turn (M, A, Channel);
+   begin
+      --  The first level is the largest turn the aligner follows by itself,
+      --  half a patch of view (Kinematics.Follow_Step), and never less than
+      --  the least turn a keyframe counts. The ladder doubles from there: its
+      --  next level is about a patch, the one after it is followed only by a
+      --  fitted arm's prediction. From the least turn, a doubling a round and
+      --  a fit a round, the x5's eye (no pixel noise, a step of 1e-4 reading
+      --  units) climbed four levels in 1100 beats to turns of 0.0013 units,
+      --  and every fit of them was undetermined (B0a_1, 10-13). Before any
+      --  keyframe has turned the joint alone, how far the view moves per unit
+      --  is not measured (Kinematics.Pixels_Per_Unit) and the first level is
+      --  the least turn: its keyframe, predicted from nothing, is what
+      --  measures it, and the ladder climbs from there.
+      return (if Step > 0.0 then Real'Max (Least, Kinematics.Follow_Step (M, A, Channel)) else Step);
    end Sweep_Start;
 
    procedure Hold_For_Keyframe (M : in out Model; A : Arm_Id) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
+      B      : Driver.Clock.Beat;
+      Done   : Boolean;
+      Cause  : Ada.Strings.Unbounded.Unbounded_String;   --  what stands in the way now
+      Detail : Ada.Strings.Unbounded.Unbounded_String;
+      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
 
       function Carries_An_Eye return Boolean is
         (for some E in 1 .. Eye_Count (M) =>
@@ -325,14 +750,27 @@ package body Driver.Robot.Motion is
       loop
          Driver.Beats.Next (B);
          Done := not Carries_An_Eye or else (M.Beats > 0 and then Kinematics.Held_Still (M, A, M.Beats - 1));
+         --  A wait says what it waits for, each cause once: the drone's first sweep held for a keyframe 2300 beats
+         --  and more with nothing in the log (m1020_d5, 10-20).
+         if not Done then
+            Kinematics.Still_Blocked_By (M, A, Cause, Detail);
+            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
+               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
+               Driver.Log.Line (Driver.Log.Robot, "motion: arm" & A'Image & " is not held still for a keyframe:"
+                                & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end if;
          Driver.Beats.Send (Driver.Commands.Hold);
          exit when Done;
       end loop;
    end Hold_For_Keyframe;
 
    procedure Hold_For_Twin (M : in out Model; A : Arm_Id) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
+      B      : Driver.Clock.Beat;
+      Done   : Boolean;
+      Cause  : Ada.Strings.Unbounded.Unbounded_String;   --  what stands in the way now
+      Detail : Ada.Strings.Unbounded.Unbounded_String;
+      Said   : Ada.Strings.Unbounded.Unbounded_String;   --  every cause the log has said stood in the way
 
       function Carries_An_Eye return Boolean is
         (for some E in 1 .. Eye_Count (M) =>
@@ -341,22 +779,20 @@ package body Driver.Robot.Motion is
       loop
          Driver.Beats.Next (B);
          Done := not Carries_An_Eye or else Kinematics.Twin_Answered (M, A);
+         --  A wait says what it waits for, each time that changes: the twin waited 2200 to 2800 beats on the drone and
+         --  more than 7000 on the humanoid (m1020_h7, 10-20) with nothing in the log.
+         if not Done then
+            Kinematics.Twin_Blocked_By (M, A, Cause, Detail);
+            if Ada.Strings.Unbounded.Index (Said, Ada.Strings.Unbounded.To_String (Cause) & "|") = 0 then
+               Ada.Strings.Unbounded.Append (Said, Ada.Strings.Unbounded.To_String (Cause) & "|");
+               Driver.Log.Line (Driver.Log.Robot, "motion: arm" & A'Image & "'s reference has no still twin yet: "
+                                & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end if;
          Driver.Beats.Send (Driver.Commands.Hold);
          exit when Done;
       end loop;
    end Hold_For_Twin;
-
-   procedure Hold_While_Matching (M : in out Model) is
-      B    : Driver.Clock.Beat;
-      Done : Boolean;
-   begin
-      loop
-         Driver.Beats.Next (B);
-         Done := Kinematics.Pending (M) = 0;
-         Driver.Beats.Send (Driver.Commands.Hold);
-         exit when Done;
-      end loop;
-   end Hold_While_Matching;
 
    procedure Hold (M : in out Model; Beats : Positive) is
       pragma Unreferenced (M);
@@ -379,11 +815,28 @@ package body Driver.Robot.Motion is
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real is
       Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
    begin
+      --  The pose a step last sent the group to, as a reading (Group_Stream.Held): the command that holds it there
+      --  may stand off it by the servo's steady error (Step sends a step again by its landing's error), and a hold
+      --  read from the command would creep by that error at every step. Before any step, the last target (a group
+      --  never commanded is held at its first reading) or the reading.
+      if Natural (M.Groups (G).Held.Length) = M.Groups (G).Size and then Channel <= M.Groups (G).Size then
+         return M.Groups (G).Held (Channel - 1);
+      end if;
       return (if Channels.Has_Target (M, G, Last) then Channels.Target (M, G, Last, Channel)
               else Channels.Reading (M, G, Last, Channel));
    end Hold_Of;
 
    function Ln (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Log;
+
+   package Real_IO is new Ada.Text_IO.Float_IO (Real);
+
+   --  A number in the log with its magnitude: probe sizes span many decades (as Boot writes them).
+   function Scientific (X : Real) return String is
+      S : String (1 .. 32);
+   begin
+      Real_IO.Put (S, X, Aft => 2, Exp => 3);
+      return Ada.Strings.Fixed.Trim (S, Ada.Strings.Both);
+   end Scientific;
 
    --  Readings for a log line, each to the six places the group lines give them (Driver.Robot.Group_Watch).
    function Readings_Image (Q : Real_Array) return String is
@@ -394,28 +847,14 @@ package body Driver.Robot.Motion is
 
    function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
 
-   --  The chance that one verdict of the eye is a false alarm: a count at
-   --  rest beats all n counts it had at rest with chance at most 1 / (n + 1);
-   --  without those, the per-cell test's own level.
+   --  The chance that one verdict of the eye is a false alarm: of n counts it had at rest, k exceeded the level a
+   --  verdict asks (Rest_Count_Above), and a count at rest exceeds it with chance at most (k + 1) / (n + 1), whatever
+   --  their distribution; without those, the per-cell test's own level. (1 / (n + 1) holds only of a level above
+   --  every count at rest: b06's eye 2, 10-17, called motion above 5.4 cells where its rest counts reached 11.)
    function False_Alarm (M : Model; E : Eye_Id) return Real is
-     (if M.Eyes (E).Rest_Counts_Known then 1.0 / Real (M.Eyes (E).Rest_Count_Beats + 1) else Tail);
-
-   --  How many seen moves in a row make a chance run rarer than Z's tail over
-   --  every level a probe may try, when one move is a false alarm with that
-   --  chance; none can when the chance is not below one.
-   function Run_Needed (Chance : Real) return Natural is
-   begin
-      if Chance <= 0.0 then
-         return 1;
-      elsif Chance >= 1.0 then
-         return Natural'Last;
-      end if;
-      declare
-         K : constant Real := Real'Ceiling (Ln (Tail / Real (Levels)) / Ln (Chance));
-      begin
-         return (if K >= Real (Natural'Last) then Natural'Last else Natural'Max (1, Natural (K)));
-      end;
-   end Run_Needed;
+     (if M.Eyes (E).Rest_Counts_Known
+      then Real (M.Eyes (E).Rest_Count_Above + 1) / Real (M.Eyes (E).Rest_Count_Beats + 1)
+      else Tail);
 
    --  Some eye's image moved at a beat from From on, and the chance that a
    --  look at that many verdicts finds one by noise alone.
@@ -431,19 +870,27 @@ package body Driver.Robot.Motion is
             end if;
          end loop;
       end loop;
+      --  The chance that at least one of the verdicts looked at is a false alarm: one less the chance that none
+      --  is, the verdicts independent. Summed instead, a look of twenty beats over three eyes with rest counts of
+      --  53 beats "had a chance" of 1.1, above one, and no run of moves could make such a
+      --  level certain: the ladder doubled past every level an eye saw, to 56 radians and the arm's ends (seed 2
+      --  of the fake robot, 10-14: levels 10 to 21 all seen, none confirmed).
+      Chance := 1.0 - Ada.Numerics.Long_Elementary_Functions.Exp (-Chance);
    end Look;
 
    --  The smallest change of the channel's reading that tells from its noise
-   --  (a change is the difference of two readings); without jitter, the
-   --  resolution of the group's readings (Channels.Resolution).
+   --  (a change is the difference of two readings, the noise taken as measured:
+   --  Channels.Significant_Change), and no less than one step of the reading
+   --  (Channels.Step_Unit); without jitter, the latter.
    function Smallest_Step (M : Model; G : Group_Id; Channel : Positive) return Real is
       Sigma : constant Real := Reading_Noise (M, G, Channel);
+      Wire  : constant Real := Channels.Step_Unit (M, G, M.Beats - 1, Channel);
    begin
       if Sigma > 0.0 and then Sigma < Real'Last then
-         return Driver.Uncertain.Threshold
-           (Driver.Uncertain.Scalar_Gate (Channels.Noise_Freedom (M, G, Channel))) * Sigma * Sqrt (2.0);
+         return Real'Max
+           (Wire, Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate) * Sigma * Sqrt (2.0));
       end if;
-      return Channels.Resolution (M, G, M.Beats - 1);
+      return Wire;
    end Smallest_Step;
 
    type Flag_Array is array (Positive range <>) of Boolean;
@@ -451,9 +898,10 @@ package body Driver.Robot.Motion is
    --  Moves the listed channels to Base plus the offsets and looks for as
    --  long as a response takes to show in the readings and then in the
    --  images: whether some eye saw motion, the chance that a look at so many
-   --  verdicts finds one by noise, and each reading at the end. Unlooked is
-   --  the first beat no look has judged: the looks tile the probe, so a
-   --  response that shows later than expected falls in the next one.
+   --  verdicts finds one by noise, and each reading once the readings are
+   --  still. Unlooked is the first beat no look has judged: the looks tile
+   --  the probe, so a response that shows later than expected falls in the
+   --  next one.
    procedure Move_And_Look
      (M        : in out Model;
       Listed   : Channel_Refs;
@@ -464,14 +912,61 @@ package body Driver.Robot.Motion is
       Seen     : out Boolean;
       Chance   : out Real;
       Now      : out Real_Array;
-      Moving   : out Flag_Array)
+      Moving   : out Flag_Array;
+      Read_At  : out Natural)
    is
       N      : constant Natural := Listed'Length;
       B      : Driver.Clock.Beat;
       C      : Driver.Commands.Command := Base;
       From   : Natural;
       Looked : Natural := 0;
+      --  How many pushes each listed group had before this move; a push of the move is one after them.
+      Before : Count_Array (1 .. N) := [others => 0];
+
+      --  Some listed group's push of this move was answered (its readings moved) and is still under way (Steps
+      --  follows it to its end: its readings still, or plainly going nowhere). A push nothing answered is not
+      --  waited for: before the body's delay is measured such a push waits as many beats as the stream had
+      --  before it (Steps: no wait is longer than all the waiting so far), and the ladder's first levels, one
+      --  tick each under a servo's deadband, stood 99, 200, 400 and 750 beats in a row (R3 on the Pi, 10-13:
+      --  the "rest" that took a minute); the next level cuts such a push short, as it always did.
+      --  A push under way: begun and not ended, whether or not its readings have moved yet. An eye sees the move
+      --  a beat before the readings do (its lag, the servo's delay), and a look that ends at that beat read the
+      --  readings where they stood: the level counted as not executed, and the ladder doubled its ask twenty-four
+      --  times, the arm swinging between its range's ends (R6's fourth start on the kiwi, 10-14, arm_b's first
+      --  joint, once the eye's threshold for motion came down).
+      --  A push nothing answered and no eye saw is not waited for: before the body's delay is measured, Steps
+      --  gives such a push up only after as many beats as the stream has had, and the first probe's levels below
+      --  the dead band would each wait that long (R6's fifth start, 10-14: 500 beats into the first probe).
+      --  And a push whose readings have not moved is waited for while an eye still sees motion at the latest beat:
+      --  a look's sighting is one verdict of the many a look takes, each a false alarm by chance (False_Alarm), and
+      --  one sighting in a look made a push be waited for as long as Steps gives an unanswered one. s43, s46 and s47
+      --  (servo seed 6 of the fake robot, 10-17) all waited from beat 79 to 118 and from 167 to 206 after looks whose
+      --  chance of a false alarm was 0.19 and 0.99, at levels of 2.45 and 4.9 units that no channel went along.
+      Looked_To : Natural := 0;   --  the last beat a look of this move judged
+      Seen_Any : Boolean := False;
+      function Seen_Now return Boolean is
+        (M.Beats > 0 and then (for some E in 1 .. Eye_Count (M) => Lockin.Moved (M, Eye_Id (E), M.Beats - 1)));
+      function Still_Pushing return Boolean is
+        (for some I in 1 .. N =>
+           Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
+           and then not Steps.Latest (M, Listed (I).Group).Ended
+           and then ((Seen_Any and then Seen_Now) or else Steps.Latest (M, Listed (I).Group).Moved));
+
+      --  Each listed channel's reading at the last beat, and whether its group's readings still move there.
+      procedure Read_Ends is
+      begin
+         Read_At := Natural'Max (1, M.Beats) - 1;
+         for I in 1 .. N loop
+            Now (I) := 0.0;
+            Moving (I) := False;
+            if Usable (I) and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
+               Now (I) := Channels.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
+               Moving (I) := Channels.Moving (M, Listed (I).Group, M.Beats - 1);
+            end if;
+         end loop;
+      end Read_Ends;
    begin
+      Read_At := 0;
       for I in 1 .. N loop
          if Usable (I) then
             declare
@@ -486,6 +981,11 @@ package body Driver.Robot.Motion is
       end loop;
       Driver.Beats.Next (B);
       From := Unlooked;
+      for I in 1 .. N loop
+         if Usable (I) then
+            Before (I) := Steps.Episodes (M, Listed (I).Group);
+         end if;
+      end loop;
       Driver.Beats.Send (C);
       loop
          Driver.Beats.Next (B);
@@ -493,14 +993,49 @@ package body Driver.Robot.Motion is
          declare
             Wait : Natural := 1;
             Delay_Beats : Natural := 0;
+            Delay_Known : Boolean;
+            Earliest : Natural := Natural'Last;
             Lag : Natural := 0;
             Done : Boolean;
          begin
+            --  How long the readings may take to answer: the body's delay where any push of it was answered
+            --  (Steps.Body_Delay: a command travels one path to every group). Before one was, this move's own
+            --  answer where its readings have moved, else as long as Steps gives an unanswered push before any
+            --  was answered (First_Push): read a beat after it was sent, a body that answers a beat later shows
+            --  nothing yet, the level is judged not executed, the next level is sent into the answer of this
+            --  one, and no push is ever clean enough to measure the delay from (seed 2 of the fake robot, 10-14:
+            --  every channel "stopped following" at the third level, the boot ended with nothing seen; seed 1's
+            --  ladder doubled 33 times before an eye saw).
+            Steps.Body_Delay (M, Delay_Beats, Delay_Known);
+            --  The earliest beat a listed group's readings can answer: the least of their own measured delays
+            --  (a closer answering in five beats beside arms answering in one made every look of every channel
+            --  together six beats long, and its chance of a false alarm that much larger, seed 2 of the fake
+            --  robot, 10-14); the wait above is the longest.
             for I in 1 .. N loop
                if Usable (I) and then M.Groups (Listed (I).Group).Delay_Known then
-                  Delay_Beats := Natural'Max (Delay_Beats, M.Groups (Listed (I).Group).Delay_Beats);
+                  Earliest := Natural'Min (Earliest, M.Groups (Listed (I).Group).Delay_Beats);
                end if;
             end loop;
+            if Earliest = Natural'Last then
+               Earliest := 0;
+            end if;
+            if not Delay_Known then
+               declare
+                  Own : Natural := 0;
+                  Any : Boolean := False;
+               begin
+                  for I in 1 .. N loop
+                     if Usable (I) and then Steps.Episodes (M, Listed (I).Group) > Before (I)
+                       and then Steps.Latest (M, Listed (I).Group).Moved
+                     then
+                        Own := Natural'Max (Own, Steps.Latest (M, Listed (I).Group).Moved_At
+                                                 - Steps.Latest (M, Listed (I).Group).Start);
+                        Any := True;
+                     end if;
+                  end loop;
+                  Delay_Beats := (if Any then Own else Steps.First_Push (M));
+               end;
+            end if;
             for E in 1 .. Eye_Count (M) loop
                Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
             end loop;
@@ -513,26 +1048,55 @@ package body Driver.Robot.Motion is
             --  where nothing is seen. The chance of a false alarm is summed
             --  over every beat looked at, whenever the look ends (Look).
             Done := Looked >= Wait;
-            if not Done and then Looked > Delay_Beats then
+            --  Before the body's delay is known, every beat is looked at from the first: an eye may show the move
+            --  before the readings do, and the wait above is then only how long an unanswered push is given.
+            if not Done and then (not Delay_Known or else Looked > Earliest) then
                Look (M, From, Seen, Chance);
                Done := Seen;
             end if;
             if Done then
                Look (M, From, Seen, Chance);
-               Unlooked := M.Beats;
-               for I in 1 .. N loop
-                  Now (I) := 0.0;
-                  Moving (I) := False;
-                  if Usable (I) and then Channels.Has_Reading (M, Listed (I).Group, M.Beats - 1) then
-                     Now (I) := Channels.Reading (M, Listed (I).Group, M.Beats - 1, Listed (I).Channel);
-                     Moving (I) := Channels.Moving (M, Listed (I).Group, M.Beats - 1);
-                  end if;
-               end loop;
+               Looked_To := M.Beats - 1;
+               Seen_Any := Seen;
+               Read_Ends;
             end if;
             Driver.Beats.Send (Driver.Commands.Hold);
             exit when Done;
          end;
       end loop;
+      --  A channel whose push is still under way when the look is over has not shown where the level takes it:
+      --  judged while it was still travelling, every level went further than the one before, and the ladder
+      --  doubled its ask up to 2 ** 18 units of a servo that travels for seconds to a far target, swinging the arm
+      --  from end to end at each level (R2 on the Pi, 10-13: arm b's joint 1, whose own eye did not see it move).
+      --  The push is waited for to its end as Steps judges it (the readings still, or plainly going nowhere: a
+      --  joint that creeps towards its target for good is not waited for for good), held meanwhile, and the
+      --  readings are read then. What an eye sees meanwhile falls in the next look, as any response that shows
+      --  later than expected does.
+      --  A joint that travels slowly, less in a beat than its readings jitter, is under way too: Steps counts a
+      --  push answered once a reading has left where the push started by more than its noise explains, not
+      --  only when it moves from one beat to the next (the kiwi's elbow, read as going nowhere at every level,
+      --  was probed to 8.8e16 units and called dead, R6's seventh and ninth starts, 10-14). Holding until the
+      --  whole body was still instead (the tenth start) caught it too, and cost the recognition two minutes of
+      --  eyes settling after levels nothing had answered.
+      while Still_Pushing loop
+         Driver.Beats.Next (B);
+         Read_Ends;
+         --  While its push is under way, what an eye sees is this move's answer, later than the wait above: a look
+         --  that has not seen it yet goes on over these beats, its chance with them. The next move's look begins
+         --  where this push ended. Charged with the tail before it, each look of a level's confirmation covered some
+         --  twenty beats (690 beats over 31 moves), its chance of a false alarm 0.73, and confirming the level took
+         --  those 31 moves (b07, seed 8, 10-17).
+         if not Seen then
+            Look (M, From, Seen, Chance);
+            Looked_To := M.Beats - 1;
+            Seen_Any := Seen;
+         end if;
+         Driver.Beats.Send (Driver.Commands.Hold);
+      end loop;
+      Unlooked := M.Beats;
+      Driver.Log.Line (Driver.Log.Robot, "probe: the move's look judged beats" & From'Image & " to" & Looked_To'Image
+                       & (if Seen then ", seen" else ", nothing seen") & ", its chance of a false alarm "
+                       & Driver.Log.Image (Chance, 3) & "; its push ended at beat" & Natural'Image (M.Beats - 1));
    end Move_And_Look;
 
    --  A probe level took the channel further along its ask than any smaller
@@ -546,36 +1110,62 @@ package body Driver.Robot.Motion is
    --  fraction that shrinks towards one as the offset grows, which exact
    --  readings call significant.)
    function Further
-     (M : Model; Ref : Channel_Ref; Advance, Noise : Real; Freedom : Natural) return Boolean
+     (M : Model; Ref : Channel_Ref; Advance, Noise : Real) return Boolean
    is
       V : constant Estimate := Visible_Step (M, Ref.Group, Ref.Channel);
    begin
       return Advance > 0.0 and then (not Known (V) or else Advance >= V.Value)
-        and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0), Freedom);
+        and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));
    end Further;
 
+   --  The body executed a level: the reading went along the ask, significantly against its own noise. The eye's
+   --  visible step is not asked here: it is the lock-in's, measured from the few pushes before, and asked of an
+   --  executed turn it made arm_a's second joint, moved 19.6 units at every level, "not further" at every one,
+   --  and the probe doubled nineteen times (R6's fifth start, 10-14).
+   function Executed (Advance, Noise : Real) return Boolean is
+     (Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));
+
    --  A level some eye saw, confirmed by moves back and forth by the same
-   --  offsets, each of them seen, as many as the chance of one false alarm
-   --  asks.
+   --  offsets, each of them seen and each executed by the body, until the
+   --  chance that every look of the run, the level's first, saw a false
+   --  alarm (the product of their own chances) is below Z's tail over every
+   --  level: a long look has a large chance, a short one a small one, and a
+   --  count set by the level's look alone asked 6455 moves of s18 (servo seed
+   --  4, 10-17) whose own looks each had 0.134, where five do. Executed as
+   --  the level's own look asks (Probe_Together): some listed reading went the way the move asked,
+   --  from where the move before left it, significantly against its own
+   --  noise (Executed). A move the body did not make is no evidence however
+   --  its look went: on the servo fake the level of 4.9 units took one
+   --  channel out of its dead band once and none again, the eye "saw" each
+   --  move after it with a chance of a false alarm near one, and the run that
+   --  chance asked was some 270 moves, 10800 beats (s02 and s04 on 10-16).
    procedure Confirm
      (M         : in out Model;
       Listed    : Channel_Refs;
       Usable    : Flag_Array;
       Base      : Driver.Commands.Command;
       Offsets   : Real_Array;
+      Noise     : Real_Array;
+      After     : Real_Array;   --  the readings the level's own move left
       Unlooked  : in out Natural;
       Chance    : Real;
       Confirmed : out Boolean)
    is
-      Needed    : constant Natural := Run_Needed (Chance);
+      --  The run is rare enough when the chance that every look in it was a false alarm, the product of their own
+      --  chances (the level's look first), is below Z's tail over every level a probe may try.
+      Rare      : constant Real := Ln (Tail / Real (Levels));
+      Run_Log   : Real := (if Chance > 0.0 then Ln (Chance) else Real'First);
       Run       : Natural := 1;
       At_Amount : Boolean := True;
       Seen      : Boolean;
       Again     : Real;
       Now       : Real_Array (1 .. Listed'Length);
+      Before    : Real_Array (1 .. Listed'Length) := After;
       Moving    : Flag_Array (1 .. Listed'Length);
+      Read_At   : Natural;
+      Made      : Boolean;
    begin
-      while Needed /= Natural'Last and then Run < Needed loop
+      while Run_Log > Rare loop
          At_Amount := not At_Amount;
          declare
             Back : Real_Array (1 .. Listed'Length);
@@ -583,12 +1173,35 @@ package body Driver.Robot.Motion is
             for I in Back'Range loop
                Back (I) := (if At_Amount then Offsets (Offsets'First + I - 1) else 0.0);
             end loop;
-            Move_And_Look (M, Listed, Usable, Base, Back, Unlooked, Seen, Again, Now, Moving);
+            Move_And_Look (M, Listed, Usable, Base, Back, Unlooked, Seen, Again, Now, Moving, Read_At);
          end;
          exit when not Seen;
+         Made := False;
+         for I in 1 .. Listed'Length loop
+            if Usable (I) and then Offsets (Offsets'First + I - 1) /= 0.0 then
+               declare
+                  --  The way this move asked the reading to go: along the offset when out to it, against it
+                  --  when back.
+                  Way : constant Real := (if Offsets (Offsets'First + I - 1) > 0.0 then 1.0 else -1.0)
+                                         * (if At_Amount then 1.0 else -1.0);
+               begin
+                  Made := Made or else Executed (Way * (Now (I) - Before (I)), Noise (I));
+               end;
+            end if;
+         end loop;
+         exit when not Made;
+         --  A look whose chance is not below one tells nothing, and no run of them becomes rare.
+         exit when Again >= 1.0;
+         Run_Log := (if Again > 0.0 then Run_Log + Ln (Again) else Real'First);
+         Before := Now;
          Run := Run + 1;
       end loop;
-      Confirmed := Needed /= Natural'Last and then Run >= Needed;
+      Confirmed := Run_Log <= Rare;
+      Driver.Log.Line (Driver.Log.Robot, "probe: the level's look and" & Natural'Image (Run - 1) & " moves back and forth"
+                       & " after it, each seen and made, had together a chance of e^"
+                       & Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)
+                       & " of false alarms only, against e^" & Driver.Log.Image (Rare, 2) & ": "
+                       & (if Confirmed then "confirmed" else "not confirmed"));
    end Confirm;
 
    --  Where every listed channel is held and reads, read in a held beat:
@@ -606,10 +1219,11 @@ package body Driver.Robot.Motion is
       Usable   : out Flag_Array;
       Start    : out Real_Array;
       Noise    : out Real_Array;
-      Freedom  : out Count_Array;
       Base     : out Driver.Commands.Command;
       Amount   : out Real;
-      Unlooked : out Natural)
+      Unlooked : out Natural;
+      Start_At : out Natural;
+      Creep    : out Real_Array)
    is
       B : Driver.Clock.Beat;
 
@@ -622,8 +1236,9 @@ package body Driver.Robot.Motion is
    begin
       Usable := [others => False];
       Start := [others => 0.0];
+      Start_At := 0;
+      Creep := [others => 0.0];
       Noise := [others => 0.0];
-      Freedom := [others => 0];
       Base := Driver.Commands.Hold;
       Amount := First;
       Driver.Beats.Next (B);
@@ -648,8 +1263,9 @@ package body Driver.Robot.Motion is
                begin
                   Usable (I) := True;
                   Start (I) := Channels.Reading (M, G, M.Beats - 1, C);
+                  Start_At := M.Beats - 1;
+                  Creep (I) := Channels.Drift (M, G, C);
                   Noise (I) := Reading_Noise (M, G, C);
-                  Freedom (I) := Channels.Noise_Freedom (M, G, C);
                   if not Driver.Commands.Has_Target (Base, G) then
                      declare
                         H : Real_Array (1 .. Group_Size (M, G));
@@ -685,20 +1301,91 @@ package body Driver.Robot.Motion is
       Base      : Driver.Commands.Command;            --  every listed group at its hold
       Start     : Real_Array (1 .. N);   --  each reading when the probe began
       Noise     : Real_Array (1 .. N);
-      Freedom   : Count_Array (1 .. N);
       Following : Flag_Array (1 .. N);
       Delivered : Flag_Array (1 .. N) := [others => False];   --  some level moved it along the ask
+      Did       : Flag_Array (1 .. N) := [others => False];   --  this level's ask was executed (Executed)
       Farthest  : Real_Array (1 .. N) := [others => 0.0];   --  the farthest a level took it along the ask
       Kept      : Real_Array (1 .. N) := [others => 0.0];   --  the offset where it last followed
       Amount    : Real;
       Unlooked  : Natural;
+      Start_At  : Natural;                --  the beat the probe's readings were read at
+      Creep     : Real_Array (1 .. N);    --  each reading's steady change a beat at rest (Channels.Drift)
+      Farthest_At : Count_Array (1 .. N);   --  the beat each one's farthest reading was read at
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
+      Farthest_At := [others => Start_At];
       Following := Usable;
       if Amount <= 0.0 or else (for all U of Usable => not U) then
          return;
       end if;
+      --  Where the body begins to execute, first: the amount climbs one doubling more at each level no listed reading
+      --  went along, and once one did, it is halved back between the last that none did and the least that some did
+      --  until the two lie within a doubling; the ladder then starts from the least that some did. Every level no
+      --  reading answers is waited for as long as no push of the body had ever been answered (Steps.First_Push), and
+      --  the ladder doubled through the body's dead band one such wait at a time: b13 (seed 10 of the fake robot,
+      --  readings in milliradians, 10-17) asked 4.2e-7 units first, its readings first went along at 1.76, twenty-two
+      --  levels of 45 beats each, a thousand of the recognition's 2059 beats. An amount is judged from the hold: after
+      --  a level some reading went along, the body is sent back to it before the next.
+      declare
+         Least  : constant Real := Amount;
+         Most   : constant Real := Least * 2.0 ** Levels;   --  as far as the ladder itself would double
+         Lo, Hi : Real := 0.0;   --  the largest amount no reading went along, the least some did
+         Stride : Natural := 0;  --  the doublings the amount climbed at its last level
+         Back   : Step_Report;
+      begin
+         loop
+            declare
+               Ask     : constant Real := (if Hi = 0.0 then Amount else Sqrt (Lo * Hi));
+               Offsets : Real_Array (1 .. N);
+               Seen    : Boolean;
+               Chance  : Real;
+               Now     : Real_Array (1 .. N);
+               Moving  : Flag_Array (1 .. N);
+               Now_At  : Natural;
+               Went    : Natural := 0;
+            begin
+               for I in 1 .. N loop
+                  Offsets (I) := Sign * Ask;
+               end loop;
+               Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
+               for I in 1 .. N loop
+                  if Usable (I)
+                    and then Executed (Sign * (Now (I) - Start (I)) - Sign * Creep (I) * Real (Now_At - Start_At),
+                                       Noise (I))
+                  then
+                     Went := Went + 1;
+                  end if;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "probe: where the body begins to execute, every channel together at "
+                                & Scientific (Ask) & " units, read at beat" & Now_At'Image & ":" & Went'Image
+                                & " channels went along their ask");
+               if Went > 0 then
+                  Hi := Ask;
+                  --  Back to the hold, and its readings, before the next amount is judged from them.
+                  Step (M, Base, Back);
+                  Start_At := M.Beats - 1;
+                  for I in 1 .. N loop
+                     if Usable (I) then
+                        Start (I) := Driver.Robot.Channels.Reading (M, Listed (I).Group, Start_At, Listed (I).Channel);
+                     end if;
+                  end loop;
+               else
+                  Lo := Ask;
+                  if Hi = 0.0 then
+                     Stride := Stride + 1;
+                     Amount := Real'Min (Ask * 2.0 ** Stride, Most);
+                  end if;
+               end if;
+               exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);
+               exit when Hi = 0.0 and then Lo >= Most;
+            end;
+         end loop;
+         if Hi > 0.0 then
+            Amount := Hi;
+         end if;
+         Farthest_At := [others => Start_At];
+      end;
       for Level in 1 .. Levels loop
          Report.Steps := Level;
          declare
@@ -707,20 +1394,25 @@ package body Driver.Robot.Motion is
             Chance  : Real;
             Now     : Real_Array (1 .. N);
             Moving  : Flag_Array (1 .. N);
+            Now_At  : Natural;
          begin
             for I in 1 .. N loop
                Offsets (I) := (if Following (I) then Sign * Amount else Kept (I));
             end loop;
-            Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving);
+            Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
             --  Which channels still follow: whether asking further took each
-            --  further than any smaller offset did.
+            --  further than any smaller offset did, less the creep of the beats between (Channels.Drift).
+            Did := [others => False];
             for I in 1 .. N loop
                if Usable (I) and then Following (I) then
                   declare
                      Excursion : constant Real := Sign * (Now (I) - Start (I));
-                     Went      : constant Boolean :=
-                       Further (M, Listed (I), Excursion - Farthest (I), Noise (I), Freedom (I));
+                     Advance   : constant Real :=
+                       Excursion - Farthest (I)
+                       - Sign * Creep (I) * Real (Now_At - Natural'Min (Now_At, Farthest_At (I)));
+                     Went      : constant Boolean := Further (M, Listed (I), Advance, Noise (I));
                   begin
+                     Did (I) := Executed (Advance, Noise (I));
                      if Delivered (I) and then not Went and then not Moving (I) then
                         --  Its own end: held where it last followed.
                         Following (I) := False;
@@ -729,21 +1421,47 @@ package body Driver.Robot.Motion is
                         if Went then
                            Delivered (I) := True;
                            Farthest (I) := Excursion;
+                           Farthest_At (I) := Now_At;
                         end if;
                      end if;
                   end;
                end if;
             end loop;
-            if Seen then
+            declare
+               Went_Along : Natural := 0;
+            begin
+               for I in 1 .. N loop
+                  if Usable (I) and then Did (I) then
+                     Went_Along := Went_Along + 1;
+                  end if;
+               end loop;
+               Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                & Scientific (Amount) & " units, read at beat" & Now_At'Image & ": seen " & Seen'Image
+                                & " (the look's chance of a false alarm " & Driver.Log.Image (Chance, 3) & "), "
+                                & Went_Along'Image & " channels went along their ask");
+            end;
+            --  A level is seen only when the body executed it: some channel's reading went along its ask. A
+            --  camera on an arm whose servo hums against its dead band shakes, and an eye sees motion where no
+            --  reading moved (R6 on the kiwi, 10-14: every channel together "first seen" at 4.9 units while no
+            --  reading changed, and the recognition ran on 4.9-unit asks the servos ignored, each waited for as
+            --  long as the stream was old).
+            if Seen and then (for some I in 1 .. N => Usable (I) and then (Delivered (I) or else Did (I))) then
                declare
                   Confirmed : Boolean;
                begin
-                  Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Now, Unlooked, Chance, Confirmed);
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
+                  else
+                     Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                      & Scientific (Amount) & " units, was seen by an eye but not confirmed (the look's"
+                                      & " chance of a false alarm " & Driver.Log.Image (Chance, 3) & ")");
                   end if;
                end;
+            elsif Seen then
+               Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
+                                & Scientific (Amount) & " units, was seen by an eye while no reading went along its ask");
             end if;
             exit when Report.Seen or else (for all I in 1 .. N => not (Usable (I) and then Following (I)));
             Amount := 2.0 * Amount;
@@ -764,18 +1482,22 @@ package body Driver.Robot.Motion is
       Base      : Driver.Commands.Command;
       Start     : Real_Array (1 .. 1);
       Noise     : Real_Array (1 .. 1);
-      Freedom   : Count_Array (1 .. 1);
       Amount    : Real;
       Unlooked  : Natural;
       Signs     : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];
       Other     : constant array (Sense) of Sense := [Increasing => Decreasing, Decreasing => Increasing];
       Open      : Sense_Flags := [others => True];
       Delivered : Sense_Flags := [others => False];
+      Did       : Sense_Flags := [others => False];   --  the way's latest level was executed (Executed)
       Answered  : Sense_Counts := [others => 0];   --  the level at which it first followed that way
       Farthest  : array (Sense) of Real := [others => 0.0];
+      Start_At  : Natural;                         --  the beat the probe's reading was read at
+      Creep     : Real_Array (1 .. 1);             --  its steady change a beat at rest (Channels.Drift)
+      Farthest_At : array (Sense) of Natural;      --  the beat each way's farthest reading was read at
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Freedom, Base, Amount, Unlooked);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
+      Farthest_At := [others => Start_At];
       if not Usable (1) then
          return;
       end if;
@@ -805,12 +1527,29 @@ package body Driver.Robot.Motion is
                Chance  : Real;
                Now     : Real_Array (1 .. 1);
                Moving  : Flag_Array (1 .. 1);
+               Now_At  : Natural;
+               Waited  : Natural;
             begin
-               Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving);
+               --  Each push from a body at rest and every picture settled: a sighting of this channel is confirmed by
+               --  the lock-in (below), whose regression counts a push only from a picture at rest, and an eye whose
+               --  picture still settled from the move before when the push began has no row of it. s49 and s50 (servo
+               --  seed 6 of the fake robot, 10-17 and 10-18): the closer's pushes began a beat after the probe's
+               --  together levels ended, while eye 3 (on the arm those levels swung) still settled, none of them was a
+               --  row of eye 3, the closer's column never had a beat there, and the closer, which only eye 3 sees, was
+               --  left unclassified. The waits after looks that saw nothing real gave those pictures their rest before.
+               Settle (M, Waited);
+               Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
                declare
                   Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
-                  Went      : constant Boolean := Further (M, Ref, Excursion - Farthest (Way), Noise (1), Freedom (1));
+                  --  Less the creep of the beats since the farthest reading (Channels.Drift): a creeping reading went
+                  --  further at every level the way it creeps, and the jaw held open at its end was asked open,
+                  --  never shut, to 7e13 units (f16f on 10-15).
+                  Advance   : constant Real :=
+                    Excursion - Farthest (Way)
+                    - Signs (Way) * Creep (1) * Real (Now_At - Natural'Min (Now_At, Farthest_At (Way)));
+                  Went      : constant Boolean := Further (M, Ref, Advance, Noise (1));
                begin
+                  Did (Way) := Executed (Advance, Noise (1));
                   if Delivered (Way) and then not Went and then not Moving (1) then
                      --  Its own end.
                      Open (Way) := False;
@@ -821,17 +1560,49 @@ package body Driver.Robot.Motion is
                      end if;
                      Delivered (Way) := True;
                      Farthest (Way) := Excursion;
+                     Farthest_At (Way) := Now_At;
                   end if;
                end;
-               if Seen then
+               --  Seen only at a level the body executed that way (as Probe_Together: a humming servo shakes
+               --  its camera without moving its reading). A sighting is confirmed by the body's one test of
+               --  motion: the estimates are computed once, and the lock-in's regression on every push so far
+               --  must see this channel move some eye (Lockin.Seen: its gain over the cells that respond stands
+               --  Z of its spread above zero). It used to be confirmed by a run of moves back and forth each seen
+               --  by an eye's per-beat verdict, as many as that verdict's chance of a false alarm asked
+               --  (Confirm): 6 to 22 moves of 8 to 14 beats for every channel of every group, 340 beats a
+               --  channel on the fake robot against 40 on the kiwi, and the "probes with confirmations" of the
+               --  kiwi's recognition (10-14). A channel probed alone has a column of its own in the regression,
+               --  so the lock-in can tell it from the rest (the levels of every channel together cannot be told
+               --  apart that way, and that ladder keeps its runs).
+               if Seen and then (Delivered (Way) or else Did (Way)) then
+                  if Report.First_Seen = 0.0 or else Offset < Report.First_Seen then
+                     Report.First_Seen := Offset;
+                  end if;
                   declare
-                     Confirmed : Boolean;
+                     Confirmed : Boolean := False;
+                     --  And the step is one an eye's cells can tell (Lockin.Shows_Step): a channel seen at a level that
+                     --  moves the picture by a hundredth of a pixel is seen by the regression's pooled gain and by no
+                     --  push a decision could rest on (a drone's motors, d20 on 10-20: levels of 0.05 to 3 thousandths of a
+                     --  metre, its own camera shown nothing at them, the group left a part with no arm to sweep).
+                     procedure Read_Seen is
+                        Step : Real_Array (1 .. Group_Size (M, Ref.Group)) := [others => 0.0];
+                     begin
+                        Step (Ref.Channel) := Offset;
+                        Confirmed := (for some E in 1 .. Eye_Count (M) => Lockin.Seen (M, Eye_Id (E), Ref.Group, Ref.Channel))
+                          and then (for some E in 1 .. Eye_Count (M) => Lockin.Shows_Step (M, Eye_Id (E), Ref.Group, Step));
+                     end Read_Seen;
                   begin
-                     Confirm (M, Listed, Usable, Base, Offsets, Unlooked, Chance, Confirmed);
+                     Hold_And_Estimate (M);
+                     Driver.Beats.Within_A_Beat (Read_Seen'Access);
                      if Confirmed then
                         Report.Seen := True;
                         Report.Excursion := Offset;
                         Report.Seen_Sense := Way;
+                     else
+                        Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
+                                         & " level" & Report.Levels (Way)'Image & " " & Way'Image & ", " & Scientific (Offset)
+                                         & " units, was seen by an eye (chance of a false alarm "
+                                         & Driver.Log.Image (Chance, 3) & ") but the lock-in sees no eye moved by it, or by a step its cells tell");
                      end if;
                   end;
                end if;
@@ -910,7 +1681,8 @@ package body Driver.Robot.Motion is
      ((State => State, Reason => To_Unbounded_String (Why), others => <>));
 
    function Stray
-     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False)
+     (M : Model; A : Arm_Id; From, To : Rigid; Q0, Q1 : Real_Array; Lever : Real := 0.0; Position_Only : Boolean := False;
+      Free_About : Vec3 := [0.0, 0.0, 0.0])
       return Real
    is
       use Driver.Numerics.Arrays;
@@ -927,7 +1699,13 @@ package body Driver.Robot.Motion is
                Translation => (1.0 - Share) * From.Translation + Share * To.Translation);
          begin
             Worst := Real'Max (Worst, abs (Is_At.Translation - Want.Translation));
-            if not Position_Only then
+            if Position_Only then
+               null;
+            elsif abs Free_About > 0.0 then
+               Worst := Real'Max
+                 (Worst, abs Driver.Numerics.Cross (Is_At.Rotation * Free_About, Want.Rotation * Free_About)
+                         / (abs Free_About) ** 2 * Lever);
+            else
                Worst := Real'Max (Worst, Driver.Numerics.Angle (Transpose (Is_At.Rotation) * Want.Rotation) * Lever);
             end if;
          end;
@@ -985,7 +1763,8 @@ package body Driver.Robot.Motion is
              (M, A, O,
               (Pose          => (Rotation    => Back * Goal.Pose.Rotation,
                                  Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),
-               Position_Only => Goal.Position_Only),
+               Position_Only => Goal.Position_Only,
+               Free_About    => Goal.Free_About),
               Clearance => (if Clearance < Real'Last then Clearance / Scale else Real'Last),
               Lever     => Lever / Scale);
       begin
@@ -1050,15 +1829,17 @@ package body Driver.Robot.Motion is
                Position_Off, Turn_Off : Real;
             begin
                Result.Solves := Result.Solves + 1;
-               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only and then B_Of = 1.0,
-                                      Next, Position_Off, Turn_Off);
+               --  A goal whose turn is free leaves it free along the way too: held at the start's on every segment
+               --  but the last, a raise of the hand's own eye near the wrist's singularity (conditioning 1e-6) was
+               --  refused for a turn 2.26e-3 rad off at a third of the way, and no hand was made (f16f on 10-15).
+               Kinematics.Solve_Pose (M, A, Q, Along (B_Of), Goal.Position_Only, Next, Position_Off, Turn_Off, Goal.Free_About);
                if not Driver.Uncertain.Significant (Position_Off, Sigma)
                  and then not Driver.Uncertain.Significant (Turn_Off, Sqrt (Sigma ** 2 + Goal_Turn_Sigma ** 2))
                then
                   declare
                      Bow : constant Real :=
                        (if Clearance < Real'Last
-                        then Stray (M, A, Along (A_Of), Along (B_Of), Q, Next, Lever, Goal.Position_Only)
+                        then Stray (M, A, Along (A_Of), Along (B_Of), Q, Next, Lever, Goal.Position_Only, Goal.Free_About)
                         else 0.0);
                   begin
                      if Bow > Clearance and then Can_Cut (A_Of, B_Of, Depth) then
@@ -1148,13 +1929,20 @@ package body Driver.Robot.Motion is
    is
    begin
       Report := (Outcome => Reached, others => <>);
-      for W of P.Waypoints loop
+      for K in P.Waypoints.First_Index .. P.Waypoints.Last_Index loop
          declare
             C : Driver.Commands.Command;
          begin
-            Driver.Commands.Set_Target (C, P.Group, W);
+            Driver.Commands.Set_Target (C, P.Group, P.Waypoints (K));
             Step (M, C, Report, Stop);
          end;
+         --  Which waypoint of how many the path ended at, and how: the step's own account of its channels.
+         if Report.Outcome /= Reached and then not Report.Stopped then
+            Driver.Log.Line (Driver.Log.Robot, "motion: a path of" & Natural'Image (Natural (P.Waypoints.Length))
+                             & " waypoints ended at waypoint" & Natural'Image (K - P.Waypoints.First_Index + 1) & ", "
+                             & Report.Outcome'Image & " after" & Report.Beats'Image & " beats: "
+                             & To_String (Report.Detail));
+         end if;
          exit when Report.Outcome /= Reached or else Report.Stopped;
       end loop;
    end Follow;

@@ -1,0 +1,20 @@
+# body-driver drone rig, official-style observation: RGB + poses only (no depth, no intrinsics, no extrinsics)
+config_name: drone
+
+config:
+  sim: sim_config
+  scene: default
+  robot: drone
+  camera: camera_config
+
+observation:
+  collect_freq: 25
+  robot:
+    joint_states: true
+    world_ee_state: true
+  vision:
+    approximate_depth: false
+    depth: false
+    intrinsic_matrix: false
+    extrinsic_matrix: false
+    shape: true

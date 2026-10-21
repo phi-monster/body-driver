@@ -6,16 +6,23 @@
 --  keyframe's every pass, ninety-six on the box for two points each, so that
 --  the box aligned a keyframe more slowly than a laptop with ten.
 --
---  A call hands each index to an idle worker, or does it itself when none is
---  idle, and returns once every index has ended; a worker that is given an
---  index runs it and reports back idle. A piece of work that itself calls
---  Parallel_For hands its own indices on the same way, and runs itself what
---  no worker is free for: nothing ever waits for a worker, so nested calls
+--  A call takes on as many of the idle workers as it has indices beyond one,
+--  and each of them and the caller take its indices one after another until
+--  none is left; it returns once every index has ended, and a worker reports
+--  back idle when it finds none left. A call that handed each index to one
+--  worker, or did it itself when none was idle, waited on its slowest while
+--  the others idled (the step 2 bench's nine-joint humanoid s2_1, 10-21: the
+--  threads waited a third of their time in the order search). A piece of work
+--  that itself calls Parallel_For takes on the workers then idle the same way
+--  and does the rest itself: nothing ever waits for a worker, so nested calls
 --  cannot deadlock. The first exception any index raises is raised again by
 --  the call, once all its indices have ended, as Parallel_For promises.
 private package Driver.Workers is
 
    type Work_Access is access procedure (Index : Positive);
+
+   function Size return Positive;
+   --  How many indices a Run does at once: the workers and the caller.
 
    procedure Run (Work : not null Work_Access; First : Positive; Last : Natural);
    --  Work (I) for every I in First .. Last, each once, at once as far as the

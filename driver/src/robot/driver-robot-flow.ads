@@ -10,10 +10,10 @@
 --  biased by the linearization, so it is linear in small motions of the
 --  body, which is what lets a regression on the readings tell which group
 --  moves which part of the image (Driver.Robot.Lockin); motions far beyond
---  a cell give no consistent displacement and are rejected there. A change
---  of light without motion (a moving shadow's interior, a renderer
---  converging) explains little as a translation, unlike a plain brightness
---  difference.
+--  a cell give no consistent displacement and are rejected there. A gain
+--  and an offset of the light are fitted with the translation, so that a
+--  change of light without motion (an exposure step of the camera, a moving
+--  shadow's interior, a renderer converging) is not read as one.
 
 private package Driver.Robot.Flow is
 

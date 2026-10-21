@@ -20,6 +20,7 @@
 --  and nothing of where the arm stands in the world. Only Tip, Tip_Now and
 --  Grip_Centre take it into the world, through the arm's placement and unit.
 
+with Ada.Containers.Vectors;
 with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
@@ -31,6 +32,10 @@ package Driver.Robot.Hand is
    type Hand_Id is new Positive;
 
    type Hands is tagged limited private;
+
+   package Corner_Vectors is new Ada.Containers.Vectors (Positive, Vec3, Driver.Numerics.Arrays."=");
+   --  The corners of a lobe's tip face as its eye sees them (Touch, Fit's Faces; Tips.Sight_Of): unit directions of
+   --  the tool frame from the sight's origin.
 
    procedure Observe (H : in out Hands; M : Model; O : Observation; Sent : Driver.Commands.Command);
    --  Estimators only, one beat; Sent as in Driver.Robot.Observe.
@@ -190,6 +195,13 @@ package Driver.Robot.Hand is
    function Closer_Reading (H : Hands; Id : Hand_Id; At_Opening : Opening) return Real_Array;
    --  The closer group's readings at that opening, the ones Tip refers to.
 
+   function Fraction (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Estimate;
+   --  How far the closer is closed at the beat of O, 0 open and 1 closed on
+   --  nothing: its readings projected on the way from its open readings to
+   --  its readings closed on nothing, with the variance of that projection
+   --  from each channel's noise at rest. Unknown for a hand with no closer,
+   --  or when the beat has no reading of it.
+
    function Grip_Centre (H : Hands; M : Model; Id : Hand_Id; O : Observation) return Point_Estimate;
    --  The middle of the region the lobes close on, at the opening of O, in
    --  the world as Tip is.
@@ -202,6 +214,11 @@ package Driver.Robot.Hand is
 
    function Tip_Sight (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Ray_Estimate;
    --  The line of sight to that tip, in the tool frame: the tip lies on it.
+
+   function Tip_Footprint (H : Hands; Id : Hand_Id; Lobe : Positive; At_Opening : Opening) return Real;
+   --  The radius of the lobe's end where it touches, in the arm's own unit: its tip region's spread about the
+   --  tip as an angle (Sight.Spread) at the tip's distance from the eye, the footprint pressing aims with. Zero
+   --  while that distance is not fitted: the end is a point until it is measured.
 
    --  The hand's sizes (Driver.Robot.Hand.Shape): from the surface of each
    --  lobe its own eye sees, fixed by the two views of the closer's sweep
@@ -222,10 +239,13 @@ package Driver.Robot.Hand is
    --  its face meets what it closes on.
 
    function Grip_Depth (H : Hands; Id : Hand_Id) return Estimate;
-   --  How far back from the lobes' tips along the hand's axis their moving
-   --  parts reach: how far a thing may go in between them before it meets
-   --  them where they begin, from the middle of the tips at the open opening.
-   --  Known when every lobe is measured.
+   --  How far a thing may go in between the lobes before it meets the hand: from the middle of the tips at the open
+   --  opening toward the tool frame's origin (the hand's axis as the contact search takes it), as far as pictures an
+   --  eye off the hand took see past it (Set_Depth). Unknown until then.
+
+   procedure Set_Depth (H : in out Hands; Id : Hand_Id; Depth : Estimate; Why : String);
+   --  How far a thing may go into the hand, as the pictures an eye off it took see it (Driver.Robot.Hand.Hull), and
+   --  what ended the way in or why it is not measured; kept while the hand is measured again.
 
    function Grip_Axis (H : Hands; Id : Hand_Id) return Direction_Estimate;
    --  The way the lobes point, in the tool frame: from the middle of their
@@ -259,6 +279,7 @@ private
       Ray    : Ray_Estimate;
       Spread : Real := 0.0;   --  of the lobe's tip region from that pixel, per axis, as an angle (Tips.Sight_Of)
       Pitch  : Real := 0.0;   --  the angle a pixel spans there
+      Face   : Corner_Vectors.Vector;   --  the corners of the outline of the lobe's tip region (Lobes.Tip_Outline)
    end record;
 
    type Sight_Array is array (Opening) of Sight;

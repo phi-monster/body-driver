@@ -60,6 +60,9 @@ package Driver.Action.Snapshots.Tests is
    --  The plane z = 0 of Place, normal +z of Place.
 
    function Gripper (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Sigma : Real) return Hand_State;
+   function One_Jaw (Arm : Arm_Id; Hand : Hand_Id; Opening, Depth, Sigma : Real) return Hand_State;
+   --  A jaw the closer swings onto a part of the hand it does not move: the one lobe the body measures moving,
+   --  from Opening across to the hand's middle.
    --  Two lobes closing toward each other along the tool's x, their ends
    --  Opening apart when open and meeting when closed, Depth beyond the tool
    --  origin along the tool's z.

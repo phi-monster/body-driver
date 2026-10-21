@@ -36,6 +36,7 @@ with Ada.Command_Line;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Numerics;
 with Ada.Numerics.Float_Random;
 with Ada.Streams.Stream_IO;
@@ -50,6 +51,7 @@ with Driver.Json;
 with Driver.Msgpack;
 with Driver.Numerics;
 with Driver.Wire;
+with Fake_Camera;
 with Fake_Render;
 with Fake_World;
 
@@ -109,6 +111,23 @@ procedure Fake_Robot is
    type Real_Access is access Real_Array;
    Pixels  : array (1 .. 16) of Byte_Access;   --  one buffer per camera, the picture sent
    Scratch : array (1 .. 16) of Real_Access;   --  one per camera, the picture rendered
+   Cam_State : array (1 .. 16) of Fake_Camera.State;   --  one per camera: its exposure, MJPEG and hiccups
+   type Rigid_Array is array (Positive range <>) of Rigid;
+   type Rigid_Access is access Rigid_Array;
+   --  One per camera: every solid's pose in the world when the camera last rendered, then the camera's own (none
+   --  before it has rendered).
+   World_At : array (1 .. 16) of Rigid_Access := [others => null];
+   --  FAKE_RENDER_ALL set: every picture rendered anew, for timing the keeping against.
+   Render_All : Boolean := False;
+   Kept_Renders : Natural := 0;   --  the renders a still world spared since the last report
+   --  FAKE_CHECK_STILL set: a kept picture is rendered anyway and compared, the most a channel differed kept.
+   Check_Still  : Boolean := False;
+   Worst_Kept   : Real := 0.0;
+   Check_Buffer : Real_Access;
+   Renders      : Natural := 0;   --  and those made
+   Cam_Exposure, Cam_Mjpeg, Cam_Gaps : Boolean := True;
+   --  The person's words, the task the robot hands the brain.
+   Instruction : Unbounded_String := To_Unbounded_String ("Pick up the thing by 10 cm.");
 
    Link : Driver.Wire.Connection;
 
@@ -116,8 +135,8 @@ procedure Fake_Robot is
 
    function Option (Name : String; Default : String := "") return String;
    function Drawn (Real_Key : String) return String;
-   procedure Draw_Group (Real_Key : String; N : Natural);
-   function Scrambled_Values (Real_Key : String; X : Real_Array) return Real_Array;
+   procedure Draw_Group (Real_Key : String; N : Natural; Integers : Boolean);
+   function Scrambled_Values (Real_Key : String; X : Real_Array; Integers : Boolean) return Real_Array;
    function Unscrambled_Values (Real_Key : String; Y : Real_Array) return Real_Array;
    function Key_Order (Path : String; Keys : String_Vectors.Vector) return String_Vectors.Vector;
    procedure Write_Scramble_Map;
@@ -126,7 +145,8 @@ procedure Fake_Robot is
    procedure Write_Box_Geometry (Store : String; Key : String; S : Solid);
    procedure Write_Geometry_Line;
    procedure Write_Truth_Line;
-   procedure Put_Group (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean);
+   procedure Put_Group
+     (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean; Integers : Boolean);
    procedure Put_Keys (B : in out Driver.Bytes.Buffer; Path : String; Keys : String_Vectors.Vector;
                        Put_Value : not null access procedure (Real_Key : String));
    procedure Encode_Observation (B : in out Driver.Bytes.Buffer);
@@ -179,7 +199,9 @@ procedure Fake_Robot is
       return Names (Real_Key);
    end Drawn;
 
-   procedure Draw_Group (Real_Key : String; N : Natural) is
+   --  Integers says the group's values are whole numbers (a servo bus's ticks) and must stay whole once
+   --  scrambled: the scale is then a whole power of two and the zero a whole number.
+   procedure Draw_Group (Real_Key : String; N : Natural; Integers : Boolean) is
       D : Group_Draw (N);
    begin
       if Draws.Contains (Real_Key) then
@@ -200,7 +222,11 @@ procedure Fake_Robot is
          end loop;
       end if;
       for I in 1 .. N loop
-         if Scrambled then
+         if Scrambled and then Integers then
+            D.Sign (I) := (if Random.Random (Scramble_Rng) < 0.5 then -1.0 else 1.0);
+            D.Scale (I) := 2.0 ** (Integer (Float'Floor (3.0 * Random.Random (Scramble_Rng))) mod 3);
+            D.Zero (I) := Real'Floor (Real (Random.Random (Scramble_Rng)) * 4096.0 - 2048.0);
+         elsif Scrambled then
             D.Sign (I) := (if Random.Random (Scramble_Rng) < 0.5 then -1.0 else 1.0);
             D.Scale (I) := 2.0 ** (Integer (Float'Floor (7.0 * Random.Random (Scramble_Rng))) mod 7 - 3);
             D.Zero (I) := Real (Random.Random (Scramble_Rng)) * 2.0 * Ada.Numerics.Pi - Ada.Numerics.Pi;
@@ -213,10 +239,10 @@ procedure Fake_Robot is
       Draws.Insert (Real_Key, D);
    end Draw_Group;
 
-   function Scrambled_Values (Real_Key : String; X : Real_Array) return Real_Array is
+   function Scrambled_Values (Real_Key : String; X : Real_Array; Integers : Boolean) return Real_Array is
       Y : Real_Array (1 .. X'Length);
    begin
-      Draw_Group (Real_Key, X'Length);
+      Draw_Group (Real_Key, X'Length, Integers);
       declare
          D : constant Group_Draw := Draws (Real_Key);
       begin
@@ -489,15 +515,23 @@ procedure Fake_Robot is
    ---------------------------------------------------------------------------
    --  The observation, scrambled, as msgpack
 
-   procedure Put_Group (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean) is
-      Y : constant Real_Array := Scrambled_Values (Real_Key, Values);
+   --  Integers: the values go as msgpack integers, as a servo bus's bridge sends its ticks (an integer reading
+   --  resolves to one tick in the driver, a float to its last bit).
+   procedure Put_Group
+     (B : in out Driver.Bytes.Buffer; Real_Key : String; Values : Real_Array; Scalar : Boolean; Integers : Boolean)
+   is
+      Y : constant Real_Array := Scrambled_Values (Real_Key, Values, Integers);
    begin
       if Scalar and then Y'Length = 1 then
          Driver.Msgpack.Put_Float (B, Y (Y'First));
       else
          Driver.Msgpack.Put_Array_Header (B, Y'Length);
          for V of Y loop
-            Driver.Msgpack.Put_Float (B, V);
+            if Integers then
+               Driver.Msgpack.Put_Integer (B, Long_Long_Integer (Real'Rounding (V)));
+            else
+               Driver.Msgpack.Put_Float (B, V);
+            end if;
          end loop;
       end if;
    end Put_Group;
@@ -543,7 +577,7 @@ procedure Fake_Robot is
             if Part = "color" then
                Picture (C);
             else
-               Put_Group (B, "shape", [Real (W.Cameras (C).Height), Real (W.Cameras (C).Width), 3.0], False);
+               Put_Group (B, "shape", [Real (W.Cameras (C).Height), Real (W.Cameras (C).Width), 3.0], False, False);
             end if;
          end Part_Value;
       begin
@@ -562,7 +596,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Readings (W, G), False);
+               Put_Group (B, Name, Readings (W, G), False, W.Groups (G).Integers);
             end if;
          end loop;
       end Group_Value;
@@ -572,7 +606,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Echo (W, G), False);
+               Put_Group (B, Name, Echo (W, G), False, W.Groups (G).Integers);
             end if;
          end loop;
       end Echo_Value;
@@ -582,7 +616,7 @@ procedure Fake_Robot is
       begin
          for G in W.Groups.First_Index .. W.Groups.Last_Index loop
             if To_String (W.Groups (G).Name) = Name then
-               Put_Group (B, Name, Readings (W, G), W.Groups (G).Scalar);
+               Put_Group (B, Name, Readings (W, G), W.Groups (G).Scalar, False);
             end if;
          end loop;
       end Const_Value;
@@ -592,13 +626,16 @@ procedure Fake_Robot is
          Keys : String_Vectors.Vector;
       begin
          if Key = "vision" then
-            for Cm of W.Cameras loop
-               Keys.Append (To_String (Cm.Name));
+            --  A camera in a hiccup gives no frame this beat: the eye is a gap at its place (body protocol).
+            for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
+               if Fake_Camera.Gives (Cam_State (C)) then
+                  Keys.Append (To_String (W.Cameras (C).Name));
+               end if;
             end loop;
             Put_Keys (B, "vision", Keys, Cam_Value'Access);
          elsif Key = "state" or else Key = "action" then
             for G of W.Groups loop
-               if not G.Joints.Is_Empty and then (Key = "state" or else G.Commandable) then
+               if not G.Joints.Is_Empty and then not G.Silent and then (Key = "state" or else G.Commandable) then
                   Keys.Append (To_String (G.Name));
                end if;
             end loop;
@@ -611,7 +648,7 @@ procedure Fake_Robot is
             end loop;
             Put_Keys (B, "additional_info", Keys, Const_Value'Access);
          elsif Key = "instruction" then
-            Driver.Msgpack.Put_String (B, "Pick up the thing by 10 cm.");
+            Driver.Msgpack.Put_String (B, To_String (Instruction));
          else
             Driver.Msgpack.Put_String (B, "v1.0");
          end if;
@@ -735,6 +772,30 @@ procedure Fake_Robot is
       return (S - 2.0) * 1.7320508075688772;
    end Noise_Gauss;
 
+   --  Whether camera C's last render still shows the world: every solid, and the camera, stands in the world bit for
+   --  bit where it stood then. Nothing else the renderer reads changes (its light stands in the world, its textures
+   --  are functions of the place), so the render it would make is the one it made, to the last bit; the sensor's
+   --  noise is drawn afresh all the same (Expose). Short of that no picture is kept: the renderer samples each pixel
+   --  at points (Supersample), and a move of a micrometre may carry an edge across one and change the pixel by a
+   --  ninth of its contrast; its highlights (Blinn-Phong to the 40th) turn four times as fast as a face does. At rest
+   --  w18 (servo seed 11 of the fake robot, 10-19) stood bit for bit at 20296 of its 27288 beats, q15 (seed 7) at 2239
+   --  of 11557 (its servos still settling by under a nanometre a beat at 3757 more); rendered anew every beat, five
+   --  fakes at once took 231 to 236 ms a beat to render against 40 to 44 for the driver (round 74, 10-19).
+   function Still_Shown (C : Positive) return Boolean is
+      Cam : Camera renames W.Cameras (C);
+      Was : constant Rigid_Access := World_At (C);
+   begin
+      if Render_All or else Cam.Fresh or else Was = null or else Was'Length /= Natural (W.Solids.Length) + 1 then
+         return False;
+      end if;
+      for I in 1 .. Natural (W.Solids.Length) loop
+         if Was (I) /= W.Solids (I).Pose then
+            return False;
+         end if;
+      end loop;
+      return Was (Was'Last) = Cam.Pose;
+   end Still_Shown;
+
    procedure Take_Pictures is
    begin
       for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
@@ -742,17 +803,39 @@ procedure Fake_Robot is
             Cam   : Camera renames W.Cameras (C);
             Share : constant Real := (if W.Quirk.Settle and then not Cam.Fresh then W.Quirk.Settle_Share else 1.0);
          begin
-            Fake_Render.Render (W, Cam, Scratch (C).all);
+            Fake_Camera.Next_Beat (Cam_State (C));
+            if Still_Shown (C) then
+               Kept_Renders := Kept_Renders + 1;
+               if Check_Still then
+                  if Check_Buffer = null or else Check_Buffer'Length /= Scratch (C)'Length then
+                     Check_Buffer := new Real_Array (Scratch (C)'Range);
+                  end if;
+                  Fake_Render.Render (W, Cam, Check_Buffer.all);
+                  for I in Check_Buffer'Range loop
+                     if abs (Check_Buffer (I) - Scratch (C) (I)) > Worst_Kept then
+                        Put_Line ("fake_robot: CHECK camera" & C'Image & " beat" & W.Beat'Image & " value" & I'Image
+                                  & " kept" & Img (Scratch (C) (I)) & " fresh" & Img (Check_Buffer (I)));
+                     end if;
+                     Worst_Kept := Real'Max (Worst_Kept, abs (Check_Buffer (I) - Scratch (C) (I)));
+                  end loop;
+               end if;
+            else
+               Fake_Render.Render (W, Cam, Scratch (C).all);
+               Renders := Renders + 1;
+               if World_At (C) = null or else World_At (C)'Length /= Natural (W.Solids.Length) + 1 then
+                  World_At (C) := new Rigid_Array (1 .. Natural (W.Solids.Length) + 1);
+               end if;
+               for I in 1 .. Natural (W.Solids.Length) loop
+                  World_At (C) (I) := W.Solids (I).Pose;
+               end loop;
+               World_At (C) (World_At (C)'Last) := Cam.Pose;
+            end if;
             for I in Scratch (C)'Range loop
                Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
-               declare
-                  Noise : constant Real := (if W.Quirk.Image_Noise > 0.0 then W.Quirk.Image_Noise * Noise_Gauss else 0.0);
-                  Seen  : constant Real := Cam.Shown (I) + Noise;
-               begin
-                  Pixels (C) (Driver.Bytes.Offset (I)) :=
-                    Driver.Bytes.Byte (Integer (Real'Floor (Real'Max (0.0, Real'Min (255.0, Seen)) + 0.5)));
-               end;
             end loop;
+            --  What the camera makes of it: its exposure, the sensor's noise, MJPEG (Fake_Camera).
+            Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
+                                Noise_Gauss'Access, Pixels (C).all);
             Cam.Fresh := False;
          end;
       end loop;
@@ -832,6 +915,8 @@ procedure Fake_Robot is
          W.Quirk.Delay_Beats := Natural'Value (Value);
       elsif Name = "droop" then
          W.Quirk.Droop := On;
+      elsif Name = "dead" then
+         W.Quirk.Dead := On;
       elsif Name = "creep" then
          W.Quirk.Creep := On;
       elsif Name = "give" then
@@ -842,6 +927,14 @@ procedure Fake_Robot is
          W.Quirk.Bounce := On;
       elsif Name = "reading_noise" then
          W.Quirk.Reading_Noise := Real'Value (Value);
+      elsif Name = "play" then
+         W.Quirk.Play := On;
+      elsif Name = "exposure" then
+         Cam_Exposure := On;
+      elsif Name = "mjpeg" then
+         Cam_Mjpeg := On;
+      elsif Name = "eye_gaps" then
+         Cam_Gaps := On;
       else
          Put_Line ("fake_robot: no quirk called " & Name);
          raise Program_Error;
@@ -854,7 +947,7 @@ procedure Fake_Robot is
 begin
    if Option ("--connect") = "" or else Option ("--out") = "" then
       Put_Line ("usage: fake_robot --connect HOST:PORT --seed N --out DIR [--width W --height H] [--beats N]"
-                & " [--stop FILE] [--scramble 0|1] [--dump N] [--quirk NAME=VALUE ...]");
+                & " [--stop FILE] [--supersample N] [--scramble 0|1] [--dump N] [--quirk NAME=VALUE ...]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -870,12 +963,13 @@ begin
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
    Rate := Real'Value (Option ("--rate", "10.0"));
+   Fake_Render.Supersample := Positive'Value (Option ("--supersample", "1"));
    declare
       Hands : constant String := Option ("--hands");
       Comma : constant Natural := Ada.Strings.Fixed.Index (Hands, ",");
       function Kind_Of (Name : String) return Hand_Kind is
         (if Name = "pair" then Pair elsif Name = "hook" then Hook elsif Name = "thumb" then Pair_And_Thumb
-         elsif Name = "fingers" then Fingers elsif Name = "" or else Name = "drawn" then Drawn
+         elsif Name = "fingers" then Fingers elsif Name = "jaw" then Jaw elsif Name = "" or else Name = "drawn" then Drawn
          else raise Program_Error with "no hand called " & Name);
    begin
       if Comma > 0 then
@@ -886,6 +980,15 @@ begin
       Shape.Eyeless := Natural'Value (Option ("--eyeless", "0"));
       Shape.Eye_Up := Natural'Value (Option ("--eye-up", "0"));
       Shape.Plain_Table := Option ("--table", "grain") = "plain";
+      Shape.White_Room := Option ("--room", "drawn") = "white";
+      Shape.Dead_Arm := Natural'Value (Option ("--dead-arm", "0"));
+      Shape.Ticks := Natural'Value (Option ("--ticks", "0"));
+      Shape.Servo := Option ("--servo", "no") = "yes";
+      Shape.Class := (if Option ("--class") = "humanoid" then Humanoid elsif Option ("--class") = "base" then Base_And_Arm
+                      elsif Option ("--class") = "drone" then Drone else Table_Arms);
+      if Option ("--instruction") /= "" then
+         Instruction := To_Unbounded_String (Option ("--instruction"));
+      end if;
    end;
    for I in 1 .. Ada.Command_Line.Argument_Count - 1 loop
       if Ada.Command_Line.Argument (I) = "--quirk" then
@@ -896,10 +999,14 @@ begin
    Build (W, Seed, Width, Height, Shape);
    Scramble_Seed := Seed * 7919 + 17;
    Noise_State := Interfaces.Unsigned_64 (Seed) * 6364136223846793005 + 1442695040888963407;
+   Check_Still := Ada.Environment_Variables.Exists ("FAKE_CHECK_STILL");
+   Render_All := Ada.Environment_Variables.Exists ("FAKE_RENDER_ALL");
    Random.Reset (Scramble_Rng, Integer (Scramble_Seed));
    for C in W.Cameras.First_Index .. W.Cameras.Last_Index loop
       Pixels (C) := new Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset (3 * Width * Height));
       Scratch (C) := new Real_Array (1 .. 3 * Width * Height);
+      Cam_State (C) := Fake_Camera.Start (Seed, C, Cam_Exposure, Cam_Mjpeg, Cam_Gaps);
+      Put_Line ("fake_robot: " & To_String (W.Cameras (C).Name) & ": " & Fake_Camera.Describe (Cam_State (C)));
    end loop;
    declare
       F : File_Type;
@@ -967,7 +1074,10 @@ begin
             Put_Line ("fake_robot: beat" & W.Beat'Image & ", a beat takes render "
                       & Img (Real (Render_Time) * 1000.0 / Real (W.Beat)) & " ms, body "
                       & Img (Real (Step_Time) * 1000.0 / Real (W.Beat)) & " ms, driver "
-                      & Img (Real (Wire_Time) * 1000.0 / Real (W.Beat)) & " ms");
+                      & Img (Real (Wire_Time) * 1000.0 / Real (W.Beat)) & " ms; pictures rendered" & Renders'Image
+                      & ", kept from a still world" & Kept_Renders'Image
+                      & (if Check_Still then ", rendered anyway, the most a kept one differed" & Img (Worst_Kept) & " levels"
+                         else ""));
          end if;
          exit when W.Beat >= Beat_Limit;
          exit when Length (Stop_File) > 0 and then Ada.Directories.Exists (To_String (Stop_File));

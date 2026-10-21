@@ -1,12 +1,19 @@
-with Ada.Containers.Vectors;
+with Ada.Containers.Doubly_Linked_Lists;
 with Driver.Beats;
+with Driver.Log;
+with Driver.Memory;
 with Driver.Bytes;
 with Driver.Recording;
 with Driver.Services;
 
 package body Driver.Apart is
 
-   package Message_Vectors is new Ada.Containers.Vectors (Positive, Message);
+   --  The messages kept back, first in first out: each is taken from the front of a list. Taken from the front of a
+   --  vector, every message taken moved all those behind it, and catching up after a long estimate cost the square
+   --  of the backlog: q9 (servo seed 7 of the fake robot, 10-19), an estimate kept 3 400 beats back, and of 2126
+   --  samples of the estimator's task 1875 were in that move, while one arm's sweep waited for the estimates and
+   --  the other's went on without them.
+   package Message_Lists is new Ada.Containers.Doubly_Linked_Lists (Message);
 
    procedure Note (Kind : Driver.Recording.Record_Kind) is
    begin
@@ -32,6 +39,8 @@ package body Driver.Apart is
       procedure Go_Apart;
       procedure Go_Apart_With (M : Message);
       procedure Arrive (Held : out Boolean; Back : out Boolean);
+      procedure Episode (Kept_Back, Longest_Queue : out Natural);
+      --  The messages kept back since the models went apart and the most that waited at once; counted again.
       procedure Append (M : Message);
       entry Settle;
       entry Next_Work (W : out Work_Kind; M : out Message);
@@ -39,8 +48,9 @@ package body Driver.Apart is
       procedure Due_Again (M : Message);
       function Apart return Boolean;
    private
+      Kept, Most : Natural := 0;   --  of the apart episode under way
       Phase    : Phase_Kind := Home;
-      Queue    : Message_Vectors.Vector;
+      Queue    : Message_Lists.List;
       Has_Rest : Boolean := False;   --  the rest of Rest_Msg is still to be given
       Rest_Msg : Message;
       Mark     : Natural := 0;       --  messages kept back when the last answer went
@@ -75,7 +85,17 @@ package body Driver.Apart is
       procedure Append (M : Message) is
       begin
          Queue.Append (M);
+         Kept := Kept + 1;
+         Most := Natural'Max (Most, Natural (Queue.Length));
       end Append;
+
+      procedure Episode (Kept_Back, Longest_Queue : out Natural) is
+      begin
+         Kept_Back := Kept;
+         Longest_Queue := Most;
+         Kept := 0;
+         Most := 0;
+      end Episode;
 
       --  An answer waits until fewer messages are kept back than at the last
       --  answer, or until the estimator has given the models everything and
@@ -178,14 +198,25 @@ package body Driver.Apart is
    begin
       Backlog.Arrive (Held, Back);
       if Back then
+         declare
+            Kept_Back, Longest : Natural;
+         begin
+            Backlog.Episode (Kept_Back, Longest);
+            Driver.Log.Line (Driver.Log.Core, "apart: the models are back after" & Kept_Back'Image
+                             & " messages kept back without their pictures, at most" & Longest'Image
+                             & " waiting at once; resident" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
+                             & " MB");
+         end;
          Note (Driver.Recording.Estimates_Back);
          Driver.Beats.Estimates_Adopted;
       end if;
    end Arrive;
 
    procedure Hold_Back (M : Message) is
+      Kept : Message := M;
    begin
-      Backlog.Append (M);
+      Lighten (Kept);
+      Backlog.Append (Kept);
       Backlog.Settle;
    end Hold_Back;
 
@@ -216,7 +247,7 @@ package body Driver.Apart is
    --  Replay: one task, so no protection.
 
    Replaying_Apart : Boolean := False;
-   Replay_Queue    : Message_Vectors.Vector;
+   Replay_Queue    : Message_Lists.List;
    Replay_Has_Rest : Boolean := False;
    Replay_Rest_Msg : Message;
 
@@ -259,6 +290,9 @@ package body Driver.Apart is
 
    procedure Replay_Apart is
    begin
+      if Due then
+         Compute;
+      end if;
       Replaying_Apart := True;
    end Replay_Apart;
 

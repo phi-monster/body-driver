@@ -45,18 +45,35 @@ private package Driver.Robot.Channels is
    function Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  Unknown (Real'Last) until measured.
 
+   function Drift (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The channel's steady change a beat at rest, in reading units: the median change of the rest its noise is
+   --  measured on, where it stands out of zero by its standard error, else 0 (and 0 until measured). A reading that
+   --  creeps at one rate for good (a simulator's readings, 1e-12 radians a beat; the fake robot's drift) keeps the
+   --  creep in its noise beat to beat, and over many beats leaves where it was by many times that noise, all of it
+   --  the creep's: whatever compares readings beats apart takes the creep of the beats between out.
+
    function Noise_Measured (M : Model; G : Group_Id) return Boolean;
 
    function Noise_Freedom (M : Model; G : Group_Id; Channel : Positive) return Natural;
-   --  The degrees of freedom the channel's noise rests on (0: known or exact).
+   --  The degrees of freedom the channel's noise rests on (0: known or exact): how far a rest that a doubling of
+   --  its beats repeats is trusted (Boot). A test of a change takes the noise as measured (Significant_Change).
    --  Every channel of the group has its noise measured.
 
    function Resolution (M : Model; G : Group_Id; Beat : Natural) return Real
      with Pre => Has_Reading (M, G, Beat);
-   --  The least change of the group's readings that float arithmetic on them
-   --  can tell, whatever their noise (none, when they repeat exactly): the
-   --  float's resolution of the group's largest reading at Beat, or of one
-   --  reading unit when every reading is zero.
+   --  The least change of the group's readings their wire can carry, whatever
+   --  their noise (none, when they repeat exactly): one unit when they come as
+   --  integers; for floats, the unit in the last place of the group's largest
+   --  reading at Beat (of one reading unit when every reading is zero) in the
+   --  format they came in (Driver.Observations.Precision_Of). A push below it
+   --  cannot show in the readings.
+
+   function Step_Unit (M : Model; G : Group_Id; Beat : Natural; Channel : Positive) return Real
+     with Pre => Has_Reading (M, G, Beat);
+   --  One step of the channel's readings up to Beat: for an integer wire the least change they have shown (a
+   --  joint whose ticks the body reports as four units each steps by four), the wire's unit where they never
+   --  changed; for floats the wire's resolution at Beat (Resolution). A change of one step at rest is the
+   --  reading's rounding, a joint between two of its values flipping to the other and back, not jitter.
 
    function Visible (M : Model; G : Group_Id; D : Real_Array) return Boolean
      with Pre => D'First = 1 and then D'Length = Group_Size (M, G);

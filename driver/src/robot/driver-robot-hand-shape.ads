@@ -79,15 +79,32 @@ package Driver.Robot.Hand.Shape is
       Sightings     : Sighting_Array;
       Open_Anchor   : Positive;
       Closed_Anchor : Positive;
-      Bordered      : Boolean) return Lobe_Shape
+      Bordered      : Boolean;
+      Closed_Is_End : Boolean := True;
+      Anchored      : Boolean := True;
+      Pixels        : Driver.Images.Mask := Driver.Images.Create (0, 0)) return Lobe_Shape
      with Pre => Open_Anchor in Sightings'Range and then Closed_Anchor in Sightings'Range;
+   --  Pixels: the lobe's pixels at the open end (the mask it was found in), followed or not; none when not given. Its
+   --  sizes reach over those that show it with no depth (End_Of).
    --  Eye is the eye's centre in the tool frame. The anchors are the
    --  sightings of the lobe's tip at the open end and at the closed end, the
    --  points the presses measure. Bordered: the lobe touches the picture's
-   --  border at its open end, so where it begins is not seen.
+   --  border at its open end, so where it begins is not seen. Closed_Is_End:
+   --  the second anchor is the tip at the closed end; when it is not, the lobe
+   --  was followed only part of its travel (its tip not seen through the rest),
+   --  the second anchor is its tip where it was last followed, and only the open
+   --  end's press scales it (Measure).
 
    function Unfitted (Why : String) return Lobe_Shape;
    --  A lobe whose shape cannot be fitted, and why.
+
+   function Not_Followed (Why : String) return Lobe_Shape;
+   --  A lobe whose shape cannot be fitted because its pixels were not followed through the views of the closer's
+   --  sweep, and why: what the eye saw behind the lobe may have hidden it (Driver.Robot.Hand.Measure sweeps the
+   --  closer again elsewhere).
+
+   function Unfollowed (S : Lobe_Shape) return Boolean;
+   --  The lobe's pixels were not followed through the sweep's views (Not_Followed).
 
    function Fitted (S : Lobe_Shape) return Boolean;
    function Why (S : Lobe_Shape) return String;
@@ -113,7 +130,6 @@ package Driver.Robot.Hand.Shape is
 
    type Hand_Size (Lobes : Natural) is record
       Sizes : Lobe_Size_Array (1 .. Lobes);
-      Depth : Estimate;
       Axis  : Direction_Estimate;          --  tool frame: from the lobes' middle toward their tips
       Why   : Ada.Strings.Unbounded.Unbounded_String;   --  what is not measured and why, for the log
    end record;
@@ -122,8 +138,28 @@ package Driver.Robot.Hand.Shape is
      with Pre => Tips'First (1) = Shapes'First and then Tips'Last (1) = Shapes'Last;
    --  The hand's sizes from its lobes' shapes and their tips at both
    --  openings (tool frame, from the presses). A lobe is measured when its
-   --  shape is fitted and both its tips are known; the depth and the axis,
-   --  when every lobe is.
+   --  shape is fitted and both its tips are known (the open one alone for a
+   --  lobe followed part of its travel: Fit's Closed_Is_End); the axis, when every
+   --  lobe is. How far a thing goes into the hand is not measured here: the pictures an eye off the hand takes of it
+   --  measure it (Driver.Robot.Hand.Hull).
+
+   --  The rigid motion of what a set of sightings sees between two pictures of one eye, by Fit's starts and fit
+   --  with no tip to anchor: Turn its rotation vector (axis times angle, the eye's frame) with its covariance in
+   --  radians squared, Shift the unit direction of its shift. For an eye carried by a joint that alone turned
+   --  between the pictures, the turn's axis is the joint's axis in the eye's frame.
+   type Two_View_Motion is record
+      Fitted   : Boolean := False;
+      Why      : Ada.Strings.Unbounded.Unbounded_String;
+      Turn     : Vec3 := [0.0, 0.0, 0.0];
+      Turn_Cov : Mat3 := [others => [others => 0.0]];
+      Shift    : Vec3 := [0.0, 0.0, 0.0];
+      Shift_Sd : Real := Real'Last;   --  radians: how far its direction may turn, at one standard deviation
+      Kept     : Natural := 0;
+      Scatter  : Real := 0.0;
+   end record;
+
+   function Motion_Between (Sightings : Sighting_Array) return Two_View_Motion
+     with Pre => Sightings'Length > 0;
 
 private
 
@@ -143,6 +179,7 @@ private
    type Lobe_Shape is record
       Fitted        : Boolean := False;
       Why           : Ada.Strings.Unbounded.Unbounded_String;
+      Unfollowed    : Boolean := False;
       Eye           : Vec3 := Zero3;
       Sightings     : Sighting_Holders.Holder;
       Points        : Point_Holders.Holder;
@@ -158,6 +195,8 @@ private
       Open_Anchor   : Positive := 1;
       Closed_Anchor : Positive := 1;
       Bordered      : Boolean := False;
+      Closed_Is_End : Boolean := True;
+      Pixels        : Driver.Images.Mask;   --  the lobe's pixels at the open end (Fit's Pixels)
    end record;
 
 end Driver.Robot.Hand.Shape;

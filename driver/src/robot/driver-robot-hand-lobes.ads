@@ -93,11 +93,35 @@ package Driver.Robot.Hand.Lobes is
       Tip_Move_There      : Natural := 0;
       Bordered_Here       : Boolean := False;      --  some pixel of it lies on the image's border
       Bordered_There      : Boolean := False;
+      Way_U, Way_V        : Real := 0.0;           --  the way the closer moves the picture over its pixels, from the
+      Way_Known           : Boolean := False;      --  first view's reading towards the other's (From_Change's Motion)
    end record;
    --  The moves are the evidence for the lobe's shape (Driver.Robot.Hand.Shape):
    --  a pixel of the lobe and the same point of it in the other view.
 
    package Lobe_Vectors is new Ada.Containers.Vectors (Positive, Lobe);
+
+   procedure Moved_Lobe
+     (Before   : Mask;
+      Changed  : Mask;
+      Anchored : Driver.Pixels.View;
+      Now      : Driver.Pixels.View;
+      Region   : out Mask;
+      Centre   : out Pixel;
+      Tip      : out Pixel;
+      Known    : out Boolean);
+   --  A lobe a small move from where it was (Before, in the view Anchored) in the view Now, whose pixels that
+   --  changed from Anchored are Changed. A pixel the lobe left or came to changes by about the lobe's contrast
+   --  with what lies behind it; one inside it, whose shading moved as the lobe turned, by a few levels. The pixels
+   --  it left or came to are the changed ones whose mean moved by more than half the contrast between the lobe
+   --  and what lies just outside it in Anchored (the medians of its pixels and of those touching it from
+   --  outside), so its pixels in Now are Before's less those and those of them it did not hold (their exclusive
+   --  or), of which the part that holds most of Before's; its tip as a stop's is, from the picture's border.
+   --  Placed between two views it barely moved between, a lobe is two crescents, neither reaching the border its
+   --  root holds, and has no tip (a15 on 10-16: none at the 19 stops nearest the open end, the anchored one). And
+   --  every changed pixel taken for one it left or came to, the kiwi-like fake's jaw, its shading moved by a few
+   --  levels, was 'changed' through and through, and the exclusive or left stripes of it, their tips anywhere
+   --  (a16 on 10-16: the tip of the stops at 7.85 to 8.25 now at the jaw's top, now 90 pixels below it).
 
    function Tip_Cap (Lobe_Mask : Mask; Centre, Tip : Pixel) return Mask;
    --  A lobe's tip region: its pixels within one mean width of the tip, along
@@ -106,9 +130,27 @@ package Driver.Robot.Hand.Lobes is
    --  touches is somewhere in the region, not on the line through the tip
    --  pixel. Empty for a lobe whose tip is its centre.
 
+   function Tip_Track (Lobe_Mask : Mask; Centre, Tip : Pixel) return Pixel;
+   --  Where the lobe's tip region is (Tip_Cap): its pixels' mean; the tip pixel itself when the region is empty. The
+   --  tip pixel is the lobe's farthest from its root, and of a lobe whose end is a flat edge across its length either
+   --  corner of it is: from one view to the next the tip pixel crossed the edge, 24 pixels on the kiwi-like fake's jaw
+   --  (a15 on 10-16, stops at 8.68 to 8.69: 242.5 and 218.5 across in turn), and the steps between views measured
+   --  by it were jumps the closer's motion did not make. The region's mean moves as the lobe does.
+
+   package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Pixel, Driver.Images."=");
+
+   function Tip_Outline (Cap : Mask) return Pixel_Vectors.Vector;
+   --  The corners of a tip region's outline, its convex hull's, in order around it (pixel centres); the region's
+   --  pixels themselves when fewer than three columns' ends make a hull. The tip's face, as the eye sees it.
+
    function Tip_Spread (Cap : Mask; Tip : Pixel) return Real;
    --  How far the pixels of a tip region lie from the tip pixel, per axis, in
    --  pixels (root mean square). Zero for an empty region.
+
+   procedure Part_Of (Region : Mask; Seed : Pixel; Part : out Mask; Centre, Tip : out Pixel; Known : out Boolean);
+   --  The part of Region that holds the pixel Seed, its pixels joined edge or corner to the next, with its centre
+   --  (its pixels' mean) and its tip as a lobe's: the pixel of it farthest within it from the picture's border
+   --  (shortest paths through it, steps of 1 and sqrt 2). Known is False when Seed is not in Region.
 
    function Find
      (Forward  : Correspondence_Array;   --  first view to the other
@@ -143,8 +185,10 @@ package Driver.Robot.Hand.Lobes is
       Parts_Here     : Natural := 0;   --  parts of the pixels given to each end that are attached and larger than the doubt
       Parts_There    : Natural := 0;
       Turned         : Boolean := False;  --  the robot's look gave each end the other's pixels, and the closer's motion turned them
+      Joined         : Natural := 0;      --  lobes joined into others the closer moves the same way (From_Change)
       With_Motion    : Natural := 0;      --  the lobes' pixels, as first given, whose way from end to end goes with the closer's motion
       Against_Motion : Natural := 0;      --  and against it (neither, without a motion to tell)
+      Still          : Mask;              --  the robot's own pixels that did not change between the ends (From_Change)
    end record;
 
    function From_Change
@@ -200,6 +244,20 @@ package Driver.Robot.Hand.Lobes is
    --  keyboard: the closed fingers' pixels went to the open end and the open
    --  ones' to the closed, the hand took its open reading for its closed one,
    --  and its tips were 31 to 104 mm from the fingers').
+   --
+   --  Still, last: the robot's own pixels that did not change between the
+   --  ends, what a single lobe closes against (Direction). A pixel that did
+   --  not change is the robot's when the poses call it so as they call a
+   --  seed (it varies over them less than the cut) and its brightness at the
+   --  anchored end is the robot's where it changed rather than the world's
+   --  there, by more than one test of Z tells apart (twice the log of the
+   --  ratio of the two histograms' shares above Z squared; each histogram
+   --  begins with one pixel a bin, as Tell_Ends' do): a flat world varies
+   --  as little as the robot over poses that hardly moved the eye (the
+   --  kiwi's white table, 10-15), and is told by its brightness. Of those,
+   --  the parts larger than the doubt: a smaller part could be made of
+   --  nothing but pixels given the wrong kind. When the closer's motion
+   --  turned the ends, the kinds' brightness are each other's too.
 
    type Places is array (Positive range <>) of Natural;
    type Flags is array (Positive range <>) of Boolean;
@@ -316,18 +374,28 @@ package Driver.Robot.Hand.Lobes is
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Estimate;
    --  How far apart the lobes are in the other view less how far apart they
-   --  are in the first, in pixels, summed over their pairs; with a single
-   --  lobe, how far it is from the robot's still pixels it can close against.
+   --  are in the first, in pixels, summed over their pairs, and to it, for
+   --  each lobe, how far ahead of its leading side the robot's still pixels it
+   --  closes against lie in the other view less in the first, each end
+   --  leading the way it came there from the other (a gap that never closes
+   --  is the picture's diagonal; a lobe whose lead meets them at neither end
+   --  adds nothing).
    --  Its sigma is that of the lobes' centres, from the matcher's noise and
    --  the pixel grid. Unknown when there is nothing to compare.
 
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask; Noise : Matcher_Noise) return Closing;
-   --  Which view has the lobes closer to each other; with a single lobe,
-   --  closer to the robot's still pixels it can close against: the sign of
-   --  Closing_Change when it is significant.
+   --  Which view has the lobes closer to each other and their leading sides
+   --  nearer the robot's still pixels: the sign of Closing_Change when it is
+   --  significant.
 
    function Closing_Change (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Estimate;
    function Direction (Lobes : Lobe_Vectors.Vector; Attached : Mask) return Closing;
+
+   procedure Lead_Gaps (L : Lobe; Attached : Mask; At_Here, At_There, Never : out Real);
+   --  How far a lobe's lead goes at each end before it meets one of the robot's still pixels (Attached): over the
+   --  pixels of the end that lead the way the lobe arrived there from the other end, the median of how many pixels lie
+   --  between each and a still pixel straight ahead, Never (the picture's diagonal) for one with none ahead, and Never
+   --  when none leads or the lobe did not move. What Closing_Change compares of each lobe.
    --  The same for lobes of From_Change, whose pixels' places are known to
    --  the grid alone (a uniform square of side one) and not to a matcher.
 

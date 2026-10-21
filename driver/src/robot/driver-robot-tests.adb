@@ -7,16 +7,17 @@ with Driver.Commands;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Images;
-with Driver.Instrument;
+with Driver.Parallel_For;
 with Driver.Observations;
 with Driver.Stats;
 with Driver.Beats;
+with Driver.Alignment;
 with Driver.Log;
 with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
 with Driver.Robot.Kinematics.Errors.Tests;
-with Driver.Robot.Kinematics.Fixed.Tests;
+with Driver.Robot.Surfaces.Tests;
 with Driver.Recording;
 with Ada.Text_IO;
 with GNAT.OS_Lib;
@@ -25,6 +26,7 @@ with Driver.Robot.Kinematics;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
+with Driver.Robot.Kinematics.Flow_Eye;
 with Ada.Strings.Unbounded;
 with Driver.Robot.Channels;
 with Driver.Robot.Hand;
@@ -41,6 +43,7 @@ package body Driver.Robot.Tests is
    use Driver.Numerics.Arrays;
    use Driver.Tests;
    use type Driver.Observations.Group_Id;
+   use type Driver.Observations.Camera_Id;
 
    --  The joints of a synthetic arm along it: the tests build their arms in the order of their readings.
    function Along (J : Driver.Robot.Kinematics.Fit.Joint_Array) return Driver.Robot.Kinematics.Fit.Chain_Order is
@@ -197,9 +200,9 @@ package body Driver.Robot.Tests is
    --  closer shakes arm 1's reading by a ten-millionth of the closer's
    --  change (a reaction).
 
-   --  Of the latest Boot_On_Rig: how many times arm 1 was held still for a keyframe at a new pose at a beat where
-   --  eye 1's picture still changed by a level or more from the beat before, after the arm's last move (the rig's
-   --  own account of its flicker): a keyframe waits for the picture to settle, so this must stay zero.
+   --  Of the latest Boot_On_Rig: how many of arm 1's keyframes were taken at a beat where eye 1's picture still
+   --  changed by a level or more from the beat before, after the arm's last move (the rig's own account of its
+   --  flicker): a keyframe waits for the picture to settle, so this must stay zero.
    Unsettled_Stills : Natural := 0;
 
    Rig_Width  : constant := 64;
@@ -321,10 +324,17 @@ package body Driver.Robot.Tests is
       Step (M, R, Target, Target);
    end Step;
 
-   type Push_Kind is (Arm_1, Arm_2, Closer, Part, Idle, Lockstep, Closer_With_Arm_1);
+   type Push_Kind is (Arm_1, Arm_2, Arm_1_Joint_1, Arm_1_Joint_2, Arm_2_Joint_1, Arm_2_Joint_2, Closer, Part, Idle,
+                      Lockstep, Closer_With_Arm_1);
 
    --  Pushes one group away by Amount and back, Times times, holding two
-   --  beats after each move; Lockstep moves both arms together.
+   --  beats after each move; Lockstep moves both arms together. Arm_1 and
+   --  Arm_2 move both joints of the arm at once, in one ratio; Arm_1_Joint_2
+   --  and Arm_2_Joint_1 move the arm's other joint alone, as the recognition's
+   --  directions rounds push one channel at a time: keyframes of joints that
+   --  only ever moved together in one ratio cannot tell how far the view
+   --  moves per unit of each (Kinematics.Measure_Shifts takes a point's
+   --  coefficients only when its keyframes determine them all).
    procedure Exercise (M : in out Model; R : in out Rig; Kind : Push_Kind; Amount : Real; Times : Positive) is
       Rest : constant Rig_State := (others => <>);
       Away : Rig_State := Rest;
@@ -332,6 +342,10 @@ package body Driver.Robot.Tests is
       case Kind is
          when Arm_1    => Away.Arm_1 := [Amount, Amount / 2.0];
          when Arm_2    => Away.Arm_2 := [Amount / 2.0, Amount];
+         when Arm_1_Joint_1 => Away.Arm_1 := [Amount, 0.0];
+         when Arm_1_Joint_2 => Away.Arm_1 := [0.0, Amount];
+         when Arm_2_Joint_1 => Away.Arm_2 := [Amount, 0.0];
+         when Arm_2_Joint_2 => Away.Arm_2 := [0.0, Amount];
          when Closer   => Away.Closer := Amount;
          when Part     => Away.Part := Amount;
          when Idle     => Away.Idle := Amount;
@@ -411,6 +425,20 @@ package body Driver.Robot.Tests is
          --  Ten pixels and more per beat: far beyond a one-step displacement.
          Exercise (M, R, Lockstep, 3.0, 10);
       end if;
+      Estimate_Now (M);
+      --  The arms recognized, their sweeps begin (the boot's Begin_Anew at the sweep's hold): an arm takes no
+      --  keyframe before. The joints pushed again from here, together and alone, give the keyframes that measure
+      --  how far the view moves per unit of each.
+      Driver.Robot.Kinematics.Begin_Anew (M, 1);
+      Driver.Robot.Kinematics.Begin_Anew (M, 2);
+      Exercise (M, R, Arm_1, 0.1, 8);
+      Exercise (M, R, Arm_2, 0.1, 8);
+      --  A joint alone by a third of the amount: the rig's view moves 7 px per 0.1 of its second joint, beyond
+      --  what the aligner follows in a 64 by 48 picture from a prediction of nothing.
+      Exercise (M, R, Arm_1_Joint_1, 0.03, 8);
+      Exercise (M, R, Arm_1_Joint_2, 0.03, 8);
+      Exercise (M, R, Arm_2_Joint_1, 0.03, 8);
+      Exercise (M, R, Arm_2_Joint_2, 0.03, 8);
       Estimate_Now (M);
    end Exercise_Rig;
 
@@ -591,10 +619,10 @@ package body Driver.Robot.Tests is
       M : Model;
       Undecided_Third : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
-         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0);
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
       Nothing_Third : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
-         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0);
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
    begin
       Exercise_Rig (M);
       Check (Role (M, 3) = Closer, "the closer is a closer, got " & Role (M, 3)'Image);
@@ -605,6 +633,216 @@ package body Driver.Robot.Tests is
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
+
+   --  A group whose channels move different eyes (a humanoid's neck moves the head's eye and its arm a wrist's, one
+   --  group of every joint) has an arm for each such eye, each carrying its eye; a channel an eye is undecided about
+   --  is no evidence that it does not move it, and the group stays one arm.
+   procedure Group_Of_Different_Eyes_Has_An_Arm_Each is
+      M : Model;
+      Whole_Effect : constant Eye_Effect :=
+        (Verdict => Whole, Responding => 48, Textured => 48,
+         Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
+         Could_Be_Whole => True);
+      Nothing_Effect : constant Eye_Effect :=
+        (Verdict => Nothing, Responding => 0, Textured => 48,
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
+         Could_Be_Whole => True);
+      Undecided_Effect : constant Eye_Effect :=
+        (Verdict => Undecided, Responding => 24, Textured => 48,
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
+         Could_Be_Whole => True);
+      Group : constant Group_Id := 1;   --  the rig's first arm, of two channels
+
+      procedure Set (Eye_1_Channel_1, Eye_1_Channel_2, Eye_2_Channel_1, Eye_2_Channel_2, Third : Eye_Effect) is
+      begin
+         M.Graph.Channels.Clear;
+         for E in 1 .. Eye_Count (M) loop
+            M.Graph.Channels.Append (Channel_Effect_Vectors.Empty_Vector);
+         end loop;
+         M.Graph.Channels (1).Append (Channel_Effect'(Group => Group, Channel => 1, Effect => Eye_1_Channel_1));
+         M.Graph.Channels (1).Append (Channel_Effect'(Group => Group, Channel => 2, Effect => Eye_1_Channel_2));
+         M.Graph.Channels (2).Append (Channel_Effect'(Group => Group, Channel => 1, Effect => Eye_2_Channel_1));
+         M.Graph.Channels (2).Append (Channel_Effect'(Group => Group, Channel => 2, Effect => Eye_2_Channel_2));
+         for E in 3 .. Eye_Count (M) loop
+            M.Graph.Channels (Eye_Id (E)).Append (Channel_Effect'(Group => Group, Channel => 1, Effect => Third));
+            M.Graph.Channels (Eye_Id (E)).Append (Channel_Effect'(Group => Group, Channel => 2, Effect => Third));
+         end loop;
+         Driver.Robot.Graph.Derive (M);
+      end Set;
+
+      function Arms_Of_Group (Of_Model : Model) return Natural is
+      begin
+         return N : Natural := 0 do
+            for A in 1 .. Arm_Count (Of_Model) loop
+               if Arm_Group (Of_Model, Arm_Id (A)) = Group then
+                  N := N + 1;
+               end if;
+            end loop;
+         end return;
+      end Arms_Of_Group;
+   begin
+      Exercise_Rig (M);
+      Check (Arms_Of_Group (M) = 1, "the rig's first group is" & Natural'Image (Arms_Of_Group (M)) & " arms, not one");
+      --  Channel 1 moves eye 1 whole and eye 2 not; channel 2 eye 2 whole and eye 1 not.
+      Set (Whole_Effect, Nothing_Effect, Nothing_Effect, Whole_Effect, Nothing_Effect);
+      Check (Arms_Of_Group (M) = 2, "a group whose channels move two eyes apart is" & Natural'Image (Arms_Of_Group (M)) & " arms, not two");
+      Check (Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 2).Kind = Arm_Carried
+             and then Eye_Mount (M, 1).Arm /= Eye_Mount (M, 2).Arm
+             and then Arm_Group (M, Eye_Mount (M, 1).Arm) = Group and then Arm_Group (M, Eye_Mount (M, 2).Arm) = Group,
+             "the two eyes do not ride on two arms of the group");
+      --  The two arms of the group each keep their own evidence through the beats that follow: the evidence was found
+      --  by the group alone, and two arms of one group took each other's over every beat (the humanoid's arm 1 had
+      --  no current evidence for 7700 beats, and its reference never got a still twin, m1020_h7, 10-20).
+      declare
+         R    : Rig;
+         Rest : constant Rig_State := (others => <>);
+         Cause, Detail : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         R.Beat := M.Beats;
+         for B in 1 .. 3 loop
+            Step (M, R, Rest);
+         end loop;
+         for A in 1 .. Arm_Count (M) loop
+            if Arm_Group (M, Arm_Id (A)) = Group then
+               Driver.Robot.Kinematics.Twin_Blocked_By (M, Arm_Id (A), Cause, Detail);
+               Check (Ada.Strings.Unbounded.Index (Cause, "no evidence") = 0,
+                      "arm" & A'Image & " of the split group has no current evidence: "
+                      & Ada.Strings.Unbounded.To_String (Detail));
+            end if;
+         end loop;
+      end;
+      --  Both channels move both eyes (an arm with two cameras): one arm.
+      Set (Whole_Effect, Whole_Effect, Whole_Effect, Whole_Effect, Nothing_Effect);
+      Check (Arms_Of_Group (M) = 1, "channels that move the same two eyes split the group into" & Natural'Image (Arms_Of_Group (M)) & " arms");
+      --  Channel 1 is no evidence against eye 2 when every other eye is undecided about it: not told apart.
+      Set (Whole_Effect, Nothing_Effect, Undecided_Effect, Whole_Effect, Undecided_Effect);
+      Check (Arms_Of_Group (M) = 1, "a channel the other eyes are undecided about split the group into" & Natural'Image (Arms_Of_Group (M)) & " arms");
+      --  The split is kept in the body file, and held while the lock-in says nothing of the group's channels.
+      Set (Whole_Effect, Nothing_Effect, Nothing_Effect, Whole_Effect, Nothing_Effect);
+      declare
+         Back : Model;
+         Ok   : Boolean;
+         Why  : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         Driver.Robot.Body_File.Read (Back, Driver.Robot.Body_File.Text (M), Ok, Why);
+         Check (Ok, "the body file was not read: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Arms_Of_Group (Back) = 2, "the reloaded body has" & Natural'Image (Arms_Of_Group (Back)) & " arms of the group, not two");
+         Check (Eye_Mount (Back, 1).Kind = Arm_Carried and then Eye_Mount (Back, 2).Kind = Arm_Carried
+                and then Eye_Mount (Back, 1).Arm /= Eye_Mount (Back, 2).Arm,
+                "the reloaded body's two eyes do not ride on two arms");
+      end;
+      --  And held while the lock-in tells nothing of the channels (an estimate whose regression had too few rows).
+      M.Graph.Channels.Clear;
+      Driver.Robot.Graph.Derive (M);
+      Check (Arms_Of_Group (M) = 2,
+             "a derivation with no channel told lost the split: " & Natural'Image (Arms_Of_Group (M)) & " arms");
+   end Group_Of_Different_Eyes_Has_An_Arm_Each;
+
+   --  A closer's remembered eye (Group_Stream.Closer_Eye) yields to another eye on an arm whose patch of the group
+   --  significantly outnumbers its own in cells, and only to such a one; where the remembered eye was not measured it
+   --  tells nothing and keeps the group (w11, servo seed 11 of the fake robot, 10-19: arm 1's closer stayed on arm 2
+   --  by arm 2's eye, 6 to 8 cells, though arm 1's own eye showed it in 36).
+   procedure Clearer_Eye_Takes_A_Closer is
+      M     : Model;
+      Group : constant Group_Id := 3;   --  the rig's closer
+      Own   : Eye_Effect;
+      Least : Natural := 0;   --  the fewest cells of a patch in eye 2 that significantly outnumber eye 1's
+      function Index_Of (E : Eye_Id) return Positive is ((Natural (Group) - 1) * Eye_Count (M) + Natural (E));
+      function Patch_Of (Cells : Natural) return Eye_Effect is
+        (Verdict => Patch, Responding => Cells, Textured => Own.Textured,
+         Fraction => (Value => Real (Cells) / Real (Own.Textured), Sigma => 0.07, Degrees_Of_Freedom => 0),
+         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
+   begin
+      Exercise_Rig (M);
+      Own := M.Graph.Effects (Index_Of (1));
+      Check (Role (M, Group) = Closer and then Own.Verdict = Patch
+             and then Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 2).Kind = Arm_Carried
+             and then Eye_Mount (M, 1).Arm /= Eye_Mount (M, 2).Arm
+             and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
+             "the rig's closer is no patch of eye 1 on eye 1's arm, or eyes 1 and 2 ride no two arms");
+      if Own.Verdict /= Patch or else Eye_Mount (M, 2).Kind /= Arm_Carried then
+         return;
+      end if;
+      for N in Own.Responding + 1 .. Own.Textured loop
+         if Real (N) - Real (Own.Responding) > Driver.Conventions.Z * Sqrt (Real (N + Own.Responding)) then
+            Least := N;
+            exit;
+         end if;
+      end loop;
+      Check (Least > Own.Responding + 1,
+             "of" & Own.Textured'Image & " cells, none outnumber eye 1's" & Own.Responding'Image
+             & " both by one at least and not significantly");
+      if Least <= Own.Responding + 1 then
+         return;
+      end if;
+      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least - 1));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
+             "a patch of" & Natural'Image (Least - 1) & " cells in eye 2 against" & Own.Responding'Image
+             & " in eye 1 moved the closer, " & Role (M, Group)'Image);
+      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
+             "a patch of" & Least'Image & " cells in eye 2 against" & Own.Responding'Image
+             & " in eye 1 left the closer on eye 1's arm, " & Role (M, Group)'Image);
+      M.Graph.Effects.Replace_Element (Index_Of (2), (Verdict => Unmeasured, others => <>));
+      M.Graph.Effects.Replace_Element (Index_Of (1), Patch_Of (Own.Textured));
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
+             "eye 2 not measured, the closer left its arm for eye 1's, " & Role (M, Group)'Image);
+   end Clearer_Eye_Takes_A_Closer;
+
+   --  An arm whose own eye the lock-in calls undecided keeps that eye while its keyframes tell that the eye's view
+   --  moves with it (Arm_Evidence.Shift_Seen): the aligner measures over the whole picture what the lock-in's flow
+   --  measures a beat at a time (f15o on 10-15: the lock-in, regressing the sweep's and the hand's beats again,
+   --  read arm 1's eye as undecided, the graph took the eye off the arm, and the hand measured in it was dropped).
+   --  Where no keyframe told, the lock-in alone decides: undecided is no verdict against the eye the arm carried
+   --  (Group_Stream.Rider), which stays; an eye in which the arm moves nothing goes (robot.boot.patch, 10-17: an
+   --  arm under its sweep, its keyframes not yet telling, lost its eye to an undecided verdict between two passes).
+   procedure Keyframes_Hold_An_Eye_On_Its_Arm is
+      M : Model;
+      Undecided_Own : constant Eye_Effect :=
+        (Verdict => Undecided, Responding => 24, Textured => 48,
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+      Nothing_Own : constant Eye_Effect :=
+        (Verdict => Nothing, Responding => 0, Textured => 48,
+         Fraction => (Value => 0.0, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
+      G : Group_Id;
+      E : Eye_Id'Base := 0;
+      K : Natural := 0;   --  arm 1's evidence
+   begin
+      Exercise_Rig (M);
+      G := Arm_Group (M, 1);
+      for I in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         if M.Kinematics (I).Group = G then
+            K := I;
+            E := M.Kinematics (I).Eye;
+         end if;
+      end loop;
+      Check (K > 0 and then E > 0, "arm 1 has no evidence with an eye after its sweep");
+      if K = 0 or else E = 0 then
+         return;
+      end if;
+      Check ((for some S of M.Kinematics (K).Shift_Seen => S),
+             "no keyframe of arm 1 told that its eye's view moves with a joint");
+      M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eye_Count (M) + Natural (E), Undecided_Own);
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, G) = Arm, "arm 1, its own eye undecided and its keyframes telling, is " & Role (M, G)'Image);
+      Check (Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G),
+             "arm 1's eye, undecided in the lock-in while the keyframes tell, is " & Eye_Mount (M, E).Kind'Image);
+      for C in 0 .. Natural (M.Kinematics (K).Shift_Seen.Length) - 1 loop
+         M.Kinematics (K).Shift_Seen.Replace_Element (C, False);
+      end loop;
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, G) = Arm and then Eye_Mount (M, E).Kind = Arm_Carried
+             and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G),
+             "with no keyframe telling, an eye the lock-in is undecided about no longer rides arm 1: "
+             & Role (M, G)'Image & ", " & Eye_Mount (M, E).Kind'Image);
+      M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eye_Count (M) + Natural (E), Nothing_Own);
+      Driver.Robot.Graph.Derive (M);
+      Check (not (Eye_Mount (M, E).Kind = Arm_Carried and then Eye_Mount (M, E).Arm = M.Graph.Arm_Of (G)),
+             "with no keyframe telling, an eye in which arm 1 moves nothing still rides it");
+   end Keyframes_Hold_An_Eye_On_Its_Arm;
 
    --  A group that carries an eye moves the whole of its picture, though much
    --  of the picture is so faintly textured that its cells cannot tell pushes
@@ -807,7 +1045,7 @@ package body Driver.Robot.Tests is
       M.Graph.Effects.Replace_Element
         ((3 - 1) * Eye_Count (M) + 1,
          (Verdict => Patch, Responding => 8, Textured => 48,
-          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0));
+          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Unclassified, "the closer pushed only with arm 1 is " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
@@ -850,6 +1088,49 @@ package body Driver.Robot.Tests is
       Check (Driver.Robot.Kinematics.Held_Still (M, 1, M.Beats - 1),
              "the arm held still with an invisible jitter is not taken as still for a keyframe");
    end Keyframe_Despite_Held_Jitter;
+
+   --  No keyframe is taken in a step under way (Model.Stepping): an arm whose readings and picture are still, away from
+   --  every keyframe it has, is a fresh keyframe, and is one once the step is over. In the first beats of a push the
+   --  readings are below the step an eye can see (the sweep's first level is that step) and the picture a lag behind
+   --  them: the keyframe held there paired a reading 62 % of the way with a picture at rest (the cold boot b2, 10-20:
+   --  4 of 76 keyframes of the base arm, 11 of 49 of seed 21's arm 1, 41 of 164 of the humanoid's).
+   procedure No_Keyframe_In_A_Step is
+      M    : Model;
+      R    : Rig;
+      Rest : constant Rig_State := (others => <>);
+      Away : Rig_State := Rest;
+      Before, During, After : Natural := 0;
+      function Frames return Natural is
+         N : Natural := 0;
+      begin
+         for E of M.Kinematics loop
+            if E.Group = 1 then
+               N := Natural (E.Frames.Length);
+            end if;
+         end loop;
+         return N;
+      end Frames;
+   begin
+      Exercise_Rig (M);
+      for B in 1 .. 12 loop
+         Step (M, R, Rest);
+      end loop;
+      Away.Arm_1 := [0.9, 0.7];
+      Before := Frames;
+      M.Stepping := True;
+      for B in 1 .. 14 loop
+         Step (M, R, Away);
+      end loop;
+      During := Frames;
+      M.Stepping := False;
+      for B in 1 .. 14 loop
+         Step (M, R, Away);
+      end loop;
+      After := Frames;
+      Check (Before > 0, "the rig's arm has keyframes before the step");
+      Check (During = Before, "a keyframe was taken in a step under way:" & Before'Image & " frames, then" & During'Image);
+      Check (After > During, "no keyframe was taken once the step was over:" & During'Image & " frames, then" & After'Image);
+   end No_Keyframe_In_A_Step;
 
    --  An arm at rest takes its reference keyframe and then a still twin of
    --  it at the same pose (the sweep waits for it). The aligner's own error
@@ -920,15 +1201,24 @@ package body Driver.Robot.Tests is
       begin
          for C in 1 .. 2 loop
             declare
-               Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-               Shift : constant Real := Lockin.Shift (M, 1, 1, C);
+               Start  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+               Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
+               Jitter : constant Real := Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
             begin
-               Check (Shift > 0.0, "arm 1's shift is not measured");
+               Check (Shift > 0.0, "arm 1's view's motion per unit of joint" & C'Image
+                      & " is not measured by the keyframes before the sweep");
                if Shift > 0.0 then
-                  Check_Close (Start, Driver.Conventions.Z * Noise / Shift
-                                      + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C),
-                               1.0e-9 * Noise / Shift,
-                               "the first level of joint" & C'Image & " moves the view by what the matcher can tell");
+                  --  The larger of half the aligner's patch of view and the least turn a keyframe counts: the step
+                  --  the matcher tells apart, no nearer than the readings tell apart, plus what the readings' noise
+                  --  can take off a turn asked of exactly it (Motion.Sweep_Start, Kinematics.Step_Of).
+                  declare
+                     Least  : constant Real := Real'Max (Driver.Conventions.Z * Noise / Shift, Jitter) + Jitter;
+                     Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
+                  begin
+                     Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
+                                  "the first level of joint" & C'Image
+                                  & " is not half a patch of view, nor the least turn a keyframe counts");
+                  end;
                end if;
             end;
          end loop;
@@ -1045,18 +1335,27 @@ package body Driver.Robot.Tests is
       Exercise_Rig (M);
       for C in 1 .. 2 loop
          declare
-            Start : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-            Shift : constant Real := Lockin.Shift (M, 1, 1, C);
-            Noise : constant Real :=
+            Start  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
+            Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
+            Jitter : constant Real := Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C);
+            Noise  : constant Real :=
               Real'Max (Lockin.Cell_Noise (M, 1), Driver.Robot.Kinematics.Match_Noise (M, 1));
          begin
             Check (Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last, "arm 1's sweep plan is not measured");
             if Start > 0.0 and then Shift > 0.0 and then Noise < Real'Last then
-               --  The step the matcher tells apart, and what the readings' noise can take off a turn asked of exactly it
-               --  (Motion.Sweep_Start: a turn of the step itself lands below it half the time).
-               Check_Close (Start, Driver.Conventions.Z * Noise / Shift
-                                   + Driver.Conventions.Z * Sqrt (2.0) * Driver.Robot.Channels.Noise (M, 1, C),
-                            1.0e-9 * Noise / Shift, "the first level moves the view of joint" & C'Image);
+               --  The larger of: half the aligner's patch of view (the largest turn it follows by itself), and the
+               --  step the matcher tells apart, no nearer than the readings tell apart, plus what the readings'
+               --  noise can take off a turn asked of exactly it (Motion.Sweep_Start: a turn of the step itself
+               --  lands below it half the time).
+               declare
+                  Least  : constant Real := Real'Max (Driver.Conventions.Z * Noise / Shift, Jitter) + Jitter;
+                  Follow : constant Real := Real (Driver.Alignment.Half_Patch (Rig_Width, Rig_Height)) / Shift;
+               begin
+                  Check_Close (Start, Real'Max (Least, Follow), 1.0e-9 * Real'Max (Least, Follow),
+                               "the first level of joint" & C'Image & " is not half a patch of view (or the least turn)");
+                  Check (Follow > Least, "the rig's half patch" & Driver.Log.Image (Follow, 6)
+                         & " is not above the least turn" & Driver.Log.Image (Least, 6) & ": the rule is not exercised");
+               end;
                Check (Known (Visible_Step (M, 1, C)) and then Start > Visible_Step (M, 1, C).Value,
                       "joint" & C'Image & "'s sweep starts at its visible step or below");
             end if;
@@ -1064,39 +1363,130 @@ package body Driver.Robot.Tests is
       end loop;
    end Sweep_Starts_Where_A_Cell_Tells;
 
-   --  An arm's match was asked, then the graph stopped listing the arm (an
-   --  estimate told its eye or group otherwise): its answer must still be
-   --  read, or the boot's wait for every answer never ends.
-   procedure Answers_Read_For_An_Unlisted_Arm is
-      M : Model;
-      R : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
+   --  The joints next to each other along an arm whose swap the fit cannot tell (Fit_Report's Untold). Two joints
+   --  never turned together are exactly that: one of them at its reference in every keyframe, the two orders give
+   --  every keyframe the same pose (they differ in the product of the two turns alone). A fit of every joint alone
+   --  and of every pair together but 2 with 3 names 2 with 3 and no other pair; with 2 and 3 turned together too,
+   --  the order is told and it names none. The pairs were taken from the order nearest the best's in residuals
+   --  before: s08's was the true order, two swaps away, s10's another, three pairs off the true ones (10-16).
+   procedure Untold_Neighbours is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 6;
+      Levels  : constant Real_Array := [0.05, -0.05, 0.1, -0.1, 0.2, -0.2];
+      Widest  : constant Real := 0.2;
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant Real := 0.2;
+      Table   : constant Vec3 := [0.0, -0.6, -0.8];   --  its normal, towards the eye
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Truth   : Fit.Joint_Array (1 .. N);
+      type Sighting_Access is access Fit.Sighting_Array;
+
+      --  Each pair turned together either way, as the boot's rows of a Sylvester-Hadamard matrix turn it: the order
+      --  search tells an order from another only where both halves of the keyframes do (Judge), and one turn of a
+      --  pair lies in one half alone.
+      procedure Fit_Of (Both : Boolean; Report : out Fit.Fit_Report) is
+         Pairs   : constant Natural := 2 * (N * (N - 1) / 2 - (if Both then 0 else 1));
+         Frames  : constant Positive := 1 + N * Levels'Length + Pairs;
+         Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
+         Asked   : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+         All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. (Frames - 1) * Columns * Rows);
+         Seen    : Natural := 0;
+         Row     : Positive := 1 + N * Levels'Length;
+         Rng     : Generator;
+         Joints  : Fit.Joint_Array (1 .. N);
+         Chain   : Fit.Chain_Order (1 .. N);
+         Found   : Fit.Lens;
+      begin
+         for J in 1 .. N loop
+            for L in Levels'Range loop
+               Changes (1 + (J - 1) * Levels'Length + (L - Levels'First + 1), J) := Levels (L);
+            end loop;
+         end loop;
+         for I in 1 .. N loop
+            for J in I + 1 .. N loop
+               if Both or else not (I = 2 and then J = 3) then
+                  for Way of Real_Array'[1.0, -1.0] loop
+                     Row := Row + 1;
+                     Changes (Row, I) := Way * Widest;
+                     Changes (Row, J) := Way * Widest;
+                  end loop;
+               end if;
+            end loop;
+         end loop;
+         for F in 1 .. Frames loop
+            for J in 1 .. N loop
+               Asked (F, J) := Changes (F, J) /= 0.0;
+            end loop;
+         end loop;
+         for F in 2 .. Frames loop
+            declare
+               D : Real_Array (1 .. N);
+               T : Rigid;
+            begin
+               for J in 1 .. N loop
+                  D (J) := Changes (F, J);
+               end loop;
+               T := Inverse (Fit.Eye_At (Truth, Along (Truth), D));
+               for Gy in 1 .. Rows loop
+                  for Gx in 1 .. Columns loop
+                     declare
+                        K  : constant Positive := (Gy - 1) * Columns + Gx;
+                        U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                        V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                        H  : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                        X  : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                        U, V : Real;
+                        Ahead : Boolean;
+                     begin
+                        Fit.Project (Lens, T * X, U, V, Ahead);
+                        U := U + Noise * Gaussian (Rng);
+                        V := V + Noise * Gaussian (Rng);
+                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                           Seen := Seen + 1;
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0,
+                                               Own_Freedom => 0, others => <>);
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end;
+         end loop;
+         Fit.Fit (Changes, Asked, [for J in 1 .. N => 0.01], All_Seen (1 .. Seen), 640, 480, 0, Joints, Chain, Found,
+                  Report);
+      end Fit_Of;
    begin
-      R.World_Pending.Append
-        (Pending_Match'(Frame  => 1,
-                        Eye    => 0,
-                        Points => 1,
-                        Ticket => Driver.Instrument.Submit_Match
-                          ((Stored => False, Image => Driver.Images.No_Image),
-                           (Stored => False, Image => Driver.Images.No_Image),
-                           [1 => (U => 1.0, V => 1.0)], True, 0)));
-      M.Kinematics.Append (R);
-      Check (Driver.Robot.Kinematics.Pending (M) = 1, "the match was not asked");
-      for B in 0 .. 3 loop
-         declare
-            O    : Observation;
-            Sent : Driver.Commands.Command;
-         begin
-            O.Beat := Driver.Clock.Beat (B);
-            O.Readings.Append (Real_Array'(1 => 0.0));
-            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
-            Driver.Commands.Set_Target (Sent, 1, [0.0]);
-            Observe (M, O, Sent);
-         end;
-      end loop;
-      Check (Arm_Count (M) = 0, "the graph lists an arm");
-      Check (Driver.Robot.Kinematics.Pending (M) = 0,
-             "the answer to an arm the graph no longer lists is never read: the boot waits forever");
-   end Answers_Read_For_An_Unlisted_Arm;
+      declare
+         --  Synthetic_Sweep's arm: no two axes alike, none through another's point.
+         Axes   : constant array (1 .. N) of Vec3 :=
+           [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+         Points : constant array (1 .. N) of Vec3 :=
+           [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      begin
+         for J in 1 .. N loop
+            declare
+               W : constant Vec3 := Unit (Axes (J));
+            begin
+               Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            end;
+         end loop;
+      end;
+      declare
+         Report : Fit.Fit_Report;
+      begin
+         Fit_Of (Both => False, Report => Report);
+         Check (Report.Fitted, "the arm turned a joint and a pair at a time, but 2 with 3, was not fitted: "
+                & Ada.Strings.Unbounded.To_String (Report.Why));
+         Check (not Report.Order_Told, "the order is told where 2 and 3 never turned together");
+         Check (Natural (Report.Untold.Length) = 1
+                and then (for some P of Report.Untold => (P.Earlier = 2 and then P.Later = 3)
+                                                         or else (P.Earlier = 3 and then P.Later = 2)),
+                "the pairs whose swap is not told are" & Report.Untold.Length'Image & ", not 2 with 3 alone");
+         Fit_Of (Both => True, Report => Report);
+         Check (Report.Fitted and then Report.Order_Told and then Report.Untold.Is_Empty,
+                "every pair turned together leaves the order untold, or names a pair:" & Report.Untold.Length'Image);
+      end;
+   end Untold_Neighbours;
 
    procedure Roles_Of_A_Synthetic_Body is
       M : Model;
@@ -1131,6 +1521,136 @@ package body Driver.Robot.Tests is
       end loop;
       Check (Carrier_Group (M) = 0, "no group carries every eye");
    end Roles_Of_A_Synthetic_Body;
+
+   --  A reading that crawls for the first 25 beats (a servo on its way to a stale goal: R0, 10-11, 660 ticks in 25
+   --  beats) and then repeats exactly, never pushed: its rest noise is zero, measured on the trend-free rest, and the
+   --  crawl is motion.
+   procedure Channel_Noise_Of_A_Crawl is
+      M    : Model;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Creep_Beats : constant := 25;
+   begin
+      for B in 0 .. 79 loop
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => 1.0 + (if B < Creep_Beats then 0.5 * Real (Creep_Beats - B) / Real (Creep_Beats) else 0.0)));
+         Sent := Driver.Commands.Hold;
+         Observe (M, O, Sent);
+         if B in 2 .. 60 and then B mod 20 = 0 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Estimate_Now (M);
+      Check (Reading_Noise (M, 1, 1) = 0.0,
+             "the crawling reading's rest noise is " & Real'Image (Reading_Noise (M, 1, 1))
+             & ", not 0: its crawl was taken for jitter");
+      Check (Channels.Moving (M, 1, 10), "the crawl at beat 10 is not motion");
+      Check (not Channels.Moving (M, 1, 60), "the exact repeats at beat 60 are motion");
+   end Channel_Noise_Of_A_Crawl;
+
+   --  One integer observation of the given groups' readings, each group one array, every group's wire an integer.
+   procedure Observe_Integers (M : in out Model; B : Natural; Values : Real_Array; Sizes : Natural_Array) is
+      O    : Observation;
+      Sent : constant Driver.Commands.Command := Driver.Commands.Hold;
+      At_V : Natural := Values'First;
+   begin
+      O.Beat := Driver.Clock.Beat (B);
+      O.Images.Append (Driver.Images.No_Image);
+      O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+      for S of Sizes loop
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Values (At_V .. At_V + S - 1));
+         O.Precisions.Append (0);
+         At_V := At_V + S;
+      end loop;
+      Observe (M, O, Sent);
+   end Observe_Integers;
+
+   --  A reading that steps by four units (a joint whose ticks the body reports as four units each) and flips one
+   --  step at rest, to the next value and back, has the rounding's noise of its own step: a change of two steps in
+   --  a beat is motion, one step is not (w11, servo seed 11 of the fake robot, 10-19: 24 such flips set arm 1's
+   --  fourth channel's noise at 4.19 units, and a change had to pass 17.8 units a beat to be motion).
+   procedure Noise_Of_Single_Step_Flips is
+      M    : Model;
+      Step : constant Real := 4.0;
+      function Value (B : Natural) return Real is
+        (2000.0 + (if B >= 110 then 2.0 * Step * Real (B - 109) elsif B mod 20 in 5 .. 9 then Step else 0.0));
+   begin
+      for B in 0 .. 119 loop
+         Observe_Integers (M, B, [1 => Value (B)], [1 => 1]);
+         if B in 2 .. 100 and then B mod 20 = 0 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Check (Reading_Noise (M, 1, 1) = Step / Sqrt (12.0),
+             "a reading flipping one step of" & Step'Image & " at rest has noise" & Real'Image (Reading_Noise (M, 1, 1))
+             & ", not its step's rounding" & Real'Image (Step / Sqrt (12.0)));
+      Check (not Channels.Moving (M, 1, 25) and then not Channels.Moving (M, 1, 30), "a flip of one step is motion");
+      Check (Channels.Moving (M, 1, 112), "a change of two steps in a beat is no motion");
+   end Noise_Of_Single_Step_Flips;
+
+   --  A group whose every channel's noise rests on few changes (one degree of freedom each) still tells a change
+   --  well beyond them: the noise is taken as measured, not widened by the fewest degrees of freedom (w12, servo seed
+   --  11 of the fake robot, 10-19: its estimate of beat 5940 found arm 1 pushed at 766 beats in one round and at
+   --  none in the next, every channel's noise then on 1 to 4 degrees of freedom).
+   procedure Change_Against_Noise_Of_Few_Changes is
+      M : Model;
+      --  Both flip a unit once (their step: Channels.Step_Unit), then two units out and back every ten beats, as evenly
+      --  as no half of the rest trends; the second then moves 20 units in a beat.
+      function First (B : Natural) return Real is
+        (2000.0 + (if B = 2 then 1.0 elsif B < 60 and then B mod 10 in 5 .. 7 then 2.0 else 0.0));
+      function Second (B : Natural) return Real is (First (B) + (if B >= 65 then 20.0 else 0.0));
+   begin
+      for B in 0 .. 70 loop
+         Observe_Integers (M, B, [First (B), Second (B)], [1 => 2]);
+         if B = 60 then
+            Estimate_Now (M);
+         end if;
+      end loop;
+      Check (Channels.Noise_Freedom (M, 1, 1) > 0 and then Channels.Noise_Freedom (M, 1, 2) > 0,
+             "the rig's noises rest on" & Channels.Noise_Freedom (M, 1, 1)'Image & " and"
+             & Channels.Noise_Freedom (M, 1, 2)'Image & " degrees of freedom, not on few changes");
+      Check (Channels.Moving (M, 1, 65),
+             "a change of 20 units against noises of" & Real'Image (Reading_Noise (M, 1, 1)) & " and"
+             & Real'Image (Reading_Noise (M, 1, 2)) & " is no motion");
+      Check (not Channels.Moving (M, 1, 15), "a change of the channels' own jitter is motion");
+   end Change_Against_Noise_Of_Few_Changes;
+
+   --  Readings that come as integers (a servo's ticks: the SO-101 pair, R0) resolve to one unit, so the smallest push
+   --  of such a joint without jitter is one unit; a rig's Reals resolve to the unit in the last place of the group's
+   --  largest reading.
+   procedure Resolution_Of_Integer_Readings is
+      M    : Model;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Last : constant Natural := 9;
+   begin
+      for B in 0 .. Last loop
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         for G in 1 .. 2 loop
+            O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         end loop;
+         O.Readings.Append (Real_Array'(1 => 2048.0, 2 => 10.0));
+         O.Readings.Append (Real_Array'(1 => 2048.0));
+         O.Precisions.Append (0);
+         O.Precisions.Append (Real'Machine_Mantissa);
+         Sent := Driver.Commands.Hold;
+         Observe (M, O, Sent);
+      end loop;
+      Estimate_Now (M);
+      Check (Channels.Resolution (M, 1, Last) = 1.0,
+             "integer readings resolve to one unit, got " & Real'Image (Channels.Resolution (M, 1, Last)));
+      Check (Channels.Resolution (M, 2, Last) = Real'Scaling (1.0, Real'Exponent (2048.0) - Real'Machine_Mantissa)
+             and then Channels.Resolution (M, 2, Last) < 1.0e-9,
+             "a Real of 2048 resolves to its unit in the last place, got " & Real'Image (Channels.Resolution (M, 2, Last)));
+   end Resolution_Of_Integer_Readings;
 
    procedure Channel_Noise_And_Pushes is
       M    : Model;
@@ -1233,7 +1753,7 @@ package body Driver.Robot.Tests is
       procedure Credit (M : in out Model; Gain : Real) is
          Effect : constant Eye_Effect :=
            (Verdict => Patch, Responding => 1, Textured => 1,
-            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0);
+            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
       begin
          M.Eyes (1).Kept_Groups.Append (1);
          M.Eyes (1).Kept_Channels.Append (1);
@@ -1530,7 +2050,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B > 40 then
@@ -1614,6 +2134,106 @@ package body Driver.Robot.Tests is
          end;
       end if;
    end Unanswered_Push_Of_An_Unanswered_Group;
+
+   --  The closer of the test above, its reading creeping up 1e-11 a beat and otherwise exact (a simulator's readings
+   --  creep for good: the fake robot's jaw, 10-15), measured at rest before it is pushed beyond its limit; the body
+   --  answers eight beats after a command. The creep is measured, and the push nothing answers is not taken as
+   --  answered by the creep since it began: the jaw, asked open at its open end, was answered at every level, went
+   --  "further" each time, and was asked open to 7e13 units, the way shut never asked (f16f).
+   procedure Unanswered_Push_Of_A_Creeping_Group is
+      M      : Model;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Limit  : constant Real := 1.0;
+      Creep  : constant Real := 1.0e-11;
+      Arm, Arm_Target : Real := 0.0;
+      Closer_Target   : Real := Limit;
+   begin
+      for B in 0 .. 140 loop
+         if B = 20 then
+            Arm_Target := 0.01;
+         elsif B = 50 then
+            Arm_Target := 0.0;
+         elsif B in 28 | 58 then
+            Arm := Arm_Target;
+         elsif B = 100 then
+            Closer_Target := Limit + 2.44e-4;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm));
+         O.Readings.Append (Real_Array'(1 => Limit + Creep * Real (B)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Driver.Commands.Set_Target (Sent, 2, [Closer_Target]);
+         Observe (M, O, Sent);
+         if B = 90 then
+            Driver.Robot.Channels.Measure (M);
+         end if;
+      end loop;
+      Check (abs (Driver.Robot.Channels.Drift (M, 2, 1) - Creep) <= 0.01 * Creep,
+             "the closer's creep of" & Creep'Image & " a beat is measured as" & Driver.Robot.Channels.Drift (M, 2, 1)'Image);
+      Check (M.Groups (1).Delay_Known and then M.Groups (1).Delay_Beats >= 7,
+             "the body's delay of eight beats is not measured: " & M.Groups (1).Delay_Beats'Image);
+      Check (Steps.Episodes (M, 2) = 1, "group 2 is pushed once, got" & Steps.Episodes (M, 2)'Image);
+      if Steps.Episodes (M, 2) = 1 then
+         declare
+            E : constant Episode := M.Groups (2).Episodes (1);
+         begin
+            Check (not E.Moved, "the push nothing answered is answered" & Natural'Image (E.Moved_At - E.Start)
+                   & " beats after it began, by the creep of the beats since");
+            Check (E.Ended, "the push nothing answered never ends");
+         end;
+      end if;
+   end Unanswered_Push_Of_A_Creeping_Group;
+
+   --  A push sent while its group is still on its way from the push before is answered at its own start beat by
+   --  that motion. Measured from such pushes the body's delay was 0 (seed 2 of the fake robot, 10-14: each probe
+   --  level sent a beat after the one before), and every look thereafter read the body a beat before it had
+   --  moved. The first push, cut short by the second, has no delivered fraction and does not count; the second,
+   --  born moving, must not either: the delay stays unmeasured rather than measured as nothing.
+   procedure Push_Born_Moving_Gives_No_Delay is
+      M      : Model;
+      Rng    : Generator;
+      O      : Observation;
+      Sent   : Driver.Commands.Command;
+      Arm, Arm_Target : Real := 0.0;
+   begin
+      for B in 0 .. 200 loop
+         if B = 40 then
+            Arm_Target := 0.01;
+         elsif B = 42 then
+            Arm_Target := 0.02;
+         end if;
+         --  The reading follows a beat late, a quarter of the first ask a beat: it is on its way when the second
+         --  push arrives, and goes on to the second target.
+         if B in 41 .. 48 then
+            Arm := 0.0025 * Real (B - 40);
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Arm + 1.0e-12 * Gaussian (Rng)));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Arm_Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 2, "the group is pushed twice, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 2 then
+         Check (not M.Groups (1).Episodes (1).Born_Moving, "the first push, from rest, is called born moving");
+         Check (M.Groups (1).Episodes (2).Born_Moving,
+                "the second push, sent while the group was on its way from the first, is not called born moving");
+      end if;
+      Check (not M.Groups (1).Delay_Known or else M.Groups (1).Delay_Beats >= 1,
+             "the body's delay was measured as" & M.Groups (1).Delay_Beats'Image
+             & " beats from a push born into the motion of the push before");
+   end Push_Born_Moving_Gives_No_Delay;
 
    --  The noise and push rounds of the channel measure can alternate for
    --  good (A9's replay spent 540 s in them at 1024 beats): a six-channel
@@ -1753,7 +2373,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 40 | 46 | 52 | 58 then
@@ -1836,7 +2456,7 @@ package body Driver.Robot.Tests is
       end loop;
       M.Graph.Effects.Replace_Element
         (1, (Verdict => Whole, Responding => 1, Textured => 1,
-             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
    end Put_Eye;
 
    --  A joint pressed into a table moves about against it (A16's arm 1,
@@ -2115,7 +2735,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          --  Pushes 1 to 8, then (once an estimate has measured how long the
@@ -2196,7 +2816,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 110 then
@@ -2255,6 +2875,84 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Let_Go_Is_Not_Blocked;
 
+   --  A servo's dead band: a push that asks less than the body is known to execute (Steps.Executed_Least, the
+   --  least ask a push moved the channel for) and is not answered is not judged, neither blocked nor delivered;
+   --  one that asks at least that and is not answered is blocked. Pushes 1 to 3 ask 0.5 and are followed (the
+   --  body executes 0.5); after the estimate at beat 128 has measured the body's delay from them (a push nothing
+   --  answers ends after that wait), push 4 asks 0.1 and nothing moves, push 5 asks 0.6 and nothing moves (the
+   --  kiwi's joints, asked 2.4 to 3.8 units within their dead band at the sweep's first levels, were every one
+   --  called blocked where they stood, R5 on 10-14).
+   procedure Step_Within_The_Dead_Band_Is_Not_Judged is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading, From : Real := 0.0;
+   begin
+      for B in 0 .. 160 loop
+         if B = 64 or else B = 128 then
+            --  What a lock-in measured of an eye watching the channel: ten cells moving 100 pixels per reading unit
+            --  (Visible_Step 0.009), set again after the estimate at 128 has measured the eye.
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               S.Kept_Groups.Append (1);
+               S.Kept_Channels.Append (1);
+               for Cell in 1 .. 10 loop
+                  S.Gains.Append (1.0e4);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 10, Textured => 10,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+            end;
+         end if;
+         if B in 66 .. 80 or else B in 130 .. 141 then
+            declare
+               K     : constant Natural := (if B < 130 then (B - 66) / 5 + 1 else 4 + (B - 130) / 6);
+               Phase : constant Natural := (if B < 130 then (B - 66) mod 5 else (B - 130) mod 6);
+            begin
+               if Phase = 0 then
+                  Target := Reading + (case K is when 4 => 0.1, when 5 => 0.6, when others => 0.5);
+                  From := Reading;
+               elsif Phase = 1 and then K <= 3 then
+                  Reading := From + 0.9855 * (Target - From);
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(1 => Reading + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Known (Visible_Step (M, 1, 1)), "the eye's visible step is known");
+      Check (Steps.Episodes (M, 1) = 5, "five pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 5 then
+         declare
+            Within : constant Episode := M.Groups (1).Episodes (4);
+            Beyond : constant Episode := M.Groups (1).Episodes (5);
+         begin
+            Check (abs (Steps.Executed_Least (M, 1, 1) - 0.5) < 0.01,
+                   "the least ask the body executed is" & Real'Image (Steps.Executed_Least (M, 1, 1)) & ", not 0.5");
+            Check (Within.Ended and then not Within.Blocked and then not Known (Within.Delivered),
+                   "a push of 0.1, within the dead band of a body known to execute 0.5, that nothing answered is "
+                   & "judged (blocked " & Within.Blocked'Image & ", delivered known " & Known (Within.Delivered)'Image
+                   & ")");
+            Check (Beyond.Ended and then Beyond.Blocked,
+                   "a push of 0.6, as large as the body executes, that nothing answered is not called blocked");
+         end;
+      end if;
+   end Step_Within_The_Dead_Band_Is_Not_Judged;
+
 
    --  The same joint, read as exactly, with a lock-in's step of 3e-17
    --  credited to it (what a lock-in that credits a group with the pictures'
@@ -2288,7 +2986,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2365,7 +3063,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 110 then
@@ -2445,7 +3143,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 310 then
@@ -2528,7 +3226,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2604,7 +3302,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             end;
          end if;
          if B in 66 .. 105 then
@@ -2710,8 +3408,10 @@ package body Driver.Robot.Tests is
       --  and settles three beats later, 0.05 short of the target with a
       --  scatter of 0.001, as a joint held against gravity does, which is many
       --  times the readings' noise. Pushes 1 to 5 and 7 move freely; push 6
-      --  meets an obstacle at 2.0; push 8 is never answered.
-      Targets : constant Real_Array (1 .. 8) := [1.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 1.5];
+      --  meets an obstacle at 2.0; push 8, asking more than any push the
+      --  joint executed (a push within a servo's dead band is not judged,
+      --  Steps.Executed_Least), is never answered.
+      Targets : constant Real_Array (1 .. 8) := [1.0, 2.0, 1.0, 2.0, 1.0, 3.0, 1.0, 2.5];
       Stop_At : constant Real := 2.0;
       Target, Reading, From, To : Real := 0.0;
       Blocked_From : Real := 0.0;   --  where push 6 started
@@ -2786,13 +3486,43 @@ package body Driver.Robot.Tests is
      (M : in out Model; Settling : Boolean; Done, Ok : out Boolean; Beats : out Natural; Still_Poses : out Natural;
       Arm_2_Poses : out Natural; Eye_2_Noise : Real := 0.0; Eye_2_Lag : Positive := 1;
       Eye_2_Near : Real := 1.0; Eye_2_Mid : Real := 1.0; Eye_2_Far : Real := 1.0;
-      File : String := ""; Stop_Once_Kept : Boolean := False; Delivers : Real := 1.0)
+      File : String := ""; Stop_Once_Kept : Boolean := False; Delivers : Real := 1.0;
+      Tick : Real := 0.0; Deadband : Natural := 0; Speed : Natural := 0)
    is
       --  File is the body file the boot is given. With Stop_Once_Kept, the main
       --  loop stops answering a few beats after the file first exists, as if
       --  the boot had died there, and the decider is aborted. The arms' joints
       --  read Delivers of what they are sent (1: exactly it; a body under load,
       --  or whose command and reading scales differ, reads less).
+      --  Tick > 0 puts servos on the arms as the SO-101's on the Pi (R1 to R4, 10-13): the wire carries the arms'
+      --  readings and targets as whole ticks of Tick rig units each (the integer the driver reads as exact), a
+      --  target within Deadband ticks of the reading moves the servo nothing (it stands two to four ticks off a
+      --  goal and the first levels of a ladder are swallowed), and a servo moves at most Speed ticks a beat
+      --  (0: at once). The rig's own state stays in its units.
+      function Ticked (X : Real_Array) return Real_Array is
+        (if Tick > 0.0 then [for V of X => Real'Rounding (V / Tick)] else X);
+      function Unticked (X : Real_Array) return Real_Array is
+        (if Tick > 0.0 then [for V of X => V * Tick] else X);
+      --  What an arm's servos stand at a beat after they were sent Target (in the wire's units), from Reading.
+      function Served (Reading, Target : Real_Array) return Real_Array is
+         Goal   : constant Real_Array := [for V of Unticked (Target) => Delivers * V];
+         Result : Real_Array := Reading;
+      begin
+         for I in Result'Range loop
+            declare
+               Gap : constant Real := Goal (Goal'First + I - Result'First) - Reading (I);
+            begin
+               if Tick = 0.0 then
+                  Result (I) := Goal (Goal'First + I - Result'First);
+               elsif abs Gap > Real (Deadband) * Tick then
+                  Result (I) :=
+                    (if Speed = 0 or else abs Gap <= Real (Speed) * Tick then Goal (Goal'First + I - Result'First)
+                     else Reading (I) + Real (Speed) * Tick * (if Gap > 0.0 then 1.0 else -1.0));
+               end if;
+            end;
+         end loop;
+         return Result;
+      end Served;
       Since_Kept : Natural := 0;
       --  What each beat showed, for an eye that lags more than one beat.
       History   : array (0 .. Eye_2_Lag - 1) of Rig_State;
@@ -2828,6 +3558,9 @@ package body Driver.Robot.Tests is
       --  As many beats as the boot may take: every channel of the rig probed
       --  from the resolution of one reading unit, pushed both ways, and swept.
       Bound : constant := 40_000;
+      --  Per beat: eye 1's picture changed by a level or more (the flicker's step from the beat before: what a byte
+      --  picture can show), as the rig made it. The flicker's remaining offset is no change.
+      Changing : array (0 .. Bound) of Boolean := [others => False];
    begin
       Beats := 0;
       Still_Poses := 0;
@@ -2911,19 +3644,25 @@ package body Driver.Robot.Tests is
                   O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
                end loop;
             end;
-            O.Readings.Append (Now.Arm_1);
-            O.Readings.Append (Now.Arm_2);
+            O.Readings.Append (Ticked (Now.Arm_1));
+            O.Readings.Append (Ticked (Now.Arm_2));
             O.Readings.Append (Real_Array'(1 => Now.Closer));
             O.Readings.Append (Real_Array'(1 => Now.Part));
             O.Readings.Append (Real_Array'(1 => Now.Idle));
-            O.Readings.Append (Real_Array'(1 => Now.Arm_1 (1) + Now.Arm_2 (1)));
+            O.Readings.Append (Ticked (Real_Array'(1 => Now.Arm_1 (1) + Now.Arm_2 (1))));
             O.Readings.Append (Real_Array'(1 => 7.0));
             for G in 1 .. 7 loop
                O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
             end loop;
+            if Tick > 0.0 then
+               --  The wire's formats: the arms and the sum sensor in whole ticks, the rest floats.
+               for G in 1 .. 7 loop
+                  O.Precisions.Append (if G in 1 | 2 | 6 then 0 else Real'Machine_Mantissa);
+               end loop;
+            end if;
             if B = 0 then
-               Driver.Commands.Set_Target (Sent, 1, Now.Arm_1);
-               Driver.Commands.Set_Target (Sent, 2, Now.Arm_2);
+               Driver.Commands.Set_Target (Sent, 1, Ticked (Now.Arm_1));
+               Driver.Commands.Set_Target (Sent, 2, Ticked (Now.Arm_2));
                Driver.Commands.Set_Target (Sent, 3, [Now.Closer]);
                Driver.Commands.Set_Target (Sent, 4, [Now.Part]);
                Driver.Commands.Set_Target (Sent, 5, [Now.Idle]);
@@ -2937,22 +3676,16 @@ package body Driver.Robot.Tests is
             then
                Still_Poses := Still_Poses + 1;
                Poses (Still_Poses) := Now.Arm_1;
-               --  The picture changed this beat by a level or more (the flicker's step from the beat before: what
-               --  a byte picture can show), as the rig made it: a keyframe held then was held on a picture still
-               --  changing. The flicker's remaining offset is no change.
-               if Settling and then Since < Natural'Last
-                 and then (if Since = 0 then Trail else Trail * 0.3 * 0.7 ** (Since - 1)) >= 1.0
-               then
-                  Unsettled_Stills := Unsettled_Stills + 1;
-                  Driver.Log.Line (Driver.Log.Robot, "rig: arm 1 held still at beat" & M.Beats'Image & " with since"
-                                   & Since'Image & ", trail " & Driver.Log.Image (Trail, 2) & ", pose "
-                                   & Driver.Log.Image (Now.Arm_1 (1), 5) & " " & Driver.Log.Image (Now.Arm_1 (2), 5)
-                                   & ", group 1 moving " & Boolean'Image (Channels.Moving (M, 1, M.Beats - 1))
-                                   & ", eye 1 settled " & Boolean'Image (Driver.Robot.Stillness.Eye_Settled (M, 1)));
-               end if;
             end if;
+            Changing (B) := Settling and then Since < Natural'Last
+              and then (if Since = 0 then Trail else Trail * 0.3 * 0.7 ** (Since - 1)) >= 1.0;
+            --  Arm 2 is swept with its eye where the model has eye 2 on it: a pose counted while the estimate had eye
+            --  2 on another arm, or on none, is a pose of a group the boot was not sweeping with that eye (a beat of the
+            --  first probe at which the lock-in, its lag not yet told, briefly read eye 2 whole on group 2 passed this
+            --  count for a boot that never swept arm 2, robot.boot.reread on 10-17).
             for A in 1 .. Arm_Count (M) loop
                if Arm_Group (M, Arm_Id (A)) = 2 and then Now.Arm_2 /= [0.0, 0.0]
+                 and then Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = Arm_Id (A)
                  and then Driver.Robot.Kinematics.Held_Still (M, Arm_Id (A), M.Beats - 1)
                  and then (for all K in 1 .. Arm_2_Poses => Poses_2 (K) /= Now.Arm_2)
                  and then Arm_2_Poses < Poses_2'Length
@@ -2988,8 +3721,8 @@ package body Driver.Robot.Tests is
             end if;
             History (B mod Eye_2_Lag) := Now;
             Shown := Now;
-            Now.Arm_1 := [for X of Driver.Commands.Target (Sent, 1) => Delivers * X];
-            Now.Arm_2 := [for X of Driver.Commands.Target (Sent, 2) => Delivers * X];
+            Now.Arm_1 := Served (Now.Arm_1, Driver.Commands.Target (Sent, 1));
+            Now.Arm_2 := Served (Now.Arm_2, Driver.Commands.Target (Sent, 2));
             Now.Closer := Driver.Commands.Target (Sent, 3) (1);
             Now.Part := Driver.Commands.Target (Sent, 4) (1);
             Now.Idle := Driver.Commands.Target (Sent, 5) (1);
@@ -3005,6 +3738,22 @@ package body Driver.Robot.Tests is
       if not Finished then
          abort Decider;
       end if;
+      --  The keyframes arm 1 was given, each at the beat its picture was taken: one taken while the picture still
+      --  changed was held on a picture still changing. Counted from the keyframes once the boot is over, not from
+      --  the model while the decider ran: the rig's main side read Held_Still between the decider's estimates and
+      --  counted beats no keyframe was taken at, one of them with the eye's own watch unsettled (robot.boot.settling,
+      --  10-17, beat 916, the keyframes at 899 and 924).
+      for R of M.Kinematics loop
+         if R.Arm = 1 then
+            for F of R.Frames loop
+               if F.Beat in Changing'Range and then Changing (F.Beat) then
+                  Unsettled_Stills := Unsettled_Stills + 1;
+                  Driver.Log.Line (Driver.Log.Robot, "rig: arm 1 keyframe at beat" & F.Beat'Image
+                                   & " taken while its picture still changed");
+               end if;
+            end loop;
+         end if;
+      end loop;
       Done := Finished;
       Ok := Fine_Run;
    end Boot_On_Rig;
@@ -3031,6 +3780,14 @@ package body Driver.Robot.Tests is
              & Role (M, 1)'Image & " and " & Role (M, 2)'Image);
       Check (Role (M, 4) = Part, "the boot recognized the part, got " & Role (M, 4)'Image);
       Check (Known (Visible_Step (M, 1, 1)), "the boot measured how far arm 1 must move to be seen");
+      --  The fixed eye 3 saw both arms: the arms' edge flow judged it (Driver.Robot.Flows), told or not, when an arm
+      --  was fitted to place it from (the rig's arms are not: its pictures' patches are too small for the aligner).
+      Check ((for some A in 1 .. 2 => Driver.Robot.Kinematics.Fitted (M, Arm_Id (A)))
+             = (Driver.Robot.Kinematics.Fixed_Why (M, 3) /= "not measured yet"),
+             "the fixed eye 3 was judged with no arm fitted, or not judged with one");
+      Driver.Log.Line (Driver.Log.Robot, "boot from zero: eye 3 "
+                       & (if Driver.Robot.Kinematics.Fixed_Known (M, 3) then "placed"
+                          else "not placed: " & Driver.Robot.Kinematics.Fixed_Why (M, 3)));
       Driver.Log.Line (Driver.Log.Robot, "boot from zero took" & Beats'Image & " beats");
    end Boot_From_Zero;
 
@@ -3081,6 +3838,40 @@ package body Driver.Robot.Tests is
              "a move at 72 settled at 73 counts from the later move: longest" & Longest_Settling (M, 1)'Image);
    end Longest_Settling_Of_An_Eye;
 
+   --  The hold after a push for one group: only the eyes that see the group
+   --  move count. Two eyes, group 1 seen whole by eye 1 (lag measured at 1)
+   --  and not at all by eye 2 (lag unmeasured): the hold is 1, not the
+   --  doubled guess; eye 2 seeing a patch of it while unmeasured: the guess;
+   --  eye 2 measured at 10 beats: 10.
+   procedure Hold_Counts_The_Seeing_Eyes is
+      use Driver.Robot.Boot;
+      M : Model;
+      S : Eye_Stream;
+      function Seen (V : Eye_Response) return Eye_Effect is
+        ((Verdict => V, Responding => 1, Textured => 1,
+          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+   begin
+      M.Eyes.Append (S);
+      M.Eyes.Append (S);
+      M.Lags.Append (1);
+      M.Lag_Known.Append (True);
+      M.Lags.Append (0);
+      M.Lag_Known.Append (False);
+      M.Graph.Effects.Append (Seen (Whole));
+      M.Graph.Effects.Append (Seen (Nothing));
+      Check (Hold_After_A_Push (M, 1, 24) = 1,
+             "an eye that sees nothing of the group, unmeasured, kept the hold at the guess:"
+             & Hold_After_A_Push (M, 1, 24)'Image);
+      M.Graph.Effects.Replace_Element (2, Seen (Patch));
+      Check (Hold_After_A_Push (M, 1, 24) = 24,
+             "an eye that sees a patch of the group, unmeasured, did not keep the hold at the guess:"
+             & Hold_After_A_Push (M, 1, 24)'Image);
+      M.Lags.Replace_Element (2, 10);
+      M.Lag_Known.Replace_Element (2, True);
+      Check (Hold_After_A_Push (M, 1, 24) = 10,
+             "two seeing eyes measured at 1 and 10 beats: the hold is 10, got" & Hold_After_A_Push (M, 1, 24)'Image);
+   end Hold_Counts_The_Seeing_Eyes;
+
    procedure Boot_With_Short_Deliveries is
       M       : Model;
       Done    : Boolean;
@@ -3117,6 +3908,33 @@ package body Driver.Robot.Tests is
       end loop;
       Driver.Log.Line (Driver.Log.Robot, "boot with short deliveries took" & Beats'Image & " beats");
    end Boot_With_Short_Deliveries;
+
+   --  The rig's boot with the SO-101's servos on its arms: readings and targets in whole ticks, a deadband of
+   --  three ticks and forty ticks a beat (the Pi's arms, R1 to R4, 10-13: the deadband swallowed the ladder's
+   --  first levels, the pushes into stops and the jaws' creep were taken for responses hundreds of beats late,
+   --  and every look waited that long). The boot must recognize both arms with their eyes, and the delay it
+   --  measures must be what a servo takes to answer, not what a stop or a creep took.
+   procedure Boot_With_Servos is
+      M     : Model;
+      Done  : Boolean;
+      Ok    : Boolean;
+      Beats : Natural;
+      Poses, Poses_2 : Natural;
+   begin
+      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, Tick => 2.0 * Ada.Numerics.Pi / 4096.0, Deadband => 3, Speed => 40);
+      Check (Done, "the boot did not finish");
+      Check (Role (M, 1) = Arm and then Role (M, 2) = Arm, "the boot recognized both arms, got "
+             & Role (M, 1)'Image & " and " & Role (M, 2)'Image);
+      Check (Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 1).Arm = 1, "eye 1 rides on arm 1");
+      Check (Eye_Mount (M, 2).Kind = Arm_Carried and then Eye_Mount (M, 2).Arm = 2, "eye 2 rides on arm 2");
+      for G in Group_Id range 1 .. 2 loop
+         Check (M.Groups (G).Delay_Known and then M.Groups (G).Delay_Beats <= 2,
+                "group" & G'Image & " answers within the beat a servo takes, got "
+                & (if M.Groups (G).Delay_Known then M.Groups (G).Delay_Beats'Image else " unknown"));
+      end loop;
+      Driver.Log.Line (Driver.Log.Robot, "boot with servos took" & Beats'Image & " beats, arm 1 swept at" & Poses'Image
+                       & " poses, arm 2 at" & Poses_2'Image);
+   end Boot_With_Servos;
 
    --  The rig's boot with arm 2's eye noisy (luma noise of 2 in its every
    --  pixel): pushed by the amount another eye first sees it at, arm 2 leaves
@@ -3252,7 +4070,7 @@ package body Driver.Robot.Tests is
          for C in 1 .. 2 loop
             declare
                First  : constant Real := Driver.Robot.Motion.Sweep_Start (M, 1, C);
-               Shift  : constant Real := Lockin.Shift (M, 1, 1, C);
+               Shift  : constant Real := Driver.Robot.Kinematics.Pixels_Per_Unit (M, 1, C);
                Offset : Real := First;
                Level  : Positive := 1;
             begin
@@ -3272,13 +4090,13 @@ package body Driver.Robot.Tests is
                        & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
       Check (Levels > 0, "arm 1 was not swept");
       Check (Poses >= Levels, "arm 1 could give" & Poses'Image & " keyframes away from rest for" & Levels'Image & " sweep levels");
-      --  A keyframe waits for the picture to settle: arm 1 is never held still for one while eye 1's picture
-      --  still flickers by a level or more after its move (the rig counts those). The same boot with pictures
+      --  A keyframe waits for the picture to settle: arm 1 is given none while eye 1's picture still flickers by a
+      --  level or more after its move (the rig counts those). The same boot with pictures
       --  that settle at once finishes too. (The sweep once visited every other level and passed the rest before
       --  the picture settled, so that this boot held fewer poses than the ideal one; now every level is held until
       --  the picture settles, and the counts tell nothing.)
-      Check (Unsettled_Stills = 0, "arm 1 was held still for a keyframe" & Unsettled_Stills'Image
-             & " times at a beat where its picture still changed by a level or more");
+      Check (Unsettled_Stills = 0, "arm 1 was given" & Unsettled_Stills'Image
+             & " keyframes at beats where its picture still changed by a level or more");
       declare
          Ideal                                 : Model;
          Ideal_Done, Ideal_Ok                  : Boolean;
@@ -3326,6 +4144,22 @@ package body Driver.Robot.Tests is
                 & Role (Back, 2)'Image & ", " & Role (Back, 4)'Image);
          Check (Eye_Mount (Back, 1) = Eye_Mount (M, 1) and then Eye_Mount (Back, 2) = Eye_Mount (M, 2),
                 "the reloaded body mounts its eyes elsewhere");
+         --  And the turns at which the recognition saw each channel move an eye, from which the sweeps begin: a boot
+         --  begun from the file without them swept from the least turn a keyframe counts, which moved no view, and
+         --  left those joints as not moving the eye (f16e on 10-15).
+         Check ((for some G in 1 .. Group_Count (M) => (for some X of M.Groups (Group_Id (G)).Seen_At => X > 0.0)),
+                "the boot recognized no channel an eye saw move");
+         for G in 1 .. Group_Count (M) loop
+            declare
+               Was : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Seen_At;
+               Now : Real_Vectors.Vector renames Back.Groups (Group_Id (G)).Seen_At;
+            begin
+               Check (Natural (Now.Length) = Natural (Was.Length)
+                      and then (for all C in Was.First_Index .. Was.Last_Index =>
+                                  abs (Now (C) - Was (C)) <= 1.0E-9 * abs Was (C)),
+                      "group" & G'Image & "'s turns its recognition saw it move an eye at were not reloaded");
+            end;
+         end loop;
          GNAT.OS_Lib.Delete_File (Name.all, Gone);
       end if;
       Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
@@ -3343,8 +4177,15 @@ package body Driver.Robot.Tests is
    --  as Lost).
    type Noise_Before is (As_Measured, Idle_Beat, Lost_Noise);
 
+   --  Late is how many beats after a command is in effect the readings show it (0: the beat after it is sent, as
+   --  the lab's simulator; 1: a beat later, as the fake robot and a servo bus); Primed says whether the body is
+   --  pushed a few times before the probe, so that its delay and the eyes' lag are measured, or the probe's
+   --  first level is the body's first push. Delay_Seen is the first push of the joint's wait from its start to
+   --  its readings' first motion (-1 when it never moved), Chained how many of the joint's pushes began while it
+   --  was still moving from the push before.
    procedure Probe_Drooping_Joint
-     (First : Real; Before : Noise_Before; Taken : out Natural; Finished : out Boolean)
+     (First : Real; Before : Noise_Before; Late : Natural; Primed : Boolean;
+      Taken : out Natural; Finished : out Boolean; Delay_Seen : out Integer; Chained : out Natural)
    is
       M     : Model;
       Done  : Boolean := False with Atomic;
@@ -3379,20 +4220,22 @@ package body Driver.Robot.Tests is
          --  show it.
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
-         for K in 1 .. 16 loop
-            declare
-               C  : Driver.Commands.Command;
-               SR : Driver.Robot.Motion.Step_Report;
-            begin
-               Driver.Commands.Set_Target (C, 5, [(if K mod 2 = 1 then 1.0e-6 else 0.0)]);
-               Driver.Robot.Motion.Step (M, C, SR);
-               Driver.Robot.Motion.Hold (M, 2 + K mod 3);
-               --  Arm 1, which eye 1 sees, for the eyes' lag.
-               Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
-               Driver.Robot.Motion.Step (M, C, SR);
-               Driver.Robot.Motion.Hold (M, 2 + K mod 4);
-            end;
-         end loop;
+         if Primed then
+            for K in 1 .. 16 loop
+               declare
+                  C  : Driver.Commands.Command;
+                  SR : Driver.Robot.Motion.Step_Report;
+               begin
+                  Driver.Commands.Set_Target (C, 5, [(if K mod 2 = 1 then 1.0e-6 else 0.0)]);
+                  Driver.Robot.Motion.Step (M, C, SR);
+                  Driver.Robot.Motion.Hold (M, 2 + K mod 3);
+                  --  Arm 1, which eye 1 sees, for the eyes' lag.
+                  Driver.Commands.Set_Target (C, 1, [(if K mod 2 = 1 then 0.1 else 0.0), 0.0]);
+                  Driver.Robot.Motion.Step (M, C, SR);
+                  Driver.Robot.Motion.Hold (M, 2 + K mod 4);
+               end;
+            end loop;
+         end if;
          Driver.Beats.Within_A_Beat (Estimate'Access);
          Driver.Robot.Motion.Gather_Rest (M, 2);
          case Before is
@@ -3409,7 +4252,7 @@ package body Driver.Robot.Tests is
             Done := True;
       end Decider;
 
-      Now, Shown : Rig_State;
+      Now, Shown, Due : Rig_State;
       Sent  : Driver.Commands.Command;
       Rng   : Generator;
    begin
@@ -3455,14 +4298,22 @@ package body Driver.Robot.Tests is
                   end if;
                end loop;
                Shown := Now;
-               Now.Arm_1 := Driver.Commands.Target (Sent, 1);
-               Now.Arm_2 := Driver.Commands.Target (Sent, 2);
-               Now.Closer := Driver.Commands.Target (Sent, 3) (1);
-               Now.Part := Driver.Commands.Target (Sent, 4) (1);
                declare
-                  T : constant Real := Real'Min (Driver.Commands.Target (Sent, 5) (1), Limit);
+                  Next : Rig_State;
+                  T    : constant Real := Real'Min (Driver.Commands.Target (Sent, 5) (1), Limit);
                begin
-                  Now.Idle := T - T * abs T;
+                  Next.Arm_1 := Driver.Commands.Target (Sent, 1);
+                  Next.Arm_2 := Driver.Commands.Target (Sent, 2);
+                  Next.Closer := Driver.Commands.Target (Sent, 3) (1);
+                  Next.Part := Driver.Commands.Target (Sent, 4) (1);
+                  Next.Idle := T - T * abs T;
+                  --  The readings show a command the beat after it is in effect, or Late beats later.
+                  if Late = 0 then
+                     Now := Next;
+                  else
+                     Now := Due;
+                     Due := Next;
+                  end if;
                end;
             end;
          end loop;
@@ -3476,6 +4327,22 @@ package body Driver.Robot.Tests is
       end if;
       Finished := Done;
       Taken := Steps;
+      Delay_Seen := -1;
+      Chained := 0;
+      if Driver.Robot.Steps.Episodes (M, 5) > 0 then
+         declare
+            E : constant Episode := M.Groups (5).Episodes.First_Element;
+         begin
+            if E.Moved then
+               Delay_Seen := Integer (E.Moved_At) - Integer (E.Start);
+            end if;
+         end;
+         for E of M.Groups (5).Episodes loop
+            if E.Born_Moving then
+               Chained := Chained + 1;
+            end if;
+         end loop;
+      end if;
    end Probe_Drooping_Joint;
 
    --  The probe must double until the joint stops, not call the second
@@ -3483,15 +4350,40 @@ package body Driver.Robot.Tests is
    procedure Probe_A_Drooping_Joint is
       Steps    : Natural;
       Finished : Boolean;
+      Seen     : Integer;
+      Chained  : Natural;
    begin
       --  From an offset of 1e-5, as a group's probe starts from the amount
       --  the probe of every channel together was first seen at.
-      Probe_Drooping_Joint (1.0e-5, As_Measured, Steps, Finished);
+      Probe_Drooping_Joint (1.0e-5, As_Measured, 0, True, Steps, Finished, Seen, Chained);
       Check (Finished, "the probe did not finish");
       --  From 1e-5 the joint follows seven doublings, to 1.28e-3, and stops at
       --  1e-3: the ninth level is the first that takes it no further.
       Check (Steps = 9, "the probe called the joint's end after" & Steps'Image & " levels, not 9");
    end Probe_A_Drooping_Joint;
+
+   --  The same joint on a body whose readings show a command a beat later than the lab's simulator's, probed as
+   --  the body's first push, before any delay is measured: each level must be read after the body has answered
+   --  it, not a beat after it was sent. Read too soon, every level reads the one before it (the first level is
+   --  judged not executed, the second is sent into the first's answer and credited with it, and so on), the
+   --  joint's end comes a level late, no push begins with the joint still, and the body's delay, measured from
+   --  pushes born into the motion of the push before, is 0 (seed 2 of the fake robot, 10-14: the boot ended with
+   --  nothing seen).
+   procedure Probe_A_Delayed_Joint is
+      Steps    : Natural;
+      Finished : Boolean;
+      Seen     : Integer;
+      Chained  : Natural;
+   begin
+      Probe_Drooping_Joint (1.0e-5, As_Measured, 1, False, Steps, Finished, Seen, Chained);
+      Check (Finished, "the probe of the delayed joint did not finish");
+      Check (Steps = 9, "the probe called the delayed joint's end after" & Steps'Image & " levels, not 9: its levels"
+             & " were read before the joint answered them");
+      Check (Seen = 1, "the delayed joint's first push was answered" & Seen'Image & " beats after its start, not 1:"
+             & " the first level was cut short by the second before its answer");
+      Check (Chained = 0, Chained'Image & " of the delayed joint's pushes began while it was still moving from the"
+             & " push before: a level was sent before the one before it was answered");
+   end Probe_A_Delayed_Joint;
 
    --  A probe that begins at the smallest step its channel's noise tells takes
    --  that step from the noise the estimates have measured when it begins,
@@ -3504,9 +4396,11 @@ package body Driver.Robot.Tests is
    procedure Probe_Reads_After_It_Measures is
       Kept, Lost         : Natural;
       Kept_Done, Lost_Done : Boolean;
+      Kept_Seen, Lost_Seen : Integer;
+      Kept_Chained, Lost_Chained : Natural;
    begin
-      Probe_Drooping_Joint (0.0, Idle_Beat, Kept, Kept_Done);
-      Probe_Drooping_Joint (0.0, Lost_Noise, Lost, Lost_Done);
+      Probe_Drooping_Joint (0.0, Idle_Beat, 0, True, Kept, Kept_Done, Kept_Seen, Kept_Chained);
+      Probe_Drooping_Joint (0.0, Lost_Noise, 0, True, Lost, Lost_Done, Lost_Seen, Lost_Chained);
       Check (Kept_Done and then Lost_Done, "a probe from the smallest step the noise tells did not finish");
       Check (Kept < Real'Machine_Mantissa,
              "the probe from the measured noise doubled as many times as a float has bits (" & Kept'Image
@@ -3521,13 +4415,18 @@ package body Driver.Robot.Tests is
    --  beats, the estimates are computed apart from the main loop (Driver.Robot.Compute_Apart): the decider that asks for them
    --  waits (Driver.Beats), the model takes in Wait beats of rest, computes them, and the decider goes on in the beat after,
    --  as Driver.Apart has the main loop do. Seen: the probe confirmed the level the eye saw.
+   --  Alone probes arm 1's first channel on its own (Probe_Both_Ways) instead of every listed channel together;
+   --  Pushes counts the pushes of group 1 the probe made.
    procedure Probe_Through_Apart_Estimates
-     (Wait : Natural; Seen : out Boolean; Excursion : out Real; Finished : out Boolean)
+     (Wait : Natural; Alone : Boolean; Seen : out Boolean; Excursion : out Real; Finished : out Boolean;
+      Pushes : out Natural)
    is
       M     : Model;
       Done  : Boolean := False with Atomic;
       Slow  : Boolean := False with Atomic;   --  the estimates the probe asks for take the Wait beats
       Got   : Driver.Robot.Motion.Probe_Report;
+      Two   : Driver.Robot.Motion.Two_Way_Report;
+      Before, After : Natural := 0 with Atomic;
 
       task Decider;
       task body Decider is
@@ -3541,6 +4440,14 @@ package body Driver.Robot.Tests is
             M.Noise.Replace_Element (0, Real'Last);   --  group 1's first channel
             M.Noise_Freedom.Replace_Element (0, 0);
          end Lose_Noise;
+         procedure Read_Before is
+         begin
+            Before := Steps.Episodes (M, 1);
+         end Read_Before;
+         procedure Read_After is
+         begin
+            After := Steps.Episodes (M, 1);
+         end Read_After;
       begin
          Driver.Robot.Motion.Settle (M, W);
          Driver.Robot.Motion.Hold (M, 100);
@@ -3559,7 +4466,15 @@ package body Driver.Robot.Tests is
          Driver.Robot.Motion.Gather_Rest (M, 2);
          Driver.Beats.Within_A_Beat (Lose_Noise'Access);
          Slow := True;
-         Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         Driver.Beats.Within_A_Beat (Read_Before'Access);
+         if Alone then
+            Driver.Robot.Motion.Probe_Both_Ways (M, (Group => 1, Channel => 1), 0.2, Two);
+            Got.Seen := Two.Seen;
+            Got.Excursion := Two.Excursion;
+         else
+            Driver.Robot.Motion.Probe_Together (M, [1 => (Group => 1, Channel => 1)], 1.0, 0.2, Got);
+         end if;
+         Driver.Beats.Within_A_Beat (Read_After'Access);
          Done := True;
       exception
          when others =>
@@ -3655,7 +4570,24 @@ package body Driver.Robot.Tests is
       Finished := Done;
       Seen := Got.Seen;
       Excursion := Got.Excursion;
+      Pushes := (if After >= Before then After - Before else 0);
    end Probe_Through_Apart_Estimates;
+
+   --  A channel probed on its own that an eye sees at the first amount is confirmed by the lock-in's regression
+   --  after one estimate, not by a run of moves back and forth: the probe pushes it up once and back once.
+   procedure Probe_Confirms_By_The_Lockin is
+      Seen     : Boolean;
+      Amount   : Real;
+      Finished : Boolean;
+      Pushes   : Natural;
+   begin
+      Probe_Through_Apart_Estimates (0, True, Seen, Amount, Finished, Pushes);
+      Check (Finished, "the probe of the channel alone did not finish");
+      Check (Seen and then Amount = 0.2,
+             "the channel alone, which the eye sees at 0.2, was sure of" & Amount'Image & " (seen:" & Seen'Image & ")");
+      Check (Pushes <= 3, "the probe of the channel alone pushed it" & Pushes'Image
+             & " times: a run of moves back and forth confirmed it instead of the lock-in");
+   end Probe_Confirms_By_The_Lockin;
 
    --  An eye sees the joint of an arm move at the first amount: the probe confirms that amount, whether the estimates it
    --  asks for as it begins come back in the same beat or beats later. Read before the estimates, the first beat no look has
@@ -3666,9 +4598,10 @@ package body Driver.Robot.Tests is
       In_Place, Apart                        : Boolean;
       In_Place_Amount, Apart_Amount          : Real;
       Done_1, Done_2                         : Boolean;
+      Pushes_1, Pushes_2                     : Natural;
    begin
-      Probe_Through_Apart_Estimates (0, In_Place, In_Place_Amount, Done_1);
-      Probe_Through_Apart_Estimates (300, Apart, Apart_Amount, Done_2);
+      Probe_Through_Apart_Estimates (0, False, In_Place, In_Place_Amount, Done_1, Pushes_1);
+      Probe_Through_Apart_Estimates (300, False, Apart, Apart_Amount, Done_2, Pushes_2);
       Check (Done_1 and then Done_2, "a probe through the estimates did not finish");
       Check (In_Place and then In_Place_Amount = 0.2,
              "the probe of an arm's joint, the estimates in place, was sure of" & In_Place_Amount'Image
@@ -3750,7 +4683,7 @@ package body Driver.Robot.Tests is
             M.Graph.Effects.Replace_Element
               ((5 - 1) * Eyes + 1,
                (Verdict => Patch, Responding => 1, Textured => 1,
-                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0));
+                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
             M.From_File (Stored_Responses) := True;
          end Credit_Step;
       begin
@@ -3949,26 +4882,34 @@ package body Driver.Robot.Tests is
    --  covariance of it: the chi square of its Lens_Terms terms (the logarithms
    --  of the focal lengths, the principal point, the two distortion terms).
    --  Real'Last when the covariance is not that of a fit or is not positive
-   --  definite.
+   --  definite. A lens fitted as a pinhole with square pixels (Fit_Report's
+   --  Pinhole) is judged on the terms it has: the first focal length and the
+   --  principal point (Pinhole_Terms).
+   Pinhole_Terms : constant array (1 .. 3) of Positive := [1, 3, 4];
+
    function Lens_Chi_Square
      (Found, Truth : Driver.Robot.Kinematics.Fit.Lens;
-      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector) return Real
+      Covariance   : Driver.Robot.Kinematics.Fit.Real_Lists.Vector;
+      Pinhole      : Boolean := False) return Real
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       Terms : constant Natural := Natural (Sqrt (Real (Natural (Covariance.Length))));
-      Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
+      All_Error : constant Real_Vector (1 .. Fit.Lens_Terms) :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Found.Fx / Truth.Fx),
          Ada.Numerics.Long_Elementary_Functions.Log (Found.Fy / Truth.Fy),
          Found.Cx - Truth.Cx, Found.Cy - Truth.Cy, Found.K1 - Truth.K1, Found.K2 - Truth.K2];
-      V, L  : Real_Matrix (1 .. Fit.Lens_Terms, 1 .. Fit.Lens_Terms) := [others => [others => 0.0]];
+      Kept  : constant Positive := (if Pinhole then Pinhole_Terms'Length else Fit.Lens_Terms);
+      function Term (K : Positive) return Positive is (if Pinhole then Pinhole_Terms (K) else K);
+      Error : constant Real_Vector (1 .. Kept) := [for K in 1 .. Kept => All_Error (Term (K))];
+      V, L  : Real_Matrix (1 .. Kept, 1 .. Kept) := [others => [others => 0.0]];
       Ok    : Boolean;
    begin
       if Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
          return Real'Last;
       end if;
-      for P in 1 .. Fit.Lens_Terms loop
-         for Q in 1 .. Fit.Lens_Terms loop
-            V (P, Q) := Covariance (Covariance.First_Index + (P - 1) * Terms + Q - 1);
+      for P in 1 .. Kept loop
+         for Q in 1 .. Kept loop
+            V (P, Q) := Covariance (Covariance.First_Index + (Term (P) - 1) * Terms + Term (Q) - 1);
          end loop;
       end loop;
       Driver.Numerics.Dense.Cholesky (V, L, Ok);
@@ -4042,9 +4983,14 @@ package body Driver.Robot.Tests is
    --  arm's (harness/robodojo_scramble): reading I is joint Order_Of (I) of
    --  the chain times Gain (I), a power of two of either sign, so that
    --  neither the readings' order is the chain's nor their unit radians.
+   --  Matcher_Noise is the spread of every sighting's own error, in pixels (0.2 unless given; the kiwi's aligner
+   --  left 0.6 to 1.2 px a keyframe, R6 10-14); Kept_Share keeps that share of the grid's points, drawn once for the
+   --  sweep (a white table leaves the aligner a fifth of its query points, R6).
    procedure Synthetic_Sweep
      (Scale : Real; Expect_Fit : Boolean; Frame_Error : Real := 0.0; Track_Error : Real := 0.0;
-      Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False)
+      Local_Error : Real := 0.0; Pending : Boolean := False; Drawn : Boolean := False;
+      Matcher_Noise : Real := 0.2; Kept_Share : Real := 1.0; Either : Boolean := False; Distortion : Real := 0.0;
+      Quantum : Real := 0.0; Relief : Real := 0.0; Order_Needed : Boolean := True)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N       : constant := 6;
@@ -4056,10 +5002,16 @@ package body Driver.Robot.Tests is
       Frames  : constant Positive := 1 + N * Levels'Length + Cells;
       Columns : constant := 16;
       Rows    : constant := 12;
-      Noise   : constant := 0.2;
+      Noise   : constant Real := Matcher_Noise;
+      Keep_Rng : Generator := (State => 13);
+      Kept_Point : constant array (1 .. Columns * Rows) of Boolean :=
+        [for K in 1 .. Columns * Rows => Kept_Share >= 1.0 or else Uniform (Keep_Rng) < Kept_Share];
       Table   : constant Vec3 := [0.0, -0.6, -0.8];   --  its normal, towards the eye
       Truth   : Fit.Joint_Array (1 .. N);
-      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => Distortion, K2 => 0.0);
+      --  The checks against fixed fractions of the noise hold for the fine sightings (0.2 px, every point, no
+      --  distortion) they were set on; elsewhere the fit is judged by its own uncertainty alone.
+      Fine    : constant Boolean := Matcher_Noise <= 0.2 and then Kept_Share >= 1.0 and then Distortion = 0.0;
       Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
       Rng     : Generator;
       type Sighting_Access is access Fit.Sighting_Array;
@@ -4144,7 +5096,10 @@ package body Driver.Robot.Tests is
                         V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
                         --  The table: the plane one unit from the eye along its normal.
                         H     : constant Vec3 := Fit.Ray (Lens, U0, V0);
-                        Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                        --  Relief: the scene no plane, each point's depth off the table's by up to that share, by the
+                        --  golden angle from one point to the next (no two alike).
+                        Plane_Depth : constant Real := -1.0 / Real'(Unit (Table) * H);
+                        Depth : constant Real := Plane_Depth * (1.0 + Relief * Sin (Real (K) * Ada.Numerics.Pi * (3.0 - Sqrt (5.0))));
                         X  : constant Vec3 := Depth * H;
                         U, V : Real;
                         Ahead : Boolean;
@@ -4152,9 +5107,10 @@ package body Driver.Robot.Tests is
                         Fit.Project (Lens, T * X, U, V, Ahead);
                         U := U + Noise * Gaussian (Rng) + Shared_U + Track_U (K) + Local_U (K);
                         V := V + Noise * Gaussian (Rng) + Shared_V + Track_V (K) + Local_V (K);
-                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+                        if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 and then Kept_Point (K) then
                            Seen := Seen + 1;
-                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0);
+                           All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V, Own => 0.0, Own_Freedom => 0,
+                                               others => <>);
                         end if;
                      end;
                   end loop;
@@ -4194,6 +5150,7 @@ package body Driver.Robot.Tests is
          --  arm it should find, by reading: joint Order_Of (I) turning by one
          --  over Gain (I) per reading unit, and the chain through the draw.
          Given      : Real_Matrix (1 .. Frames, 1 .. N);
+         Asked      : Fit.Flag_Matrix (1 .. Frames, 1 .. N);   --  the draw's joints that turned: what a sweep asked
          Want_Joints : Fit.Joint_Array (1 .. N);
          Want_Chain  : Fit.Chain_Order (1 .. N);
          function Drawn_Of (D : Real_Array) return Real_Array is
@@ -4201,7 +5158,10 @@ package body Driver.Robot.Tests is
       begin
          for F in 1 .. Frames loop
             for I in 1 .. N loop
-               Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+               --  A servo reads its turn to the nearest tick (Quantum, 0 for none): the fit is given that.
+               Given (F, I) := Gain (I) * (if Quantum > 0.0 then Quantum * Real'Rounding (Changes (F, Order_Of (I)) / Quantum)
+                                           else Changes (F, Order_Of (I)));
+               Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
             end loop;
          end loop;
          for I in 1 .. N loop
@@ -4209,11 +5169,19 @@ package body Driver.Robot.Tests is
             Want_Joints (I).C := 1.0 / Gain (I);
             Want_Chain (Order_Of (I)) := I;
          end loop;
-         Fit.Fit (Given, [for I in 1 .. N => abs Gain (I) * 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints,
+         Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01 * Scale], All_Seen (1 .. Seen), 640, 480, 0, Joints,
                   Chain, Found, Report);
+         Driver.Log.Line (Driver.Log.Robot, "kinematics test: widest turn" & Real'Image (0.2 * Scale) & " rad, noise"
+                          & Real'Image (Noise) & " px, " & Seen'Image & " sightings: " & (if Report.Fitted then "fitted, focal "
+                          & Driver.Log.Image (Found.Fx, 2) & " +- " & Driver.Log.Image (Report.Focal_Sigma, 2) & " px"
+                          else "not fitted at stage" & Report.Stage'Image & ", " & Ada.Strings.Unbounded.To_String (Report.Why)));
          if not Expect_Fit then
             Check (not Report.Fitted, "a sweep of" & Real'Image (0.2 * Scale) & " rad at most was fitted, focal"
                    & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy));
+            return;
+         end if;
+         --  Either: a sweep that may or may not tell the arm; what the fit reports, it reports right.
+         if Either and then not Report.Fitted then
             return;
          end if;
          Check (Report.Fitted, "the fit did not succeed: stage" & Report.Stage'Image & ", "
@@ -4227,17 +5195,18 @@ package body Driver.Robot.Tests is
                 & Report.Focal_Sigma'Image);
          --  The whole lens, its terms together: a chi square as rare as Z.
          declare
-            Chi : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance);
+            Chi  : constant Real := Lens_Chi_Square (Found, Lens, Report.Covariance, Report.Pinhole);
+            Kept : constant Positive := (if Report.Pinhole then Pinhole_Terms'Length else Fit.Lens_Terms);
          begin
-            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Fit.Lens_Terms) <= Driver.Conventions.Z,
-                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Fit.Lens_Terms'Image
+            Check (Driver.Distributions.Chi_Square_Deviate (Chi, Kept) <= Driver.Conventions.Z,
+                   "the lens is off by a chi square of" & Real'Image (Chi) & " on" & Kept'Image
                    & " terms: focal" & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy) & ", centre"
                    & Real'Image (Found.Cx) & "," & Real'Image (Found.Cy) & ", distortion" & Real'Image (Found.K1)
                    & "," & Real'Image (Found.K2));
             Driver.Log.Line (Driver.Log.Robot, "kinematics test lens: chi square" & Real'Image (Chi) & " on"
                              & Fit.Lens_Terms'Image & " terms");
          end;
-         if Frame_Error = 0.0 then
+         if Frame_Error = 0.0 and then Fine then
             Check_Close (Found.Fx, Lens.Fx, Lens.Fx * Noise / 40.0, "the focal length across");
             Check_Close (Found.Fy, Lens.Fy, Lens.Fy * Noise / 40.0, "the focal length down");
             --  Each reading's turn per unit, as a vector: an axis and its
@@ -4255,6 +5224,12 @@ package body Driver.Robot.Tests is
                end;
             end loop;
          end if;
+         --  The order, and the eye where it rests on the order: where the sweep's keyframes leave the true order the
+         --  best (Order_Needed), the best is the true one, told or not; and a told one is right. Whether keyframes tell
+         --  an order at Z is the order exams' (robot.order.exam): these sweeps turn no pair the fit names (the boot's
+         --  Pair_Shares), and the fits that told an order from them told it by sightings counted one by one, the test
+         --  that told s83's wrong order (servo seed 6 of the fake robot, 10-18).
+         if Order_Needed or else Report.Order_Told then
          Check (Fit."=" (Chain, Want_Chain), "the joints along the arm, by their readings, came out as " & Chain_Text (Chain)
                 & ", not " & Chain_Text (Want_Chain));
          --  The eye at a pose no keyframe had, lengths in the fit's units.
@@ -4276,7 +5251,7 @@ package body Driver.Robot.Tests is
             Scale := Sqrt (Scale / Real (Frames));
             Want := Fit.Eye_At (Truth, Along (Truth), Test);
             Got := Fit.Eye_At (Joints, Chain, Drawn_Of (Test));
-            if Frame_Error = 0.0 then
+            if Frame_Error = 0.0 and then Fine then
                Check (abs (Scale * Got.Translation - Want.Translation) < Scale * Noise / 40.0,
                       "the eye at a new pose is off by" & Real'Image (abs (Scale * Got.Translation - Want.Translation) / Scale)
                       & " of the arm's reach");
@@ -4309,7 +5284,9 @@ package body Driver.Robot.Tests is
                                 & " sigma" & Real'Image (Sqrt (Turn (1, 1) + Turn (2, 2) + Turn (3, 3))));
             end;
          end;
-         if Frame_Error = 0.0 then
+         end if;
+         --  The table, where the scene is one (no relief).
+         if Frame_Error = 0.0 and then Relief = 0.0 then
          declare
             Normal : Vec3;
             Offset, Offset_Sigma : Real;
@@ -4346,9 +5323,25 @@ package body Driver.Robot.Tests is
             --  to: its distance from the table is minus the offset.
             Check (Offset < 0.0 and then Offset_Sigma < -Offset, "the table's offset is" & Offset'Image & " +-"
                    & Offset_Sigma'Image);
-            Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
-                   "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
-            Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
+            if Fine then
+               Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) < Noise / 40.0,
+                      "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table)))) & " rad");
+               Check (Sigma < Noise / 40.0, "the table's normal is uncertain by" & Sigma'Image & " rad");
+            else
+               --  The table a desktop arm's eye sees: its normal within Z of its uncertainty as the driver takes it,
+               --  the points' scatter and what the fit's own uncertainty moves every depth by together
+               --  (Plane_Covariance, as Kinematics has the table): sparse sightings a pixel off leave the second the
+               --  larger.
+               declare
+                  Whole : Fit.Sight_Plane := Plane;
+               begin
+                  Whole.Covariance := Fit.Plane_Covariance (Sights, On, Plane, Report.Depth_Gains, Report.Covariance);
+                  Check (Arccos (Real'Min (1.0, Normal * Unit (Table))) <= Driver.Conventions.Z * Fit.Plane_Tilt_Sigma (Whole),
+                         "the table's normal is off by" & Real'Image (Arccos (Real'Min (1.0, Normal * Unit (Table))))
+                         & " rad, its sigma" & Real'Image (Fit.Plane_Tilt_Sigma (Whole)) & " (the points' scatter alone"
+                         & Sigma'Image & ")");
+               end;
+            end if;
          end;
          end if;
          Driver.Log.Line (Driver.Log.Robot, "kinematics test: focal " & Real'Image (Found.Fx) & " x" & Real'Image (Found.Fy)
@@ -4514,7 +5507,7 @@ package body Driver.Robot.Tests is
       begin
          O.Readings.Append (Start);
          declare
-            P : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Fit.Eye_At (Truth, Along (Truth), Goal_Q), Position_Only => False));
+            P : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Fit.Eye_At (Truth, Along (Truth), Goal_Q), Position_Only => False, Free_About => <>));
          begin
             Check (Motion.Status (P) = Motion.Planned, "a goal a period away is not planned: " & Motion.Why (P));
             if Motion.Status (P) = Motion.Planned then
@@ -4621,7 +5614,7 @@ package body Driver.Robot.Tests is
       Line := Unit (Goal.Translation - From.Translation);
       declare
          Sigma : constant Real := Driver.Robot.Kinematics.Angle_Sigma (M, 1);
-         Free  : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => False));
+         Free  : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => False, Free_About => <>));
          Bow   : Real;
       begin
          Check (Motion.Status (Free) = Motion.Planned, "a pose the arm can reach is not planned: " & Motion.Why (Free));
@@ -4632,7 +5625,7 @@ package body Driver.Robot.Tests is
          declare
             Asked : constant Real := Bow / 8.0;
             Held  : constant Motion.Plan := Motion.Plan_Reach_In_Arm
-              (M, 1, O, (Pose => Goal, Position_Only => False), Clearance => Asked);
+              (M, 1, O, (Pose => Goal, Position_Only => False, Free_About => <>), Clearance => Asked);
          begin
             Check (Motion.Status (Held) = Motion.Planned, "a pose the arm can reach is not planned with a clearance: "
                    & Motion.Why (Held));
@@ -4657,7 +5650,7 @@ package body Driver.Robot.Tests is
          --  search, hundreds of times over).
          declare
             Far    : constant Rigid := (Rotation => Goal.Rotation, Translation => From.Translation + 100.0 * Line);
-            Lost   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Far, Position_Only => False));
+            Lost   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Far, Position_Only => False, Free_About => <>));
             Levels : constant Natural :=
               Natural (Real'Ceiling (Ada.Numerics.Long_Elementary_Functions.Log (100.0 / Sigma)
                                      / Ada.Numerics.Long_Elementary_Functions.Log (2.0)));
@@ -4757,7 +5750,7 @@ package body Driver.Robot.Tests is
                declare
                   Goal : constant Rigid := Fit.Eye_At (Truth, Along (Truth), Q);
                   Held : constant Motion.Plan :=
-                    Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => True), Clearance => Asked);
+                    Motion.Plan_Reach_In_Arm (M, 1, O, (Pose => Goal, Position_Only => True, Free_About => <>), Clearance => Asked);
                begin
                   if Motion.Status (Held) = Motion.Planned and then abs (Goal.Translation - From.Translation) > Sigma then
                      declare
@@ -4829,7 +5822,8 @@ package body Driver.Robot.Tests is
       Readings : Real_Array;
       Ref      : Real_Array;
       Truth    : Driver.Robot.Kinematics.Fit.Joint_Array;
-      Rng      : in out Generator)
+      Rng      : in out Generator;
+      Base     : Real_Array)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       K : Keyframe;
@@ -4837,6 +5831,10 @@ package body Driver.Robot.Tests is
       K.Beat := Natural (R.Frames.Length) + 1;
       for X of Readings loop
          K.Readings.Append (X);
+      end loop;
+      --  What the sweep asked: every joint away from the sweep's base (the reference may lie off it).
+      for J in Readings'Range loop
+         K.Asked.Append (Readings (J) /= Base (Base'First + J - Readings'First));
       end loop;
       R.Frames.Append (K);
       if Natural (R.Frames.Length) > 1 then
@@ -4900,7 +5898,7 @@ package body Driver.Robot.Tests is
 
       procedure Add_Frame (Readings : Real_Array) is
       begin
-         Add_Keyframe (R, Readings, Ref, Truth, Rng);
+         Add_Keyframe (R, Readings, Ref, Truth, Rng, Base);
       end Add_Frame;
    begin
       for J in 1 .. N loop
@@ -5061,9 +6059,6 @@ package body Driver.Robot.Tests is
 
    type Box_Array is array (Positive range <>) of Box;
 
-   --  A box standing alone: two of the first eye's points are on it (they are seen a tenth of a unit apart).
-   Lone : constant Box_Array := [(0.0, 0.13, 0.5, 0.63, 0.25)];
-
    --  Three under each arm's view, about half of what each eye sees.
    Boxes : constant Box_Array :=
      [(-0.7, 0.3, 0.2, 0.9, 0.2), (0.35, 1.4, 0.8, 1.7, 0.3), (-1.5, -0.2, 1.2, 2.1, 0.15),
@@ -5103,32 +6098,47 @@ package body Driver.Robot.Tests is
       X := Best * H;
    end Scene_Point;
 
-   --  How the arms' world is drawn. The first arm's reference eye is the
-   --  world; the second's stands at Second. Head, when there is one, is a
-   --  third eye fixed in the world at Head_Pose that shows both arms move;
-   --  each arm's reference is matched into it. The second arm's eye shows the
-   --  first arm move when Wrist_Sees. A point an eye does not show is
-   --  answered nonetheless when Answer_Unseen holds for that eye: where an
-   --  eye at the query eye's centre, turned as the asked eye is, would see it
-   --  (what a dense matcher spreads over what it cannot see); otherwise it
-   --  has no answer.
+   --  How the arms' world is drawn. The first arm's reference eye is the world; the second's stands at Second.
+   --  Head, when there is one, is a third eye fixed in the world at Head_Pose that saw both arms turn: placed as the
+   --  arms' edge flow places it (Driver.Robot.Flows), its lens and its camera in each arm's frame drawn about the
+   --  truth with the sigmas it states (Head_Noise pixels at its lens).
    type Rig_Scene is record
       Second        : Rigid := Driver.Numerics.Identity;
       With_Boxes    : Boolean := False;
       Head          : Boolean := False;
       Head_Pose     : Rigid := Driver.Numerics.Identity;
-      Wrist_Sees    : Boolean := True;
-      Unseen_Wrist  : Boolean := False;   --  the second eye answers the first arm's points it does not show
-      Unseen_Head   : Boolean := True;    --  the head answers the points it does not show
-      Head_Noise    : Real := 0.1;        --  how far the head's answers err, pixels per coordinate
-      Head_Moved    : Rigid := Driver.Numerics.Identity;   --  how far it moved before the second arm's reference
+      Head_Noise    : Real := 0.1;        --  how far the head's fit leaves a point in its picture, pixels
       Head_Lens     : Driver.Robot.Kinematics.Fit.Lens := Rig_Lens;   --  the head's own lens
-      Head_Shows    : Natural := Natural'Last;   --  the most points it answers, the first it shows
       Seed          : Long_Long_Integer := 1;   --  the generator of the matches' errors starts here
-      Lone_Box      : Boolean := False;   --  one small box stands on the table, in place of the others
       Arm_Noise     : Real := 0.1;        --  how far the arms' own matches err, pixels per coordinate
-      Last_Unmatched : Boolean := False;   --  no keyframe answers the arms' last reference point (nor does the head)
    end record;
+
+   --  How long the arm's fit unit is in the units the scene is drawn in: its
+   --  fitted eye positions over its keyframes against the true ones, by least
+   --  squares (the fit makes their root mean square one unit).
+   function Unit_Of (M : Model; A : Positive) return Real is
+      Changes : constant Real_Matrix := Sweep_Changes;
+      Num, Den : Real := 0.0;
+   begin
+      for F in Changes'Range (1) loop
+         declare
+            D : Real_Array (1 .. 6);
+         begin
+            for J in 1 .. 6 loop
+               D (J) := Changes (F, J);
+            end loop;
+            declare
+               T : constant Vec3 :=
+                 Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D).Translation;
+               G : constant Vec3 := Driver.Robot.Kinematics.Eye_In_Reference (M, Arm_Id (A), D).Translation;
+            begin
+               Num := Num + T * G;
+               Den := Den + G * G;
+            end;
+         end;
+      end loop;
+      return Num / Den;
+   end Unit_Of;
 
    procedure Build_Two_Arms (M : in out Model; Scene : Rig_Scene) is
       package Fit renames Driver.Robot.Kinematics.Fit;
@@ -5143,48 +6153,27 @@ package body Driver.Robot.Tests is
       Cells   : constant := 4;
       Eyes    : constant Positive := (if Scene.Head then 3 else 2);
 
-      function Point_Of (A : Positive; U, V : Real) return Vec3 is
-         X : Vec3;
-         On_Table : Boolean;
-      begin
-         Scene_Point (Placed (A), U, V, Scene.With_Boxes, X, On_Table, (if Scene.Lone_Box then Lone else Boxes));
-         return X;
-      end Point_Of;
-
       --  From_Arm's reference query points, seen by an eye whose frame
-      --  Seen_From maps From_Arm's reference frame into; Unseen: what it
-      --  answers for those it does not show.
-      procedure Match (Seen_From : Rigid; Frame : Positive; Eye : Natural; Into : in out Match_Set_Vectors.Vector;
-                       From_Arm : Positive; Unseen : Boolean; Error : Real := Noise;
-                       Asked : Fit.Lens := Rig_Lens; Limit : Natural := Natural'Last) is
-         Set      : Match_Set;
-         Answered : Natural := 0;
+      --  Seen_From maps From_Arm's reference frame into.
+      procedure Match (Seen_From : Rigid; Frame : Positive; Into : in out Match_Set_Vectors.Vector;
+                       From_Arm : Positive; Error : Real := Noise)
+      is
+         Set : Match_Set;
       begin
          Set.Frame := Frame;
-         Set.Eye := Eye;
          for I in 0 .. Natural (Arms (From_Arm).Query_U.Length) - 1 loop
             declare
                U0    : constant Real := Arms (From_Arm).Query_U (I);
                V0    : constant Real := Arms (From_Arm).Query_V (I);
-               X     : constant Vec3 := Point_Of (From_Arm, U0, V0);
+               X     : Vec3;
+               On_Table : Boolean;
                U, V  : Real;
                Ahead : Boolean;
                Shown : Boolean;
             begin
-               Fit.Project (Asked, Seen_From * X, U, V, Ahead);
+               Scene_Point (Placed (From_Arm), U0, V0, Scene.With_Boxes, X, On_Table);
+               Fit.Project (Rig_Lens, Seen_From * X, U, V, Ahead);
                Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
-               if not Shown and then Unseen then
-                  --  As from the query eye's centre: its line of sight, turned.
-                  Fit.Project (Asked, Seen_From.Rotation * Fit.Ray (Rig_Lens, U0, V0), U, V, Ahead);
-                  Shown := Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0;
-               end if;
-               if Scene.Last_Unmatched and then I = Natural (Arms (From_Arm).Query_U.Length) - 1 then
-                  Shown := False;
-               end if;
-               if Shown then
-                  Answered := Answered + 1;
-                  Shown := Answered <= Limit;
-               end if;
                Set.To_U.Append (U + Error * Gaussian (Rng));
                Set.To_V.Append (V + Error * Gaussian (Rng));
                Set.Back_U.Append (U0 + Error * Gaussian (Rng));
@@ -5194,6 +6183,7 @@ package body Driver.Robot.Tests is
          end loop;
          Into.Append (Set);
       end Match;
+
    begin
       for A in 1 .. 2 loop
          M.Groups.Append (Group_Stream'(Size => N, Commandable => True, others => <>));
@@ -5220,14 +6210,12 @@ package body Driver.Robot.Tests is
             M.Eyes.Append (S);
          end;
       end loop;
-      --  Each group moves its own eye's whole view; the second eye shows the
-      --  first arm move when Wrist_Sees, and the head shows both.
+      --  Each group moves its own eye's whole view; the head shows both arms move.
       for G in 1 .. 2 loop
          for E in 1 .. Eyes loop
             M.Graph.Effects.Append
               (if E = G then Eye_Effect'(Verdict => Whole, Responding => Cells, Textured => Cells, others => <>)
-               elsif E = 3 or else (G = 1 and then E = 2 and then Scene.Wrist_Sees)
-               then Eye_Effect'(Verdict => Patch, Responding => 1, Textured => Cells, others => <>)
+               elsif E = 3 then Eye_Effect'(Verdict => Patch, Responding => 1, Textured => Cells, others => <>)
                else Eye_Effect'(Verdict => Nothing, Textured => Cells, others => <>));
          end loop;
       end loop;
@@ -5254,59 +6242,82 @@ package body Driver.Robot.Tests is
                K.Beat := F;
                for J in 1 .. N loop
                   K.Readings.Append (Changes (F, J));
+                  --  What the sweep asked: every joint away from the base the frames are drawn about.
+                  K.Asked.Append (Changes (F, J) /= 0.0);
                   D (J) := Changes (F, J);
                end loop;
                Arms (A).Frames.Append (K);
                if F > 1 then
-                  Match (Inverse (Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D)), F, 0, Arms (A).Matches, A,
-                         False, Scene.Arm_Noise);
+                  Match (Inverse (Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D)), F, Arms (A).Matches, A,
+                         Scene.Arm_Noise);
                end if;
             end;
          end loop;
       end loop;
-      --  The first arm's reference matched into the second's.
-      Match (Inverse (Scene.Second), 1, 0, Arms (2).World_Matches, 1, Scene.Unseen_Wrist);
-      Arms (2).World_Asked := True;
-      Arms (2).World_Group := 1;
-      Arms (2).World_Reference := Arms (1).Frames.First_Element.Beat;
-      --  Each arm's reference matched into the head.
-      if Scene.Head then
-         for A in 1 .. 2 loop
-            Match (Inverse ((if A = 2 then Scene.Head_Moved else Driver.Numerics.Identity) * Scene.Head_Pose) * Placed (A),
-                   1, 3, Arms (A).Eye_Matches, A, Scene.Unseen_Head, Scene.Head_Noise,
-                   Scene.Head_Lens, Scene.Head_Shows);
-         end loop;
-      end if;
       M.Kinematics.Append (Arms (1));
       M.Kinematics.Append (Arms (2));
       Driver.Robot.Kinematics.Refit (M);
-   end Build_Two_Arms;
-
-   --  How long the arm's fit unit is in the units the scene is drawn in: its
-   --  fitted eye positions over its keyframes against the true ones, by least
-   --  squares (the fit makes their root mean square one unit).
-   function Unit_Of (M : Model; A : Positive) return Real is
-      Changes : constant Real_Matrix := Sweep_Changes;
-      Num, Den : Real := 0.0;
-   begin
-      for F in Changes'Range (1) loop
+      --  The head as the arms' flow fit leaves it: its camera in each arm's reference frame, in that arm's unit, turned
+      --  about its own axes by Head_Noise pixels over its focal length and its centre moved by that over its distance,
+      --  each way at random, the lens its own; then the arms are placed again, through it.
+      if Scene.Head then
          declare
-            D : Real_Array (1 .. 6);
+            Terms      : constant Natural := Fit.Lens_Terms + 6 * 2;
+            Turn_Sigma : constant Real := Scene.Head_Noise / Scene.Head_Lens.Fx;
+            Joint      : Real_Matrix (1 .. Terms, 1 .. Terms) := [others => [others => 0.0]];
+            F          : Fixed_Fit;
          begin
-            for J in 1 .. 6 loop
-               D (J) := Changes (F, J);
+            F.Lens := (Fx => Scene.Head_Lens.Fx, Fy => Scene.Head_Lens.Fy, Cx => Scene.Head_Lens.Cx,
+                       Cy => Scene.Head_Lens.Cy, K1 => Scene.Head_Lens.K1, K2 => Scene.Head_Lens.K2);
+            for T in 1 .. 2 loop
+               Joint (T, T) := Turn_Sigma ** 2;   --  the focal lengths' logarithms
             end loop;
-            declare
-               T : constant Vec3 := Driver.Robot.Kinematics.Fit.Eye_At (Truth_Of (A), Along (Truth_Of (A)), D).Translation;
-               G : constant Vec3 := Driver.Robot.Kinematics.Eye_In_Reference (M, Arm_Id (A), D).Translation;
-            begin
-               Num := Num + T * G;
-               Den := Den + G * G;
-            end;
+            for T in 3 .. 4 loop
+               Joint (T, T) := Scene.Head_Noise ** 2;   --  the principal point
+            end loop;
+            for A in 1 .. 2 loop
+               declare
+                  Unit         : constant Real := Unit_Of (M, A);
+                  True_In_A    : constant Rigid := Inverse (Placed (A)) * Scene.Head_Pose;
+                  Centre_Sigma : constant Real := Turn_Sigma * abs True_In_A.Translation / Unit;
+                  O            : constant Natural := Fit.Lens_Terms + 6 * (A - 1);
+                  Turn         : constant Vec3 :=
+                    [Turn_Sigma * Gaussian (Rng), Turn_Sigma * Gaussian (Rng), Turn_Sigma * Gaussian (Rng)];
+                  Shift        : constant Vec3 :=
+                    [Centre_Sigma * Gaussian (Rng), Centre_Sigma * Gaussian (Rng), Centre_Sigma * Gaussian (Rng)];
+               begin
+                  F.Arms.Append (A);
+                  F.Poses.Append (Rigid'(Rotation    => True_In_A.Rotation * Driver.Numerics.Exp (Turn),
+                                         Translation => (1.0 / Unit) * True_In_A.Translation + Shift));
+                  for K in 1 .. 3 loop
+                     Joint (O + K, O + K) := Turn_Sigma ** 2;
+                     Joint (O + 3 + K, O + 3 + K) := Centre_Sigma ** 2;
+                  end loop;
+               end;
+            end loop;
+            for P in 1 .. Terms loop
+               for Q in 1 .. Terms loop
+                  F.Joint.Append (Joint (P, Q));
+               end loop;
+            end loop;
+            for P in 1 .. Fit.Lens_Terms + 6 loop
+               for Q in 1 .. Fit.Lens_Terms + 6 loop
+                  F.Covariance.Append (Joint (P, Q));
+               end loop;
+            end loop;
+            F.Known := True;
+            F.Arm := 1;
+            F.Pose := F.Poses (F.Poses.First_Index);
+            F.Sigma_Px := Scene.Head_Noise;
+            F.Judged := True;
+            while M.Fixed_Eyes.Last_Index < 3 loop
+               M.Fixed_Eyes.Append (Fixed_Fit'(others => <>));
+            end loop;
+            M.Fixed_Eyes (3) := F;
          end;
-      end loop;
-      return Num / Den;
-   end Unit_Of;
+         Driver.Robot.Kinematics.Refit (M);
+      end if;
+   end Build_Two_Arms;
 
    --  The second arm placed in the first arm's world: where its eye stands,
    --  how it is turned, the scale of its lengths, and its eye at a pose no
@@ -5328,7 +6339,7 @@ package body Driver.Robot.Tests is
          U1 : constant Real := Unit_Of (M, 1);
          U2 : constant Real := Unit_Of (M, 2);
          R  : Arm_Fit renames M.Kinematics (2).Result;
-         function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 6 + Q - 1));
+         function C (P, Q : Positive) return Real is (R.Placement_Covariance ((P - 1) * 7 + Q - 1));
          Turn_Sigma   : constant Real := Sqrt (C (1, 1) + C (2, 2) + C (3, 3));
          Centre_Sigma : constant Real := Sqrt (C (4, 4) + C (5, 5) + C (6, 6));
          Turned : constant Real := Driver.Numerics.Angle (Transpose (Placement.Rotation) * Second.Rotation);
@@ -5371,332 +6382,60 @@ package body Driver.Robot.Tests is
       end;
    end Check_Placement;
 
-   --  A second arm, its eye at its reference keyframe turned and moved from the
-   --  first's and its body half again as large, its eye showing the first arm
-   --  move and much of what the first eye shows: placed through its own eye's
-   --  view of the first arm's table. Both lenses' errors are in it.
-   procedure Place_A_Second_Arm is
-      M      : Model;
-      Second : constant Rigid := (Rotation => Driver.Numerics.Exp ([0.12, -0.2, 0.08]), Translation => [0.25, 0.04, 0.05]);
-   begin
-      Build_Two_Arms (M, (Second => Second, others => <>));
-      Check_Placement (M, Second, 2, "its own eye");
-   end Place_A_Second_Arm;
-
    --  Two arms whose eyes never see each other's table, four and a half units
-   --  apart, and a head: an eye fixed above and behind them that shows both
-   --  arms move and most of both tables, but not their far sides. Boxes stand
-   --  on the table, about half of each view.
+   --  apart, and a head: an eye fixed behind and above them that watches both
+   --  arms move, a few units from them.
    Far_Second : constant Rigid := (Rotation => Driver.Numerics.Exp ([0.05, -0.1, 0.03]), Translation => [4.5, 0.05, 0.1]);
 
    function Head_Pose return Rigid is
-      Centre : constant Vec3 := 2.25 * Table_X + 1.2 * Table_Y + Table_O * Table_N;   --  on the table, between the views
-      Eye    : constant Vec3 := Centre + 3.2 * Table_N - 1.2 * Table_Y;
-      Z_Axis : constant Vec3 := Unit (Centre - Eye);
-      Y_Axis : constant Vec3 := Cross (Z_Axis, Table_X);
+      Between : constant Vec3 := [2.4, 0.3, 0.35];   --  between the two arms' hands
+      Eye     : constant Vec3 := Between + [0.0, -1.5, -4.0];
+      Z_Axis  : constant Vec3 := Unit (Between - Eye);
+      Y_Axis  : constant Vec3 := Cross (Z_Axis, [1.0, 0.0, 0.0]);
    begin
-      return (Rotation    => [[Table_X (1), Y_Axis (1), Z_Axis (1)],
-                              [Table_X (2), Y_Axis (2), Z_Axis (2)],
-                              [Table_X (3), Y_Axis (3), Z_Axis (3)]],
+      return (Rotation    => [[1.0, Y_Axis (1), Z_Axis (1)],
+                              [0.0, Y_Axis (2), Z_Axis (2)],
+                              [0.0, Y_Axis (3), Z_Axis (3)]],
               Translation => Eye);
    end Head_Pose;
 
-   --  How many of the arm's reference points an eye's match set shows.
-   function Shown (S : Match_Set) return Natural is
-      K : Natural := 0;
+   --  The scene the head tests share: two arms four and a half units apart with boxes on their table, and the head
+   --  above and behind them, placed by its fit to both arms.
+   procedure Head_Scene (M : in out Model) is
    begin
-      for F of S.Found loop
-         if F then
-            K := K + 1;
-         end if;
-      end loop;
-      return K;
-   end Shown;
-
-   procedure Head_Scene (M : in out Model; Unseen_Wrist : Boolean) is
-   begin
-      Build_Two_Arms (M, (Second       => Far_Second,
-                          With_Boxes   => True,
-                          Head         => True,
-                          Head_Pose    => Head_Pose,
-                          Wrist_Sees   => False,
-                          Unseen_Wrist => Unseen_Wrist,
-                          Unseen_Head  => True,
-                          others       => <>));
-      --  What the scene is: the wrist views share no point, and the head does
-      --  not show every table point of either arm.
-      declare
-         Truly : Model;
-      begin
-         Build_Two_Arms (Truly, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
-                                 Wrist_Sees => False, Unseen_Wrist => False, Unseen_Head => False, others => <>));
-         Check (Shown (Truly.Kinematics (2).World_Matches.First_Element) = 0,
-                "the rig's wrist views share" & Shown (Truly.Kinematics (2).World_Matches.First_Element)'Image & " points");
-         for A in 1 .. 2 loop
-            declare
-               Table, Seen : Natural := 0;
-               S : constant Match_Set := Truly.Kinematics (A).Eye_Matches.First_Element;
-            begin
-               for I in 0 .. Natural (Truly.Kinematics (A).Query_U.Length) - 1 loop
-                  declare
-                     X : Vec3;
-                     On_Table : Boolean;
-                  begin
-                     Scene_Point ((if A = 1 then Driver.Numerics.Identity else Far_Second),
-                                  Truly.Kinematics (A).Query_U (I), Truly.Kinematics (A).Query_V (I), True, X, On_Table);
-                     if On_Table then
-                        Table := Table + 1;
-                        if S.Found (I) then
-                           Seen := Seen + 1;
-                        end if;
-                     end if;
-                  end;
-               end loop;
-               Driver.Log.Line (Driver.Log.Robot, "head rig: arm" & A'Image & ": " & Table'Image & " of"
-                                & Truly.Kinematics (A).Query_U.Length'Image & " points on the table, the head shows"
-                                & Seen'Image & " of them");
-               Check (Seen < Table, "the rig's head shows every table point of arm" & A'Image);
-               Check (2 * Table < Natural (Truly.Kinematics (A).Query_U.Length),
-                      "the rig's table holds" & Table'Image & " of arm" & A'Image & "'s points, not less than half");
-            end;
-         end loop;
-      end;
+      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose, others => <>));
+      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3), "the head is not placed");
    end Head_Scene;
 
    --  Placed through the head, against the truth.
    procedure Place_Through_A_Head is
       M : Model;
    begin
-      Head_Scene (M, Unseen_Wrist => False);
+      Head_Scene (M);
       Check_Placement (M, Far_Second, 3, "through the head");
    end Place_Through_A_Head;
 
-   --  The same, the second eye answering every one of the first arm's points
-   --  it does not show as from the first eye's centre: one turn explains them
-   --  all, which places the second eye at the first's. The head still places
-   --  it right.
-   procedure Place_Despite_False_Wrist_Matches is
-      M : Model;
-   begin
-      Head_Scene (M, Unseen_Wrist => True);
-      Check_Placement (M, Far_Second, 3, "through the head, the wrist answering what it does not show");
-   end Place_Despite_False_Wrist_Matches;
-
-   --  The head's answers five times as precise as the arms' own matches: the
-   --  arms' lenses and tables, measured from their own sweeps, now err by
-   --  more than the head's view of them does. Placed through the head, within
-   --  its sigma: the link holds each arm's lens and table to its own
-   --  uncertainty, not to its estimate exactly.
+   --  The head's answers five times as precise as the arms' own matches: the arms' lenses and tables, measured from
+   --  their own sweeps, now err by more than the head's view of them does. Placed through the head, within its sigma:
+   --  the placement holds each arm's table to its own uncertainty, not to its estimate exactly.
    procedure Place_Through_A_Precise_Head is
       M : Model;
    begin
       Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
-                          Wrist_Sees => False, Head_Noise => 0.02, others => <>));
+                          Head_Noise => 0.02, others => <>));
       Check_Placement (M, Far_Second, 3, "through a precise head");
    end Place_Through_A_Precise_Head;
-
-   --  The head turned by a fiftieth of a radian and moved by a twentieth of a
-   --  unit between the two arms' reference beats: its two views are no views
-   --  of one plane through one eye, and the second arm is not placed.
-   procedure Moved_Head_Places_Nothing is
-      M : Model;
-      Placement : Rigid;
-      Scale : Real;
-      Known : Boolean;
-   begin
-      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
-                          Wrist_Sees => False,
-                          Head_Moved => (Rotation => Driver.Numerics.Exp ([0.02, 0.0, 0.0]), Translation => [0.0, 0.05, 0.0]),
-                          others => <>));
-      Driver.Robot.Kinematics.In_World (M, 2, Placement, Scale, Known);
-      Check (not Known, "the second arm is placed through a head that moved between the two arms' views, off by"
-             & Real'Image (abs (Placement.Translation - (1.0 / Unit_Of (M, 1)) * Far_Second.Translation)) & " units");
-   end Moved_Head_Places_Nothing;
 
    --  A head whose lens is not the wrists': its principal point lies 32 and 35 pixels from the picture's middle and
    --  its two focal lengths differ.
    Off_Centre_Head : constant Driver.Robot.Kinematics.Fit.Lens :=
      (Fx => 330.0, Fy => 345.0, Cx => 352.0, Cy => 205.0, K1 => 0.0, K2 => 0.0);
 
-   --  The scene the head tests share: two arms with a table, and boxes on it when Boxes, and the head above and
-   --  behind them with a lens of its own, answering at most Shows points; Unseen says whether it also answers
-   --  what it does not show.
-   function Head_Rig
-     (Boxes : Boolean; Shows : Natural := Natural'Last; Unseen : Boolean := True; Lone : Boolean := False;
-      Arm_Noise : Real := 0.1; Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1;
-      Last_Unmatched : Boolean := False)
-      return Rig_Scene is
-     ((Second => Far_Second, With_Boxes => Boxes, Head => True, Head_Pose => Head_Pose, Wrist_Sees => False,
-       Unseen_Head => Unseen, Head_Lens => Off_Centre_Head, Head_Shows => Shows, Lone_Box => Lone,
-       Arm_Noise => Arm_Noise, Head_Noise => Head_Noise, Seed => Seed, Last_Unmatched => Last_Unmatched,
-       others => <>));
-
-   --  How many sigmas away from the truth the model's fixed eye E is: the head at Head_Pose, in the world's unit,
-   --  with Off_Centre_Head.
-   function Head_Off (M : Model; E : Eye_Id) return Real is
-      F      : Fixed_Fit renames M.Fixed_Eyes (E);
-      Report : Driver.Robot.Kinematics.Fixed.Fit_Report;
-   begin
-      Report.L := (Fx => F.Lens.Fx, Fy => F.Lens.Fy, Cx => F.Lens.Cx, Cy => F.Lens.Cy,
-                   K1 => F.Lens.K1, K2 => F.Lens.K2);
-      Report.Pose := F.Pose;
-      for X of F.Covariance loop
-         Report.Covariance.Append (X);
-      end loop;
-      return Driver.Robot.Kinematics.Fixed.Tests.Deviate
-        (Report, Off_Centre_Head,
-         (Rotation => Head_Pose.Rotation, Translation => (1.0 / Unit_Of (M, 1)) * Head_Pose.Translation));
-   end Head_Off;
-
-   --  Nothing is known of the head's place: every answer of it is unknown.
-   procedure Check_Head_Unknown (M : Model; What : String) is
-      O    : Observation;
-      P    : constant Pose_Estimate := Eye_Pose (M, 3, O);
-      Px   : constant Driver.Images.Pixel := (U => 320.0, V => 240.0);
-      Line : constant Ray_Estimate := Ray (M, 3, O, Px);
-      Own  : constant Ray_Estimate := Eye_Ray (M, 3, Px);
-      Seen : Driver.Images.Pixel;
-      Visible : Boolean;
-   begin
-      Check (not Driver.Robot.Kinematics.Fixed_Known (M, 3), What & ": the head is placed");
-      Check (Driver.Robot.Kinematics.Fixed_Why (M, 3)'Length > 0,
-             What & ": the head is not placed, and no reason is given");
-      Driver.Log.Line (Driver.Log.Robot, "head test (" & What & "): " & Driver.Robot.Kinematics.Fixed_Why (M, 3));
-      Check (P.Position_Covariance (1, 1) = Real'Last and then P.Rotation_Covariance (1, 1) = Real'Last,
-             What & ": the head's pose is known");
-      Check (Line.Direction.Sigma = Real'Last and then Own.Direction.Sigma = Real'Last,
-             What & ": a line of sight through the head is known");
-      Project (M, 3, O, [0.0, 0.0, 1.0], Seen, Visible);
-      Check (not Visible, What & ": a point is seen by the head");
-   end Check_Head_Unknown;
-
-   --  A head with a lens of its own that sees most of both arms' tables and their boxes: its lens and its place in
-   --  the world come out within Z of their sigmas of the truth, so do the lines of sight through its pixels, in its
-   --  own frame and in the world, and a point in the world lands in its picture where the lens and the place put it.
-   procedure Measure_The_Head is
-      M : Model;
-      O : Observation;
-   begin
-      Build_Two_Arms (M, Head_Rig (Boxes => True));
-      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
-             "the head is not placed: " & Driver.Robot.Kinematics.Fixed_Why (M, 3));
-      if not Driver.Robot.Kinematics.Fixed_Known (M, 3) then
-         return;
-      end if;
-      declare
-         U1  : constant Real := Unit_Of (M, 1);
-         Off : constant Real := Head_Off (M, 3);
-         P   : constant Pose_Estimate := Eye_Pose (M, 3, O);
-         F   : Fixed_Fit renames M.Fixed_Eyes (3);
-         True_Centre : constant Vec3 := (1.0 / U1) * Head_Pose.Translation;
-         Worst_Line  : Real := 0.0;
-         Worst_Own   : Real := 0.0;
-         Worst_Back  : Real := 0.0;
-      begin
-         Driver.Log.Line (Driver.Log.Robot, "head test: " & Driver.Log.Image (Off, 2) & " sigmas off the truth, focal "
-                          & Driver.Log.Image (F.Lens.Fx, 2) & " x " & Driver.Log.Image (F.Lens.Fy, 2) & ", centre "
-                          & Driver.Log.Image (F.Lens.Cx, 2) & ", " & Driver.Log.Image (F.Lens.Cy, 2) & ", used"
-                          & F.Used'Image & " of" & F.Offered'Image);
-         Check (Off <= Driver.Conventions.Z, "the head is" & Off'Image & " sigmas off the truth");
-         Check (P.Pose.Rotation = F.Pose.Rotation and then P.Pose.Translation = F.Pose.Translation,
-                "the head's pose is not the fit's");
-         Check ((for all A in 1 .. 3 =>
-                   P.Position_Covariance (A, A) in 0.0 .. Real'Last and then P.Position_Covariance (A, A) > 0.0
-                   and then P.Rotation_Covariance (A, A) in 0.0 .. Real'Last
-                   and then P.Rotation_Covariance (A, A) > 0.0),
-                "the head's pose has no covariance");
-         for Row in 0 .. 4 loop
-            for Col in 0 .. 4 loop
-               declare
-                  Px    : constant Driver.Images.Pixel :=
-                    (U => 640.0 * (Real (Col) + 0.5) / 5.0, V => 480.0 * (Real (Row) + 0.5) / 5.0);
-                  Line  : constant Ray_Estimate := Ray (M, 3, O, Px);
-                  Own   : constant Ray_Estimate := Eye_Ray (M, 3, Px);
-                  In_Eye : constant Vec3 := Unit (Driver.Robot.Kinematics.Fit.Ray (Off_Centre_Head, Px.U, Px.V));
-                  Truth : constant Vec3 := Head_Pose.Rotation * In_Eye;
-                  Angle : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Line.Direction.Unit_Vector * Truth)));
-                  Angle_Own : constant Real :=
-                    Arccos (Real'Max (-1.0, Real'Min (1.0, Own.Direction.Unit_Vector * In_Eye)));
-                  Along : constant Vec3 := Line.Origin.Mean + 3.0 * Line.Direction.Unit_Vector;
-                  Back  : Driver.Images.Pixel;
-                  Seen  : Boolean;
-               begin
-                  Check (Line.Direction.Sigma < Real'Last and then Own.Direction.Sigma < Real'Last,
-                         "a line of sight through the head has no sigma");
-                  Worst_Line := Real'Max (Worst_Line, Angle / Line.Direction.Sigma);
-                  Worst_Own := Real'Max (Worst_Own, Angle_Own / Own.Direction.Sigma);
-                  Project (M, 3, O, Along, Back, Seen);
-                  Worst_Back := Real'Max (Worst_Back, Sqrt ((Back.U - Px.U) ** 2 + (Back.V - Px.V) ** 2));
-                  Check (Seen, "a point along the line of sight through pixel" & Px.U'Image & Px.V'Image
-                         & " is not seen by the head");
-               end;
-            end loop;
-         end loop;
-         Driver.Log.Line (Driver.Log.Robot, "head test: lines of sight off the truth by at most "
-                          & Driver.Log.Image (Worst_Line, 2) & " of their sigmas in the world, "
-                          & Driver.Log.Image (Worst_Own, 2) & " in the eye; a point along a line lands "
-                          & Driver.Log.Image (Worst_Back, 9) & " px from its pixel");
-         Check (Worst_Line <= Driver.Conventions.Z, "a line of sight through the head is"
-                & Worst_Line'Image & " of its sigmas off the truth");
-         Check (Worst_Own <= Driver.Conventions.Z, "a line of sight in the head's frame is"
-                & Worst_Own'Image & " of its sigmas off the truth");
-         Check (Worst_Back < 1.0e-6, "a point along a line of sight lands" & Worst_Back'Image
-                & " px from the pixel it was drawn through");
-         --  The pose estimate's own convention: the centre and the rotation vector that takes the estimate to the
-         --  truth, both in the world's axes, each within Z of its sigma.
-         declare
-            Away : constant Vec3 := True_Centre - F.Pose.Translation;
-            Turn : constant Vec3 := Driver.Numerics.Log (Head_Pose.Rotation * Transpose (P.Pose.Rotation));
-         begin
-            for A in 1 .. 3 loop
-               Check (abs Away (A) <= Driver.Conventions.Z * Sqrt (P.Position_Covariance (A, A)),
-                      "the head's centre is off by" & Real'Image (Away (A)) & " along axis" & A'Image
-                      & ", its sigma" & Real'Image (Sqrt (P.Position_Covariance (A, A))));
-               Check (abs Turn (A) <= Driver.Conventions.Z * Sqrt (P.Rotation_Covariance (A, A)),
-                      "the head is turned" & Real'Image (Turn (A)) & " rad about world axis" & A'Image
-                      & ", its sigma" & Real'Image (Sqrt (P.Rotation_Covariance (A, A))));
-            end loop;
-         end;
-      end;
-   end Measure_The_Head;
-
-   --  The arm's fit has a track to the last reference point that a keyframe answered, and a head is placed through the
-   --  depths of all of them (a row of their gains for each reference point, whatever the fit's last track): A31's first
-   --  arm had 476 reference points and a fit of 475, "no covariance of its points' depths" was the head's reason, and
-   --  the head was not placed for the 4,200 beats between its second recompute and its third. Here no keyframe
-   --  answers the last reference point of either arm.
-   procedure Head_Is_Placed_Without_The_Last_Reference is
-      M : Model;
-   begin
-      Build_Two_Arms (M, Head_Rig (Boxes => True, Last_Unmatched => True));
-      Check (Driver.Robot.Kinematics.Fixed_Known (M, 3),
-             "the head is not placed, the last reference point of the arms having no answer: "
-             & Driver.Robot.Kinematics.Fixed_Why (M, 3));
-      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
-         Check (Head_Off (M, 3) <= Driver.Conventions.Z, "the head is" & Head_Off (M, 3)'Image
-                & " sigmas off the truth");
-      end if;
-   end Head_Is_Placed_Without_The_Last_Reference;
-
-   --  Five true answers: the head's place is not determined, and the eye says so with a reason, not with numbers.
-   procedure Head_Needs_Answers is
-      M : Model;
-   begin
-      Build_Two_Arms (M, Head_Rig (Boxes => True, Shows => 5, Unseen => False));
-      Check_Head_Unknown (M, "five answers");
-   end Head_Needs_Answers;
-
-   --  The head sees plenty of the arm's points, but every one lies on the table: the plane fixes the eye only up to
-   --  one term (its focal length trades against its distance), so its place is not determined. With boxes on the
-   --  table, the same head is placed (Measure_The_Head).
-   procedure Head_Needs_More_Than_A_Plane is
-      M : Model;
-   begin
-      Build_Two_Arms (M, Head_Rig (Boxes => False));
-      Check_Head_Unknown (M, "the table alone");
-      Check (M.Fixed_Eyes (3).Offered > Driver.Robot.Kinematics.Fixed.Terms,
-             "the head was offered" & M.Fixed_Eyes (3).Offered'Image & " answers, not more than its terms");
-   end Head_Needs_More_Than_A_Plane;
+   --  The scene the head tests share: two arms with a table and boxes on it, and the head above and behind them with
+   --  a lens of its own, its fit leaving points Head_Noise pixels uncertain in its picture.
+   function Head_Rig (Head_Noise : Real := 0.1; Seed : Long_Long_Integer := 1) return Rig_Scene is
+     ((Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose, Head_Lens => Off_Centre_Head,
+       Head_Noise => Head_Noise, Seed => Seed, others => <>));
 
    --  The rest of what a boot measures of the two-arm rig, set to values it could have measured, for its body file to
    --  be reloaded whole.
@@ -5728,124 +6467,6 @@ package body Driver.Robot.Tests is
       end loop;
    end Measured_Rig;
 
-   --  The table with a single small box on it, two points of the first eye's view, and the arm's own matches ten
-   --  times as noisy as the box is high: nearly a plane. The head is placed or it is not, but whichever it says is
-   --  true to its covariance: the points on the table say nothing of the eye's lens whatever the noise of their
-   --  depths seems to (the table alone, Head_Needs_More_Than_A_Plane), and the two off it say what they can.
-   procedure Head_Among_Few_Off_The_Table is
-      M    : Model;
-      Off  : Real;
-      Here : Natural := 0;
-   begin
-      Build_Two_Arms (M, Head_Rig (Boxes => True, Lone => True, Arm_Noise => 1.0));
-      for I in 0 .. Natural (M.Kinematics (1).Query_U.Length) - 1 loop
-         if I < Natural (M.Kinematics (1).Result.Table_On.Length) and then not M.Kinematics (1).Result.Table_On (I) then
-            Here := Here + 1;
-         end if;
-      end loop;
-      Check (Here > 0, "no point of the first arm's view is off its table: the box is not seen");
-      Driver.Log.Line (Driver.Log.Robot, "head test (a lone box): " & Here'Image
-                       & " of the first arm's points off the table; "
-                       & (if Driver.Robot.Kinematics.Fixed_Known (M, 3) then "placed" else "not placed: "
-                          & Driver.Robot.Kinematics.Fixed_Why (M, 3)));
-      if Driver.Robot.Kinematics.Fixed_Known (M, 3) then
-         Off := Head_Off (M, 3);
-         Driver.Log.Line (Driver.Log.Robot, "head test (a lone box): placed, " & Driver.Log.Image (Off, 2)
-                          & " sigmas off the truth, focal " & Driver.Log.Image (M.Fixed_Eyes (3).Lens.Fx, 2));
-         Check (Off <= Driver.Conventions.Z, "the head is placed, and" & Off'Image & " sigmas off the truth");
-      else
-         Check (Driver.Robot.Kinematics.Fixed_Why (M, 3)'Length > 0, "the head is not placed, and no reason is given");
-      end if;
-   end Head_Among_Few_Off_The_Table;
-
-   --  The worst, over a grid of five by five pixels, of the angle between the line of sight the head gives through a
-   --  pixel and the true one, in units of the sigma the head states for that line.
-   function Worst_Line_Pull (M : Model) return Real is
-      O     : Observation;
-      Worst : Real := 0.0;
-   begin
-      for Row in 0 .. 4 loop
-         for Col in 0 .. 4 loop
-            declare
-               Px    : constant Driver.Images.Pixel :=
-                 (U => 640.0 * (Real (Col) + 0.5) / 5.0, V => 480.0 * (Real (Row) + 0.5) / 5.0);
-               Line  : constant Ray_Estimate := Ray (M, 3, O, Px);
-               Truth : constant Vec3 :=
-                 Head_Pose.Rotation * Unit (Driver.Robot.Kinematics.Fit.Ray (Off_Centre_Head, Px.U, Px.V));
-               Angle : constant Real := Arccos (Real'Max (-1.0, Real'Min (1.0, Line.Direction.Unit_Vector * Truth)));
-            begin
-               Worst := Real'Max (Worst, Angle / Line.Direction.Sigma);
-            end;
-         end loop;
-      end loop;
-      return Worst;
-   end Worst_Line_Pull;
-
-   --  A head whose answers err by tens of pixels cannot fix its lens, and a covariance whose linearisation does not
-   --  hold over its sigma (or that leaves the optical axis anywhere in the picture) would say it did: the fit finds out
-   --  itself, by the cost over the covariance's range and by where the principal point is known to be, and the head
-   --  is unknown with that reason. The same scene with the answers off by 0.4 pixel (A16's matcher) is placed,
-   --  within Z of its sigmas.
-   --  And where answers off by 3 pixels place the head, it is within Z in its terms and in every line of sight: the
-   --  covariance it states is not a claim the data do not carry (the two scenes whose lines err most of eight).
-   procedure Head_With_Noisy_Answers is
-      Noisy, Quadratic, Fine : Model;
-
-      function Why (M : Model) return String is (Driver.Robot.Kinematics.Fixed_Why (M, 3));
-   begin
-      --  Answers off by 36 pixels (a twentieth of the picture): in most scenes made with other errors the eye's focal
-      --  lengths come out unsure (seeds 2 to 13: eleven so, and seed 4 by the cost not being quadratic over the
-      --  covariance's range; which seed that is moves with the arms' fits: it was seed 3 for two commits on 10-10).
-      --  Seed 1 is the scene that places the eye otherwise: its principal point unsure by more than the picture, and a
-      --  distortion the noise made.
-      Build_Two_Arms (Noisy, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 1));
-      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 1): "
-                       & (if Driver.Robot.Kinematics.Fixed_Known (Noisy, 3) then "placed"
-                          else "not placed: " & Why (Noisy)));
-      Check (not Driver.Robot.Kinematics.Fixed_Known (Noisy, 3), "a head whose answers err by 36 pixels is placed");
-      Check (Ada.Strings.Fixed.Index (Why (Noisy), "principal point") > 0,
-             "the reason is not that the principal point is not located within half the picture: '" & Why (Noisy)
-             & "'");
-      Build_Two_Arms (Quadratic, Head_Rig (Boxes => True, Head_Noise => 36.0, Seed => 4));
-      Driver.Log.Line (Driver.Log.Robot, "head test (36 px, seed 4): "
-                       & (if Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3) then "placed"
-                          else "not placed: " & Why (Quadratic)));
-      Check (not Driver.Robot.Kinematics.Fixed_Known (Quadratic, 3), "a head whose answers err by 36 pixels is placed");
-      Check (Ada.Strings.Fixed.Index (Why (Quadratic), "quadratic") > 0,
-             "the reason is not that the cost is not quadratic over the fit's sigma: '" & Why (Quadratic) & "'");
-      Build_Two_Arms (Fine, Head_Rig (Boxes => True, Head_Noise => 0.4));
-      Check (Driver.Robot.Kinematics.Fixed_Known (Fine, 3),
-             "a head whose answers err by 0.4 pixel is not placed: " & Why (Fine));
-      if Driver.Robot.Kinematics.Fixed_Known (Fine, 3) then
-         Check (Head_Off (Fine, 3) <= Driver.Conventions.Z,
-                "the head with answers off by 0.4 pixel is" & Real'Image (Head_Off (Fine, 3))
-                & " sigmas off the truth");
-      end if;
-      for Seed in 5 .. 8 loop
-         if Seed = 5 or else Seed = 8 then
-            declare
-               Rough : Model;
-            begin
-               Build_Two_Arms (Rough, Head_Rig (Boxes => True, Head_Noise => 3.0, Seed => Long_Long_Integer (Seed)));
-               Driver.Log.Line (Driver.Log.Robot, "head test (3 px, seed" & Seed'Image & "): "
-                                & (if Driver.Robot.Kinematics.Fixed_Known (Rough, 3)
-                                   then "placed, " & Driver.Log.Image (Head_Off (Rough, 3), 2)
-                                        & " sigmas off, its worst line "
-                                        & Driver.Log.Image (Worst_Line_Pull (Rough), 2) & " sigmas off"
-                                   else "not placed: " & Why (Rough)));
-               if Driver.Robot.Kinematics.Fixed_Known (Rough, 3) then
-                  Check (Head_Off (Rough, 3) <= Driver.Conventions.Z,
-                         "the head with answers off by 3 pixels (seed" & Seed'Image & ") is"
-                         & Real'Image (Head_Off (Rough, 3)) & " sigmas off the truth");
-                  Check (Worst_Line_Pull (Rough) <= Driver.Conventions.Z,
-                         "a line of sight of the head with answers off by 3 pixels (seed" & Seed'Image & ") is"
-                         & Real'Image (Worst_Line_Pull (Rough)) & " sigmas off the truth");
-               end if;
-            end;
-         end if;
-      end loop;
-   end Head_With_Noisy_Answers;
-
    --  The head's place is part of the body: written, read back, it is the same fit with the same covariance, and
    --  the reloaded body answers as the measured one did.
    procedure Head_In_The_Body_File is
@@ -5854,7 +6475,7 @@ package body Driver.Robot.Tests is
       Ok      : Boolean;
       Why     : Ada.Strings.Unbounded.Unbounded_String;
    begin
-      Build_Two_Arms (M, Head_Rig (Boxes => True));
+      Build_Two_Arms (M, Head_Rig);
       Check (Driver.Robot.Kinematics.Fixed_Known (M, 3), "the head to write is not placed");
       Measured_Rig (M);
       declare
@@ -5914,8 +6535,7 @@ package body Driver.Robot.Tests is
    procedure Table_Among_Boxes is
       M : Model;
    begin
-      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose,
-                          Wrist_Sees => False, others => <>));
+      Build_Two_Arms (M, (Second => Far_Second, With_Boxes => True, Head => True, Head_Pose => Head_Pose, others => <>));
       for A in 1 .. 2 loop
          declare
             R      : Arm_Fit renames M.Kinematics (A).Result;
@@ -5972,8 +6592,8 @@ package body Driver.Robot.Tests is
    --  keyframe had, its table and its up come out within Z of their own
    --  uncertainty of the truth, in the arm's unit. Then the second arm is
    --  misplaced in the world far beyond its placement's own sigma (the head
-   --  places its eye to a fifth of a unit): turned by a hundredth of a
-   --  radian, its centre moved by a unit, its scale five per cent too large.
+   --  places its eye to half a unit): turned by a hundredth of a radian, its
+   --  centre moved by ten units, its scale five per cent too large.
    --  Its tool in the world moves by all of that; in its own frame nothing
    --  moves, neither its tool nor its table nor its up nor a reach planned
    --  there, and that reach still plans with the arm not placed at all,
@@ -5987,7 +6607,7 @@ package body Driver.Robot.Tests is
       Q : constant Real_Array (1 .. 6) := [0.15, -0.1, 0.08, -0.12, 0.1, -0.15];
       O : Observation;
    begin
-      Head_Scene (M, Unseen_Wrist => False);
+      Head_Scene (M);
       O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       O.Readings.Append (Q);
       declare
@@ -6002,7 +6622,8 @@ package body Driver.Robot.Tests is
          Goal   : constant Motion.Pose_Goal :=
            (Pose          => (Rotation    => Tool.Pose.Rotation * Driver.Numerics.Exp ([0.0, 0.02, 0.0]),
                               Translation => Tool.Pose.Translation + [0.02, -0.01, 0.0]),
-            Position_Only => False);
+            Position_Only => False,
+            Free_About    => <>);
          Plan   : constant Motion.Plan := Motion.Plan_Reach_In_Arm (M, 2, O, Goal);
          True_N : Vec3;
          True_O : Real;
@@ -6028,7 +6649,7 @@ package body Driver.Robot.Tests is
                           & Real'Image (Plane_Off (Table, True_N, True_O)) & " of its uncertainty");
          --  Misplaced in the world.
          R2.Placement := (Rotation    => Driver.Numerics.Exp ([0.0, 0.0, 0.01]) * R2.Placement.Rotation,
-                          Translation => R2.Placement.Translation + [1.0, 0.0, 0.0]);
+                          Translation => R2.Placement.Translation + [10.0, 0.0, 0.0]);
          R2.Scale := 1.05 * R2.Scale;
          declare
             Moved_By : constant Real := abs (Tool_Pose (M, 2, O).Pose.Translation - World.Pose.Translation);
@@ -6057,7 +6678,7 @@ package body Driver.Robot.Tests is
                       and then Motion.Last_Readings (Unplaced) = Motion.Last_Readings (Plan),
                       "a reach in the arm's own frame does not plan, or plans elsewhere, with the arm not placed");
                Check (Tool_In_Arm (M, 2, O) = Tool, "the tool in its own frame changes with the arm not placed");
-               Check (Motion.Status (Motion.Plan_Reach (M, 2, O, (Pose => World.Pose, Position_Only => False)))
+               Check (Motion.Status (Motion.Plan_Reach (M, 2, O, (Pose => World.Pose, Position_Only => False, Free_About => <>)))
                       = Motion.Unmeasured, "a reach given in the world plans for an arm not placed in it");
             end;
          end if;
@@ -6077,14 +6698,14 @@ package body Driver.Robot.Tests is
       Q_Goal  : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
       O, Want : Observation;
    begin
-      Head_Scene (M, Unseen_Wrist => False);
+      Head_Scene (M);
       O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       Want.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       Want.Readings.Append (Q_Goal);
       declare
          Goal : constant Rigid := Tool_Pose (M, 2, Want).Pose;
-         P    : constant Motion.Plan := Motion.Plan_Reach (M, 2, O, (Pose => Goal, Position_Only => False));
+         P    : constant Motion.Plan := Motion.Plan_Reach (M, 2, O, (Pose => Goal, Position_Only => False, Free_About => <>));
       begin
          Check (Motion.Status (P) = Motion.Planned, "a reach given in the world for the placed arm is not planned: "
                 & Motion.Why (P));
@@ -6171,6 +6792,8 @@ package body Driver.Robot.Tests is
       Why     : Ada.Strings.Unbounded.Unbounded_String;
    begin
       Measured_Body (M);
+      --  An aligner's error as keyframes measure it, which the synthetic keyframes of this body do not show.
+      M.Kinematics (M.Kinematics.First_Index).Scatter := 0.3;
       Check (Driver.Robot.Kinematics.Fitted (M, 1), "the body to write has no fitted arm");
       declare
          Written : constant String := Driver.Robot.Body_File.Text (M);
@@ -6182,6 +6805,10 @@ package body Driver.Robot.Tests is
          end loop;
          Check (Driver.Robot.Body_File.Text (Back) = Written, "the reloaded body writes another file");
          Check (Driver.Robot.Kinematics.Fitted (Back, 1), "the reloaded arm is not fitted");
+         Check (Driver.Robot.Kinematics.Match_Noise (M, 1) > 0.0
+                and then Driver.Robot.Kinematics.Match_Noise (Back, 1) = Driver.Robot.Kinematics.Match_Noise (M, 1),
+                "the aligner's error on the arm's eye, " & Driver.Robot.Kinematics.Match_Noise (M, 1)'Image
+                & " px, was reloaded as" & Driver.Robot.Kinematics.Match_Noise (Back, 1)'Image);
          declare
             Q    : constant Real_Array (1 .. 6) := [0.1, -0.05, 0.08, 0.05, 0.1, -0.1];
             Was  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q);
@@ -6279,6 +6906,49 @@ package body Driver.Robot.Tests is
       GNAT.OS_Lib.Free (File_Name);
       GNAT.OS_Lib.Free (Recording_Name);
    end Body_File_In_The_Recording;
+
+   --  A body file is one line, and a body of thirty joints writes a megabyte of it: the humanoid's reload died of a
+   --  stack overflow in the function form of Get_Line, which reads a line's rest by recursion (10-20). A file of the
+   --  body's text and thirty-two megabytes of blanks (8192 pieces of 4096) before its last brace, one line, loads and
+   --  is the body it held.
+   procedure Body_File_One_Long_Line is
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type GNAT.OS_Lib.String_Access;
+      M, Live : Model;
+      Ok      : Boolean;
+      Why     : Ada.Strings.Unbounded.Unbounded_String;
+      FD      : GNAT.OS_Lib.File_Descriptor;
+      File_Name : GNAT.OS_Lib.String_Access;
+      Gone    : Boolean;
+   begin
+      Measured_Body (M);
+      GNAT.OS_Lib.Create_Temp_File (FD, File_Name);
+      Check (FD /= GNAT.OS_Lib.Invalid_FD, "no scratch file for the body file");
+      GNAT.OS_Lib.Close (FD);
+      if File_Name = null then
+         return;
+      end if;
+      declare
+         Written : constant String := Driver.Robot.Body_File.Text (M);
+         Brace   : constant Natural := Ada.Strings.Fixed.Index (Written, "}", Ada.Strings.Backward);
+         Piece   : constant String (1 .. 4096) := [others => ' '];
+         F       : Ada.Text_IO.File_Type;
+      begin
+         Check (Brace > 0, "the body's text has no closing brace");
+         Ada.Text_IO.Open (F, Ada.Text_IO.Out_File, File_Name.all);
+         Ada.Text_IO.Put (F, Written (Written'First .. Brace - 1));
+         for Pieces in 1 .. 8192 loop
+            Ada.Text_IO.Put (F, Piece);
+         end loop;
+         Ada.Text_IO.Put (F, Written (Brace .. Written'Last));
+         Ada.Text_IO.Close (F);
+         Load_Body (Live, File_Name.all, Ok, Why);
+         Check (Ok, "the long body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+         Check (Driver.Robot.Body_File.Text (Live) = Written, "the long body file loaded another body than it held");
+      end;
+      GNAT.OS_Lib.Delete_File (File_Name.all, Gone);
+      GNAT.OS_Lib.Free (File_Name);
+   end Body_File_One_Long_Line;
 
    --  A decider's Estimate_Now goes into the recording once per call; the
    --  recomputations Observe makes as the evidence doubles do not, since a
@@ -6444,7 +7114,7 @@ package body Driver.Robot.Tests is
       O.Readings.Append (Real_Array'(1 .. 6 => 0.0));
       declare
          Goal : constant Driver.Robot.Motion.Pose_Goal :=
-           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q_Goal), Position_Only => False);
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Q_Goal), Position_Only => False, Free_About => <>);
          use type Driver.Robot.Motion.Plan_Status;
       begin
          Check (Driver.Robot.Motion.Status (Driver.Robot.Motion.Plan_Reach (Back, 1, O, Goal))
@@ -6608,7 +7278,7 @@ package body Driver.Robot.Tests is
       declare
          use type Driver.Robot.Motion.Plan_Status;
          Goal : constant Driver.Robot.Motion.Pose_Goal :=
-           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False);
+           (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False, Free_About => <>);
          P    : constant Driver.Robot.Motion.Plan := Driver.Robot.Motion.Plan_Reach (M, 1, O, Goal);
          Done : Boolean := False with Atomic;
          Got  : Driver.Robot.Motion.Step_Report;
@@ -6714,6 +7384,64 @@ package body Driver.Robot.Tests is
       end if;
    end Plan_And_Follow_Beyond_The_Travel;
 
+   --  The eye's place in the arm's own unit (Fit.Place_Covariance_In_Unit): what the fit leaves uncertain of every
+   --  length of the arm together moves every place with the unit, and is none of a place's uncertainty in that unit;
+   --  one length alone is. The pose's covariance (Fit.Pose_Covariance) holds both (a18 on 10-16: 12 per cent of
+   --  the eye's place, 6.5 units from the reference, where the truth put the tool within a seventieth of a unit).
+   procedure Place_In_Own_Unit is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N      : constant := 3;
+      Joints : constant Fit.Joint_Array (1 .. N) :=
+        [(W => [0.0, 0.0, 1.0], P => [0.3, -0.2, 0.0], C => 1.0, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.5, -1.0], C => 1.0, Slide => False),
+         (W => Driver.Numerics.Unit ([0.0, 1.0, 0.2]), P => [0.4, 0.1, -0.6], C => 1.0, Slide => False)];
+      Chain  : constant Fit.Chain_Order := [1, 2, 3];
+      --  The unit's keyframes, each joint turned alone and all together, near the reference; the place asked, far.
+      Unit_Changes : constant Real_Matrix (1 .. 4, 1 .. N) :=
+        [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, 0.1], [0.05, -0.05, 0.05]];
+      Far     : constant Real_Array (1 .. N) := [0.4, -0.3, 0.5];
+      Reduced : constant Natural := Fit.Terms (N);
+      Sigma   : constant Real := 0.01;
+      G       : Real_Array (1 .. Reduced) := [others => 0.0];
+      Every_Length, One_Length : Fit.Real_Lists.Vector;
+
+      function Trace (X : Driver.Numerics.Mat3) return Real is (X (1, 1) + X (2, 2) + X (3, 3));
+   begin
+      --  Every length scaled together: each joint's point moved across its axis by its own share (Fit.Across).
+      for J in 1 .. N loop
+         declare
+            E1, E2 : Driver.Numerics.Vec3;
+         begin
+            Fit.Across (Joints (J).W, E1, E2);
+            G (Fit.Term_Of (J, Fit.Point_1)) := Driver.Numerics.Dot (Joints (J).P, E1);
+            G (Fit.Term_Of (J, Fit.Point_2)) := Driver.Numerics.Dot (Joints (J).P, E2);
+         end;
+      end loop;
+      for P in 1 .. Reduced loop
+         for Q in 1 .. Reduced loop
+            Every_Length.Append (Sigma ** 2 * G (P) * G (Q));
+            One_Length.Append (if P = Q and then P = Fit.Term_Of (2, Fit.Point_1) then Sigma ** 2 else 0.0);
+         end loop;
+      end loop;
+      declare
+         Turn, Every_Pose, One_Pose : Driver.Numerics.Mat3;
+         Every_Unit : constant Driver.Numerics.Mat3 :=
+           Fit.Place_Covariance_In_Unit (Joints, Chain, Far, Unit_Changes, Every_Length);
+         One_Unit   : constant Driver.Numerics.Mat3 :=
+           Fit.Place_Covariance_In_Unit (Joints, Chain, Far, Unit_Changes, One_Length);
+      begin
+         Fit.Pose_Covariance (Joints, Chain, Far, Every_Length, Turn, Every_Pose);
+         Fit.Pose_Covariance (Joints, Chain, Far, One_Length, Turn, One_Pose);
+         Check (Trace (Every_Pose) > 0.0, "every length scaled together does not move the eye's place: the test shows nothing");
+         Check (Trace (Every_Unit) <= Driver.Conventions.Unchanged_Fraction ** 2 * Trace (Every_Pose),
+                "every length scaled together leaves the eye's place in the arm's own unit uncertain by"
+                & Trace (Every_Unit)'Image & " of the" & Trace (Every_Pose)'Image & " it leaves the pose");
+         Check (Trace (One_Unit) >= Driver.Conventions.Unchanged_Fraction * Trace (One_Pose),
+                "one length alone leaves the eye's place in the arm's own unit uncertain by" & Trace (One_Unit)'Image
+                & " of the" & Trace (One_Pose)'Image & " it leaves the pose");
+      end;
+   end Place_In_Own_Unit;
+
    --  The unit of length is the first fit's. A keyframe taken after the arm
    --  was fitted (every rest of a hand's presses, every stop of an action)
    --  refines every term and moves no length: the eye's position at a pose
@@ -6752,12 +7480,12 @@ package body Driver.Robot.Tests is
             for J in Q'Range loop
                Q (J) := 0.4 * Real ((Row * J) mod 3 - 1);
             end loop;
-            Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng);
+            Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng, Base);
          end;
       end loop;
       Driver.Robot.Kinematics.Refit (M);
       Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm is not fitted with the keyframes taken after its fit");
-      Check (M.Kinematics (1).Result.Matches = Natural (M.Kinematics (1).Matches.Length)
+      Check (M.Kinematics (1).Result.Matches = Natural (Ada.Containers.Count_Type'(M.Kinematics (1).Matches.Length))
              and then M.Kinematics (1).Result.Used > First_Used,
              "the refit did not use the keyframes taken after the fit:" & M.Kinematics (1).Result.Used'Image
              & " sightings against" & First_Used'Image);
@@ -6821,6 +7549,103 @@ package body Driver.Robot.Tests is
    begin
       Synthetic_Sweep (0.002, Expect_Fit => False);
    end Kinematics_Of_A_Small_Sweep;
+
+   --  The kiwi's regime (R6, 10-14): the first passes turned each joint by 1.5 to 3.4 degrees, the aligner's
+   --  sightings erred by about a pixel, and a white table left it a quarter of its points. Swept that little, the
+   --  fit may or may not tell the arm, but what it reports it must report right: a wrong lens taken for fitted
+   --  (the kiwi's 27, 57 and 24453 px) puts every later measurement off. Swept to 11.5 degrees, as the passes'
+   --  ladder climbs to, it must tell it.
+   --  A plane's points seen before and after a turn about an axis and a shift across it: the turn, and the plane
+   --  times the shift, come back from their lines of sight alone, whatever way the axis points against the eye's
+   --  (along its sight, across it, and between).
+   procedure Turn_On_A_Plane is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      type Case_Record is record
+         W     : Vec3;
+         Turn  : Real;
+         Point : Vec3;   --  on the axis
+      end record;
+      Cases : constant array (1 .. 4) of Case_Record :=
+        [(Unit ([0.0, 0.0, 1.0]), 0.3, [0.05, -0.02, 0.0]),
+         (Unit ([1.0, 0.0, 0.1]), -0.6, [0.0, 0.2, -0.1]),
+         (Unit ([0.3, -0.8, 0.4]), 0.15, [0.1, 0.1, 0.3]),
+         (Unit ([0.0, 1.0, 0.0]), 0.6, [0.0, 0.0, -0.4])];
+      --  The plane N . X = 1, below and ahead of the eye.
+      N : constant Vec3 := [0.0, -0.6, -0.8] / 0.9;   --  its normal over its distance
+   begin
+      for C of Cases loop
+         declare
+            R : constant Mat3 := Driver.Numerics.Exp (-C.Turn * C.W);
+            T : constant Vec3 := C.Point - R * C.Point;
+            Before, After : Fit.Vec3_Array (1 .. 48);
+            Weight : constant Real_Array (1 .. 48) := [others => 1.0];
+            K      : Natural := 0;
+         begin
+            for Gy in 1 .. 6 loop
+               for Gx in 1 .. 8 loop
+                  declare
+                     H0 : constant Vec3 := [(Real (Gx) - 4.5) * 0.12, (Real (Gy) - 3.5) * 0.12, 1.0];
+                     X  : constant Vec3 := (1.0 / Dot (N, H0)) * H0;
+                     Y  : constant Vec3 := R * X + T;
+                  begin
+                     K := K + 1;
+                     Before (K) := H0;
+                     After (K) := (1.0 / Y (3)) * Y;
+                  end;
+               end loop;
+            end loop;
+            declare
+               Turn  : Real;
+               Shift, Normal : Vec3;
+               Found : Boolean;
+               Want  : constant Mat3 := Driver.Numerics.Outer (T, N);
+               Got   : Mat3;
+               Off   : Real := 0.0;
+            begin
+               Fit.Turn_On_Plane (Before, After, Weight, C.W, Turn, Shift, Normal, Found);
+               Check (Found, "the turn on a plane was not found about" & C.W (1)'Image & C.W (2)'Image & C.W (3)'Image);
+               if Found then
+                  Got := Driver.Numerics.Outer (Shift, Normal);
+                  for P in 1 .. 3 loop
+                     for Q in 1 .. 3 loop
+                        Off := Real'Max (Off, abs (Got (P, Q) - Want (P, Q)));
+                     end loop;
+                  end loop;
+                  Check (abs (Turn - C.Turn) < 1.0e-9, "the turn came out" & Turn'Image & " for" & C.Turn'Image);
+                  Check (Off < 1.0e-9, "the shift times the plane is off by" & Off'Image);
+               end if;
+            end;
+         end;
+      end loop;
+   end Turn_On_A_Plane;
+
+   --  The desktop arm swept to 34 degrees, its readings a servo's ticks (4096 a turn), its eye on a plane of points
+   --  (the table under a wrist): every keyframe's sightings a homography of the reference's, whose epipolar lines hold
+   --  under a family of motions, and stage 1 chose 69 px of 400 by them, the fit ending at 777 +- 57 px (10-16); and
+   --  the same scene given relief, whose keyframes are no homography where the eye travels.
+   procedure Kinematics_On_A_Plane_In_Ticks is
+      Tick : constant Real := 2.0 * Ada.Numerics.Pi / 4096.0;
+   begin
+      Synthetic_Sweep (3.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Quantum => Tick);
+      Synthetic_Sweep (3.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Quantum => Tick,
+                       Relief => 0.3);
+   end Kinematics_On_A_Plane_In_Ticks;
+
+   --  The order of the joints is not asked of the sweep to 11.5 degrees: its keyframes that move several joints turn
+   --  each by 0.05 units, 2.9 degrees, and what the order changes grows with the product of two joints' turns. Every
+   --  order of its six joints scored (10-16), joints 2 and 3 exchanged left residuals of median 0.966 and 0.945 px
+   --  against 0.960 and 0.955 px in their true order, not significantly the larger by their signed ranks; the search
+   --  that ended at the true order had started there (the axes' distances from the eye) and found no move it could
+   --  tell from it.
+   procedure Kinematics_In_A_Desktop_Regime is
+   begin
+      Synthetic_Sweep (0.3, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Either => True,
+                       Order_Needed => False);
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Order_Needed => False);
+      --  The same with a wide-angle wrist camera's barrel distortion.
+      Synthetic_Sweep (1.0, Expect_Fit => True, Matcher_Noise => 1.0, Kept_Share => 0.25, Distortion => -0.2,
+                       Order_Needed => False);
+   end Kinematics_In_A_Desktop_Regime;
 
    --  The same arm, every keyframe's points sharing an error of 0.3 pixels
    --  (a rendering, a view, the matcher on that pair), as A9's matches did:
@@ -6887,6 +7712,7 @@ package body Driver.Robot.Tests is
          Gain      : constant Real_Array (1 .. N) :=
            (if Drawn and then N = 6 then [-0.5, -1.0, 4.0, -1.0, -0.25, 4.0] else [1 .. N => 1.0]);
          Given     : Real_Matrix (1 .. Frames, 1 .. N);
+         Asked     : Fit.Flag_Matrix (1 .. Frames, 1 .. N);   --  the recorded joints that turned: what the sweep asked
          Want_Chain : Fit.Chain_Order (1 .. N);
       begin
          Check (not Drawn or else N = 6, "the recorded arm has" & N'Image & " joints, the draw six");
@@ -6916,12 +7742,13 @@ package body Driver.Robot.Tests is
          for F in 1 .. Frames loop
             for I in 1 .. N loop
                Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+               Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
             end loop;
          end loop;
          for I in 1 .. N loop
             Want_Chain (Order_Of (I)) := I;
          end loop;
-         Fit.Fit (Given, [for I in 1 .. N => abs Gain (I) * Visible (Order_Of (I))], Seen.all, Width, Height, Unit, Joints,
+         Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * Visible (Order_Of (I))], Seen.all, Width, Height, Unit, Joints,
                   Chain, Found, Report);
          Check (Fit."=" (Chain, Want_Chain), "the joints along the recorded arm, by their readings, came out as "
                 & Chain_Text (Chain) & ", not " & Chain_Text (Want_Chain));
@@ -6960,6 +7787,254 @@ package body Driver.Robot.Tests is
    begin
       Fit_Of_A_Recording ("tests/data/refit_with_presses.txt", Drawn => True);
    end Kinematics_On_A_Drawn_Recording;
+
+   --  The order exam (10-18): many arms, each swept as Synthetic_Sweep sweeps its own (every joint alone at six
+   --  levels, then every joint at once in seven cells), each a draw about that arm: its axes tilted, its joints'
+   --  places scaled and moved, its readings in a drawn order and unit; its sightings with the matcher's noise, an
+   --  error shared by a keyframe and a smooth field of each keyframe's own. Fitted; while the fit does not tell the
+   --  order, the pairs it names (Fit_Report.Untold) are turned together as Boot turns them, in every row of a
+   --  Hadamard matrix of the pair's signs at the sweep's widest level, and the arm fitted again with them; until
+   --  the order is told or no pair is named that was not turned. Scored against each arm's true order: told and
+   --  right, told and wrong (the fit claims what is false), not told (its best order right or wrong).
+   procedure Order_Exam_At
+     (Width, Height : Positive; Focal, Kept_Share, Matcher_Noise, Frame_Error, Tilt : Real; Seed : Long_Long_Integer)
+   is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N        : constant := 6;
+      Arms     : constant := 12;
+      Columns  : constant := 16;
+      Rows     : constant := 12;
+      Widest   : constant Real := 0.2;
+      Levels   : constant Real_Array := [0.25 * Widest, -0.25 * Widest, 0.5 * Widest, -0.5 * Widest, Widest, -Widest];
+      Cells    : constant := 7;
+      Noise    : constant Real := Matcher_Noise;
+      Lens     : constant Fit.Lens := (Fx => Focal, Fy => Focal, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
+                                       K1 => 0.0, K2 => 0.0);
+      Table    : constant Vec3 := [0.0, -0.6, -0.8];
+      Base_Axes : constant array (1 .. N) of Vec3 :=
+        [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5], [0.0, 0.05, 1.0]];
+      Base_Points : constant array (1 .. N) of Vec3 :=
+        [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1], [0.02, 0.03, 0.0]];
+      Most_Frames : constant := 1 + N * 6 + Cells + 4 * N * (N - 1) / 2;
+      Told_Right, Told_Wrong, Untold_Right, Untold_Wrong, Unfitted : Natural := 0;
+      type Verdict is (Not_Fitted, Right_Told, Wrong_Told, Right_Untold, Wrong_Untold);
+      Outcome : array (1 .. Arms) of Verdict := [others => Not_Fitted];
+
+      --  One arm: drawn, swept, fitted and scored. The arms draw from generators of their own and share nothing, so they
+      --  are fitted at once on the workers: twelve one after another took a hundred seconds, past the two-minute cap
+      --  whenever anything else ran (10-20).
+      procedure One_Arm (Arm : Positive) is
+         Rng      : Generator := (State => Seed + 7919 * Long_Long_Integer (Arm));
+         Keep_Rng : Generator := (State => Seed + 104_729 * Long_Long_Integer (Arm));
+         Kept_Point : constant array (1 .. Columns * Rows) of Boolean :=
+           [for K in 1 .. Columns * Rows => Kept_Share >= 1.0 or else Uniform (Keep_Rng) < Kept_Share];
+         Truth    : Fit.Joint_Array (1 .. N);
+         Order_Of : array (1 .. N) of Positive;
+         Gain     : Real_Array (1 .. N);
+         Changes  : Real_Matrix (1 .. Most_Frames, 1 .. N) := [others => [others => 0.0]];
+         Frames   : Natural := 1;
+         type Sighting_Access is access Fit.Sighting_Array;
+         All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. Most_Frames * Columns * Rows);
+         Seen     : Natural := 0;
+         Turned   : array (1 .. N, 1 .. N) of Boolean := [others => [others => False]];
+         Rounds   : Natural := 0;
+         Want_Chain : Fit.Chain_Order (1 .. N);
+         Joints   : Fit.Joint_Array (1 .. N);
+         Chain    : Fit.Chain_Order (1 .. N);
+         Found    : Fit.Lens;
+         Report   : Fit.Fit_Report;
+
+         --  The sightings of the keyframes from First on, at the true arm, with their errors.
+         procedure Sight (First : Positive) is
+         begin
+            for F in First .. Frames loop
+               declare
+                  D : Real_Array (1 .. N);
+                  T : Rigid;
+                  Shared_U : constant Real := Frame_Error * Gaussian (Rng);
+                  Shared_V : constant Real := Frame_Error * Gaussian (Rng);
+               begin
+                  for J in 1 .. N loop
+                     D (J) := Changes (F, J);
+                  end loop;
+                  T := Inverse (Fit.Eye_At (Truth, Along (Truth), D));
+                  for Gy in 1 .. Rows loop
+                     for Gx in 1 .. Columns loop
+                        declare
+                           K  : constant Positive := (Gy - 1) * Columns + Gx;
+                           U0 : constant Real := (Real (Gx) - 0.5) * Real (Width) / Real (Columns);
+                           V0 : constant Real := (Real (Gy) - 0.5) * Real (Height) / Real (Rows);
+                           H  : constant Vec3 := Fit.Ray (Lens, U0, V0);
+                           X  : constant Vec3 := (-1.0 / Real'(Unit (Table) * H)) * H;
+                           U, V : Real;
+                           Ahead : Boolean;
+                        begin
+                           Fit.Project (Lens, T * X, U, V, Ahead);
+                           U := U + Noise * Gaussian (Rng) + Shared_U;
+                           V := V + Noise * Gaussian (Rng) + Shared_V;
+                           if Ahead and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height)
+                             and then Kept_Point (K)
+                           then
+                              Seen := Seen + 1;
+                              All_Seen (Seen) := (Frame => F, Track => K, U0 => U0, V0 => V0, U => U, V => V,
+                                                  Own => 0.0, Own_Freedom => 0, others => <>);
+                           end if;
+                        end;
+                     end loop;
+                  end loop;
+               end;
+            end loop;
+         end Sight;
+
+         procedure Fit_Now is
+            Given : Real_Matrix (1 .. Frames, 1 .. N);
+            Asked : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+         begin
+            for F in 1 .. Frames loop
+               for I in 1 .. N loop
+                  Given (F, I) := Gain (I) * Changes (F, Order_Of (I));
+                  Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
+               end loop;
+            end loop;
+            Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01], All_Seen (1 .. Seen), Width, Height, 0,
+                     Joints, Chain, Found, Report);
+         end Fit_Now;
+      begin
+         --  The arm: each axis tilted and each joint's place scaled and moved by a draw.
+         for J in 1 .. N loop
+            declare
+               W : constant Vec3 := Unit (Base_Axes (J) + Tilt * Vec3'[Gaussian (Rng), Gaussian (Rng), Gaussian (Rng)]);
+               P : constant Vec3 := (0.6 + 0.8 * Uniform (Rng)) * Base_Points (J)
+                 + 0.03 * Vec3'[Gaussian (Rng), Gaussian (Rng), Gaussian (Rng)];
+            begin
+               Truth (J) := (W => W, P => P - Real'(P * W) * W, C => 1.0, Slide => False);
+            end;
+         end loop;
+         --  The readings: a drawn order (Fisher-Yates) and unit, a power of two of either sign.
+         for I in 1 .. N loop
+            Order_Of (I) := I;
+         end loop;
+         for I in reverse 2 .. N loop
+            declare
+               J : constant Positive := 1 + Natural (Real'Floor (Uniform (Rng) * Real (I))) mod I;
+               X : constant Positive := Order_Of (I);
+            begin
+               Order_Of (I) := Order_Of (J);
+               Order_Of (J) := X;
+            end;
+         end loop;
+         for I in 1 .. N loop
+            Gain (I) := (if Uniform (Rng) < 0.5 then -1.0 else 1.0) * 2.0 ** (Integer (Real'Floor (Uniform (Rng) * 5.0)) - 2);
+            Want_Chain (Order_Of (I)) := I;
+         end loop;
+         --  The sweep: every joint alone at its levels, then the cells.
+         for J in 1 .. N loop
+            for L in Levels'Range loop
+               Frames := Frames + 1;
+               Changes (Frames, J) := Levels (L);
+            end loop;
+         end loop;
+         for Row in 1 .. Cells loop
+            Frames := Frames + 1;
+            for J in 1 .. N loop
+               declare
+                  Bits : Natural := 0;
+                  R    : Natural := Row;
+                  C    : Natural := J;
+               begin
+                  while R > 0 and then C > 0 loop
+                     if R mod 2 = 1 and then C mod 2 = 1 then
+                        Bits := Bits + 1;
+                     end if;
+                     R := R / 2;
+                     C := C / 2;
+                  end loop;
+                  Changes (Frames, J) := (if Bits mod 2 = 0 then 0.25 else -0.25) * Widest;
+               end;
+            end loop;
+         end loop;
+         Sight (2);
+         loop
+            Fit_Now;
+            Rounds := Rounds + 1;
+            exit when not Report.Fitted or else Report.Order_Told;
+            declare
+               Fresh : Natural := 0;
+               First : constant Positive := Frames + 1;
+            begin
+               for P of Report.Untold loop
+                  --  A pair is turned once, whichever way along the arm the fit puts it: the order the fit keeps
+                  --  changes between rounds, and a pair named both ways was turned twice, past the keyframes the
+                  --  exam keeps (arm 5 of the hard exam, 10-20).
+                  if not Turned (P.Earlier, P.Later) and then not Turned (P.Later, P.Earlier) then
+                     Turned (P.Earlier, P.Later) := True;
+                     Fresh := Fresh + 1;
+                     --  The pair's joints by the truth's numbering: the readings are drawn from them.
+                     for S1 of Real_Array'[1.0, -1.0] loop
+                        for S2 of Real_Array'[1.0, -1.0] loop
+                           Frames := Frames + 1;
+                           Changes (Frames, Order_Of (P.Earlier)) := S1 * Widest;
+                           Changes (Frames, Order_Of (P.Later)) := S2 * Widest;
+                        end loop;
+                     end loop;
+                  end if;
+               end loop;
+               exit when Fresh = 0;
+               Sight (First);
+            end;
+         end loop;
+         declare
+            Right : constant Boolean := Report.Fitted and then Fit."=" (Chain, Want_Chain);
+         begin
+            if not Report.Fitted then
+               Outcome (Arm) := Not_Fitted;
+            elsif Report.Order_Told and then Right then
+               Outcome (Arm) := Right_Told;
+            elsif Report.Order_Told then
+               Outcome (Arm) := Wrong_Told;
+            elsif Right then
+               Outcome (Arm) := Right_Untold;
+            else
+               Outcome (Arm) := Wrong_Untold;
+            end if;
+            Driver.Log.Line (Driver.Log.Robot, "order exam: arm" & Arm'Image & ": true" & Chain_Text (Want_Chain)
+                             & ", fitted" & (if Report.Fitted then Chain_Text (Chain) else " (not fitted: "
+                                             & Ada.Strings.Unbounded.To_String (Report.Why) & ")")
+                             & (if Report.Order_Told then ", told" else ", not told") & " after" & Rounds'Image
+                             & " fits and" & Natural'Image ((Frames - 1 - N * 6 - Cells) / 4) & " pairs turned: "
+                             & (if Right then "right" else "wrong"));
+         end;
+      end One_Arm;
+      procedure Every_Arm is new Driver.Parallel_For (One_Arm);
+   begin
+      Every_Arm (1, Arms);
+      for Arm in 1 .. Arms loop
+         case Outcome (Arm) is
+            when Not_Fitted => Unfitted := Unfitted + 1;
+            when Right_Told => Told_Right := Told_Right + 1;
+            when Wrong_Told => Told_Wrong := Told_Wrong + 1;
+            when Right_Untold => Untold_Right := Untold_Right + 1;
+            when Wrong_Untold => Untold_Wrong := Untold_Wrong + 1;
+         end case;
+      end loop;
+      Driver.Log.Line (Driver.Log.Robot, "order exam:" & Arms'Image & " arms: told and right" & Told_Right'Image
+                       & ", told and wrong" & Told_Wrong'Image & ", not told but right" & Untold_Right'Image
+                       & ", not told and wrong" & Untold_Wrong'Image & ", not fitted" & Unfitted'Image);
+      Check (Told_Wrong = 0, "the fit told a wrong order for" & Told_Wrong'Image & " arms");
+   end Order_Exam_At;
+
+   procedure Order_Exam is
+   begin
+      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000);
+   end Order_Exam;
+
+   --  As the fake robot's eyes are: 320 by 240 pixels, a focal length of about 143 (its wrist eyes'), a third of the
+   --  points textured (a white table leaves the aligner a fifth of its query points, R6), the matcher's noise 0.5 px
+   --  and a keyframe's shared error 0.2, and the arms' axes tilted further from the template.
+   procedure Order_Exam_Hard is
+   begin
+      Order_Exam_At (320, 240, 143.0, 0.33, 0.5, 0.2, 0.5, 5000);
+   end Order_Exam_Hard;
 
    procedure Kinematics_Of_A_Drawn_Synthetic_Arm is
    begin
@@ -7340,7 +8415,7 @@ package body Driver.Robot.Tests is
             S.Has_Stopped_Low.Append (False);
          end loop;
          return Driver.Robot.Motion.Plan_Reach
-           (M, 1, O, (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False));
+           (M, 1, O, (Pose => Driver.Robot.Kinematics.Eye_In_Reference (M, 1, Beyond_Goal), Position_Only => False, Free_About => <>));
       end Planned_With;
       use type Driver.Robot.Motion.Plan_Status;
    begin
@@ -7409,48 +8484,618 @@ package body Driver.Robot.Tests is
    end Ends_Are_Kept_In_The_Body_File;
 
    procedure Scales_Beside_Stated_Sigmas is
-      --  Residuals each of the spread of a common floor (a tenth of a pixel: what the model leaves of any sighting)
-      --  and what its sighting states, which grows from nothing to a pixel and a half as the view moved the more. The
-      --  noise they show together is several times the floor; the floor read from them beside what is stated is
-      --  the common one, so the sightings that moved far, whose residuals are large for what they state, are not taken
-      --  for outliers by the noise of those that moved little. With nothing stated the floor is that noise.
-      Count   : constant := 2000;
-      Floor   : constant Real := 0.1;
-      R, Own, None : Real_Array (1 .. Count);
-      Rng     : Generator;
+      --  Residuals each of the spread of a common floor (what the model leaves of any sighting) and a gain times what
+      --  its sighting states, which grows from nothing to a pixel and a half as the view moved the more: the floor and
+      --  the gain read from them are theirs, whether what is stated is borne out in full, in half or not at all (the
+      --  aligner's stated sigmas, 10-19: 0.50 of them and none on two arms of the fake robot). Read so, the sightings
+      --  that state much are not outliers by the noise of those that state little, nor those that state little by what
+      --  others state. With nothing stated the floor is the noise the residuals show together, several times the floor.
+      --  The bounds are four of the spreads the reading showed over 60 such draws (a floor of 0.10 +- 0.025 and a gain
+      --  of 1.00 +- 0.041 at a gain of one, 0.10 +- 0.014 and 0.50 +- 0.021 at a half, 0.49 +- 0.015 and 0.06 +- 0.07
+      --  at none).
+      Count : constant := 2000;
+      type Truth is record
+         Floor, Gain, Floor_Within, Gain_Within : Real;
+      end record;
+      Cases : constant array (1 .. 3) of Truth :=
+        [(Floor => 0.1, Gain => 1.0, Floor_Within => 0.1, Gain_Within => 0.16),
+         (Floor => 0.1, Gain => 0.5, Floor_Within => 0.056, Gain_Within => 0.084),
+         (Floor => 0.5, Gain => 0.0, Floor_Within => 0.06, Gain_Within => 0.28)];
+      Rng   : Generator;
    begin
-      for I in 1 .. Count loop
-         Own (I) := 1.5 * Real (I) / Real (Count);
-         None (I) := 0.0;
-         R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (Floor ** 2 + Own (I) ** 2) * Gaussian (Rng);
+      for C of Cases loop
+         declare
+            R, Own : Real_Array (1 .. Count);
+         begin
+            for I in 1 .. Count loop
+               Own (I) := 1.5 * Real (I) / Real (Count);
+               R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (C.Floor ** 2 + (C.Gain * Own (I)) ** 2)
+                 * Gaussian (Rng);
+            end loop;
+            declare
+               Read : constant Driver.Robot.Kinematics.Fit.Error_Model := Driver.Robot.Kinematics.Fit.Model_Of (R, Own);
+            begin
+               Check_Close (Read.Floor, C.Floor, C.Floor_Within, "the floor read beside what the sightings state, from "
+                            & "residuals of floor" & Real'Image (C.Floor) & " and gain" & Real'Image (C.Gain) & ", is"
+                            & Real'Image (Read.Floor));
+               Check_Close (Read.Gain, C.Gain, C.Gain_Within, "the gain read beside the floor, from residuals of floor"
+                            & Real'Image (C.Floor) & " and gain" & Real'Image (C.Gain) & ", is" & Real'Image (Read.Gain));
+            end;
+         end;
       end loop;
       declare
-         Read  : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, Own);
-         Alone : constant Real := Driver.Robot.Kinematics.Fit.Floor_Of (R, None);
-         Shown : Real_Array (1 .. Count);
+         R, None : Real_Array (1 .. Count);
+         Shown   : Real_Array (1 .. Count);
       begin
          for I in 1 .. Count loop
+            None (I) := 0.0;
+            R (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (0.1 ** 2 + (1.5 * Real (I) / Real (Count)) ** 2)
+              * Gaussian (Rng);
             Shown (I) := abs R (I);
          end loop;
-         Check_Close (Read, Floor, 0.03, "the floor read beside what the sightings state, from residuals whose floor is"
-                      & Real'Image (Floor) & ", is" & Real'Image (Read));
-         Check (Alone > 3.0 * Floor,
-                "the noise the residuals show together is not several times their floor:" & Real'Image (Alone));
-         Check_Close (Alone, Driver.Stats.Median (Shown)
-                      / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5), 1.0E-9,
-                      "with nothing stated the floor is not the noise the residuals show");
-         Check (Driver.Robot.Kinematics.Fit.Scale_Of (0.0, 0.0) > 0.0, "a residual with neither floor nor stated has no scale");
-         Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of (0.3, 0.4), 0.5, 1.0E-12, "a scale is the floor and what is stated, as variances");
+         declare
+            Alone : constant Driver.Robot.Kinematics.Fit.Error_Model := Driver.Robot.Kinematics.Fit.Model_Of (R, None);
+         begin
+            Check (Alone.Floor > 3.0 * 0.1,
+                   "the noise the residuals show together is not several times their floor:" & Real'Image (Alone.Floor));
+            Check_Close (Alone.Floor, Driver.Stats.Median (Shown) / Driver.Distributions.Gaussian_Two_Sided_Quantile (0.5),
+                         1.0E-9, "with nothing stated the floor is not the noise the residuals show");
+            Check (Alone.Gain = 1.0, "with nothing stated the gain is not one:" & Real'Image (Alone.Gain));
+         end;
       end;
+      Check (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.0, Gain => 0.0), 0.0) > 0.0,
+             "a residual with neither floor nor stated has no scale");
+      Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.3, Gain => 1.0), 0.4), 0.5, 1.0E-12,
+                   "a scale is the floor and what is stated, as variances");
+      Check_Close (Driver.Robot.Kinematics.Fit.Scale_Of ((Floor => 0.3, Gain => 0.5), 0.8), 0.5, 1.0E-12,
+                   "a scale is the floor and the gain times what is stated, as variances");
    end Scales_Beside_Stated_Sigmas;
+
+   --  A fixed eye placed by the edge flow of a synthetic arm (Kinematics.Flow_Eye): three joints (a turn about the
+   --  vertical, two about level axes), points of its second and third links seen by an eye 0.9 away looking down at the
+   --  arm, each with a gradient of 30 levels a pixel in a direction of its own and, for every joint, the change of the
+   --  picture there a reading unit as the arm's motion has it (central differences of the point's projection, not the
+   --  fit's own formula) with Gaussian noise of the sigma each states; the joints that do not move a point change it by
+   --  noise alone. The lens and the pose come back within Z of their sigmas, and the eye is told.
+   procedure Flow_Eye_On_A_Synthetic_Arm is
+      package Flow renames Driver.Robot.Kinematics.Flow_Eye;
+      package KFit renames Driver.Robot.Kinematics.Fit;
+      Width  : constant := 320;
+      Height : constant := 240;
+      Focal  : constant Real := 150.0;
+      --  The pixels not square, by more than a camera's (the fake's eyes 0.995 to 1.005) so that the check tells the
+      --  fit's aspect from square pixels: its sigma is 0.86 % (at 1.03 the fit said 1.0233), and at 1.004 and 1.03 the
+      --  check passed against square pixels too (10-21).
+      Aspect : constant Real := 1.06;
+      Joints : aliased constant KFit.Joint_Array :=
+        [(W => [0.0, 0.0, 1.0], P => [0.0, 0.0, 0.0], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.0, 0.1], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.25, 0.1], C => 0.001, Slide => False)];
+      Eye_At_Place : constant Vec3 := [0.15, -0.55, 0.75];
+      Target       : constant Vec3 := [0.0, 0.2, 0.08];
+      Forward      : constant Vec3 := Unit (Minus (Target, Eye_At_Place));
+      Right        : constant Vec3 := Unit (Cross (Forward, [0.0, 0.0, 1.0]));
+      Down         : constant Vec3 := Cross (Forward, Right);
+      Truth        : constant Rigid :=
+        (Rotation    => [[Right (1), Down (1), Forward (1)], [Right (2), Down (2), Forward (2)],
+                         [Right (3), Down (3), Forward (3)]],
+         Translation => Eye_At_Place);
+      Sigma  : constant Real := 0.04;
+      G      : Generator := (State => 7);
+      Poses  : constant := 5;
+      Points : constant := 60;
+      Views  : aliased Flow.Pose_Array := [1 .. Poses => null];
+      Result : Flow.Report (Arms => 1, Count => Flow.Terms_For (1));
+      --  Where the camera sees the point of link K (at the reference) with the joints at Readings.
+      procedure Project (Point : Vec3; K : Positive; Readings : Real_Array; U, V : out Real; Ahead : out Boolean) is
+         Moved : constant Rigid := KFit.Eye_At (Joints (1 .. K), [for I in 1 .. K => I], Readings (1 .. K));
+         C     : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (Moved * Point, Truth.Translation));
+      begin
+         Ahead := C (3) > 0.0;
+         U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
+         V := (if Ahead then Focal * Aspect * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+      end Project;
+   begin
+      for P in 1 .. Poses loop
+         declare
+            Readings : Real_Array (1 .. 3);
+            View     : constant Flow.Pose_Access := new Flow.Pose_View (3, Points);
+         begin
+            for J in 1 .. 3 loop
+               Readings (J) := (if P = 1 then 0.0 else 300.0 * (2.0 * Uniform (G) - 1.0));
+            end loop;
+            View.Readings := Readings;
+            View.Back := [others => 0.0];
+            for I in 1 .. Points loop
+               declare
+                  K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
+                  Along : constant Real := Uniform (G);
+                  Point : constant Vec3 :=
+                    (if K = 2
+                     then [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]
+                     else [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along,
+                           0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]);
+                  Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
+                  U, V  : Real;
+                  Ahead : Boolean;
+               begin
+                  Project (Point, K, Readings, U, V, Ahead);
+                  Check (Ahead, "a point of the synthetic arm is behind its eye");
+                  View.U (I) := U;
+                  View.V (I) := V;
+                  View.Gu (I) := 30.0 * Cos (Angle);
+                  View.Gv (I) := 30.0 * Sin (Angle);
+                  View.Link (I) := K;
+                  for J in 1 .. 3 loop
+                     View.Sigma (I, J) := Sigma;
+                     if J <= K then
+                        declare
+                           Step     : constant Real := 1.0E-3;
+                           Up, Back : Real_Array := Readings;
+                           U1, V1, U2, V2 : Real;
+                           A1, A2   : Boolean;
+                        begin
+                           Up (J) := Readings (J) + Step;
+                           Back (J) := Readings (J) - Step;
+                           Project (Point, K, Up, U1, V1, A1);
+                           Project (Point, K, Back, U2, V2, A2);
+                           View.Rate (I, J) := -(View.Gu (I) * (U1 - U2) + View.Gv (I) * (V1 - V2)) / (2.0 * Step)
+                             + Sigma * Gaussian (G);
+                        end;
+                     else
+                        View.Rate (I, J) := Sigma * Gaussian (G);
+                     end if;
+                  end loop;
+               end;
+            end loop;
+            Views (P) := View;
+         end;
+      end loop;
+      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access, Unit_Sigma => null)],
+                    Width, Height, Result);
+      Check (Result.Determined, "the synthetic arm's eye is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
+      if Result.Determined then
+         declare
+            Off_F  : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Focal);
+            Off_C  : constant Vec3 := Minus (Result.Poses (1).Translation, Truth.Translation);
+            O      : constant Natural := Flow.Terms_For (1) - 6;   --  the lens's terms, before the arm's
+            Turned : constant Vec3 :=
+              Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (1).Rotation));
+         begin
+            Check (abs Off_F <= Driver.Conventions.Z * Sqrt (Result.Covariance (1, 1)),
+                   "the focal length is off its sigma:" & Real'Image (Result.Lens.Fx));
+            Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fy / Result.Lens.Fx / Aspect)
+                   <= Driver.Conventions.Z * Sqrt (Result.Covariance (4, 4)),
+                   "the aspect is off its sigma:" & Real'Image (Result.Lens.Fy / Result.Lens.Fx));
+            for A in 1 .. 3 loop
+               Check (abs Off_C (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + 3 + A, O + 3 + A)),
+                      "the centre is off its sigma along axis" & A'Image & ":" & Real'Image (Off_C (A)));
+               Check (abs Turned (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + A, O + A)),
+                      "the turn is off its sigma about axis" & A'Image & ":" & Real'Image (Turned (A)));
+            end loop;
+         end;
+      end if;
+   end Flow_Eye_On_A_Synthetic_Arm;
+
+   --  A fixed eye placed again by the table two arms' own eyes see (Kinematics.Flow_Eye.Refine_By_Scene): the arm of
+   --  robot.flow.eye twice, side by side above a table 0.25 below their bases, each flow as that test makes it but
+   --  with 200 points a pose spread 8 cm about the links, a sigma of 0.02 and turns of 0.4 rad either way (with that
+   --  test's flows the eye's distance and focal length grew together without end along the table's open direction); the
+   --  last link of each carries an eye looking down at the table, its pictures at its flow's poses and at as many
+   --  more; the table's texture blobs a few centimetres wide, the fixed eye's picture of it with no arm in the way. The
+   --  eye placed again is told, within Z of its sigmas in every term, and the table's points it puts in its picture
+   --  lie nearer the true eye's places than the flows' eye put them.
+   procedure Scene_Places_A_Fixed_Eye is
+      package Flow renames Driver.Robot.Kinematics.Flow_Eye;
+      package KFit renames Driver.Robot.Kinematics.Fit;
+      Width  : constant := 320;
+      Height : constant := 240;
+      Focal  : constant Real := 150.0;
+      --  The pixels not square, a camera's little: the table's places tell it from square pixels (checked against
+      --  them instead, the aspect's check fails, 10-21).
+      Aspect : constant Real := 0.996;
+      Wrist_W : constant := 160;
+      Wrist_H : constant := 120;
+      Wrist_Lens : constant KFit.Lens := (Fx | Fy => 120.0, Cx => 80.0, Cy => 60.0, K1 | K2 => 0.0);
+      Table_Z : constant Real := -0.25;
+      Arms    : constant := 2;
+      Bases   : constant array (1 .. Arms) of Vec3 := [[-0.15, 0.0, 0.0], [0.15, 0.0, 0.0]];
+      type Joints_Access is access KFit.Joint_Array;
+      Joints  : array (1 .. Arms) of Joints_Access;
+      Eye_At_Place : constant Vec3 := [0.15, -0.55, 0.75];
+      Target       : constant Vec3 := [0.0, 0.25, -0.1];
+      Forward      : constant Vec3 := Unit (Minus (Target, Eye_At_Place));
+      Right        : constant Vec3 := Unit (Cross (Forward, [0.0, 0.0, 1.0]));
+      Down         : constant Vec3 := Cross (Forward, Right);
+      Truth        : constant Rigid :=
+        (Rotation    => [[Right (1), Down (1), Forward (1)], [Right (2), Down (2), Forward (2)],
+                         [Right (3), Down (3), Forward (3)]],
+         Translation => Eye_At_Place);
+      --  The wrist eye at the reference, at the third link's far end: x along the world's x, looking straight down.
+      Wrist_Turn : constant Mat3 := [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+      Sigma  : constant Real := 0.02;
+      G      : Generator := (State => 11);
+      Poses  : constant := 6;
+      Points : constant := 200;
+      type Views_Access is access Flow.Pose_Array;
+      Views  : array (1 .. Arms) of Views_Access;
+      Result : Flow.Report (Arms => Arms, Count => Flow.Terms_For (Arms));
+      --  The table's texture: blobs of 2 to 5 cm, each of its own brightness, over every place either eye sees.
+      Blobs  : constant := 900;
+      type Blob is record
+         X, Y, S, A : Real;
+      end record;
+      Bank : array (1 .. Blobs) of Blob;
+      function Texture_At (X, Y : Real) return Real is
+         Sum : Real := 128.0;
+      begin
+         for B of Bank loop
+            declare
+               R2 : constant Real := (X - B.X) ** 2 + (Y - B.Y) ** 2;
+            begin
+               if R2 < 16.0 * B.S ** 2 then
+                  Sum := Sum + B.A * Exp (-R2 / (2.0 * B.S ** 2));
+               end if;
+            end;
+         end loop;
+         return Sum;
+      end Texture_At;
+      --  An eye's picture of the table (luma, row after row): its pose in the world and its lens.
+      function Picture_Of (Pose : Rigid; L : KFit.Lens; W, H : Positive) return Flow.Luma_Access is
+         Luma : constant Flow.Luma_Access := new Real_Array (1 .. W * H);
+      begin
+         for V in 0 .. H - 1 loop
+            for U in 0 .. W - 1 loop
+               declare
+                  D : constant Vec3 := Times (Pose.Rotation, KFit.Ray (L, Real (U) + 0.5, Real (V) + 0.5));
+               begin
+                  Luma (V * W + U + 1) :=
+                    (if D (3) < 0.0
+                     then Texture_At (Pose.Translation (1) + (Table_Z - Pose.Translation (3)) / D (3) * D (1),
+                                      Pose.Translation (2) + (Table_Z - Pose.Translation (3)) / D (3) * D (2))
+                     else 0.0);
+               end;
+            end loop;
+         end loop;
+         return Luma;
+      end Picture_Of;
+      --  Where the camera sees the point of arm A's link K (at the reference) with the joints at Readings.
+      procedure Project
+        (A : Positive; Point : Vec3; K : Positive; Readings : Real_Array; U, V : out Real; Ahead : out Boolean)
+      is
+         Moved : constant Rigid := KFit.Eye_At (Joints (A) (1 .. K), [for I in 1 .. K => I], Readings (1 .. K));
+         C     : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (Moved * Point, Truth.Translation));
+      begin
+         Ahead := C (3) > 0.0;
+         U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
+         V := (if Ahead then Focal * Aspect * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+      end Project;
+      type Pictures_Access is access Flow.Wrist_Picture_Array;
+      Pictures : array (1 .. Arms) of Pictures_Access;
+      Worlds   : Flow.Arm_World_Array (1 .. Arms);
+      In_Arms  : Flow.Arm_Flow_Array (1 .. Arms);
+      --  Every picture's readings, and where the wrist eye stands at the reference.
+      Readings_At : array (1 .. Arms, 1 .. 2 * Poses) of Real_Array (1 .. 3);
+      Rest_At     : array (1 .. Arms) of Rigid;
+      Fixed    : Flow.Luma_Access;
+      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Flow.Luma_Access);
+      --  How far an eye of those terms puts the table's points (a grid 4 cm apart the true eye sees) from the true
+      --  eye's places, at most.
+      function Table_Off (R : Flow.Report) return Real is
+         Worst : Real := 0.0;
+      begin
+         for I in -10 .. 10 loop
+            for J in -5 .. 20 loop
+               declare
+                  X  : constant Vec3 := [0.04 * Real (I), 0.04 * Real (J), Table_Z];
+                  Ct : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (X, Truth.Translation));
+                  Cf : constant Vec3 :=
+                    Transposed_Times (R.Poses (1).Rotation, Minus (X, R.Poses (1).Translation));
+               begin
+                  if Ct (3) > 0.0 and then Cf (3) > 0.0 then
+                     declare
+                        Tu : constant Real := Focal * Ct (1) / Ct (3) + Real (Width) / 2.0;
+                        Tv : constant Real := Focal * Aspect * Ct (2) / Ct (3) + Real (Height) / 2.0;
+                     begin
+                        if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
+                           Worst := Real'Max
+                             (Worst, Sqrt ((R.Lens.Cx + R.Lens.Fx * Cf (1) / Cf (3) - Tu) ** 2
+                                           + (R.Lens.Cy + R.Lens.Fy * Cf (2) / Cf (3) - Tv) ** 2));
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Worst;
+      end Table_Off;
+   begin
+      for B of Bank loop
+         B := (X => -0.8 + 1.6 * Uniform (G), Y => -0.5 + 1.6 * Uniform (G), S => 0.02 + 0.03 * Uniform (G),
+               A => 70.0 * (2.0 * Uniform (G) - 1.0));
+      end loop;
+      for A in 1 .. Arms loop
+         Joints (A) := new KFit.Joint_Array'
+           [(W => [0.0, 0.0, 1.0], P => Bases (A), C => 0.001, Slide => False),
+            (W => [1.0, 0.0, 0.0], P => Plus (Bases (A), [0.0, 0.0, 0.1]), C => 0.001, Slide => False),
+            (W => [1.0, 0.0, 0.0], P => Plus (Bases (A), [0.0, 0.25, 0.1]), C => 0.001, Slide => False)];
+         Views (A) := new Flow.Pose_Array (1 .. Poses);
+         Pictures (A) := new Flow.Wrist_Picture_Array (1 .. 2 * Poses);
+         for P in 1 .. 2 * Poses loop
+            declare
+               Readings : Real_Array (1 .. 3);
+            begin
+               for J in 1 .. 3 loop
+                  Readings (J) := (if P = 1 then 0.0 else 400.0 * (2.0 * Uniform (G) - 1.0));
+               end loop;
+               --  The wrist eye's picture at the pose, and where it stood.
+               declare
+                  Moved : constant Rigid := KFit.Eye_At (Joints (A).all, [1, 2, 3], Readings);
+                  Pose  : constant Rigid :=
+                    Moved * Rigid'(Rotation => Wrist_Turn, Translation => Plus (Bases (A), [0.0, 0.45, 0.12]));
+               begin
+                  Readings_At (A, P) := Readings;
+                  Rest_At (A) := (Rotation => Wrist_Turn, Translation => Plus (Bases (A), [0.0, 0.45, 0.12]));
+                  Pictures (A) (P) := (Luma => Picture_Of (Pose, Wrist_Lens, Wrist_W, Wrist_H), Width => Wrist_W,
+                                       Height => Wrist_H, Eye => Pose, World => null);
+               end;
+               --  The flow at the first poses, as robot.flow.eye makes it.
+               if P <= Poses then
+                  declare
+                     View : constant Flow.Pose_Access := new Flow.Pose_View (3, Points);
+                  begin
+                     View.Readings := Readings;
+                     View.Back := [others => 0.0];
+                     for I in 1 .. Points loop
+                        declare
+                           K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
+                           Along : constant Real := Uniform (G);
+                           Point : constant Vec3 :=
+                             Plus (Bases (A),
+                                   (if K = 2
+                                    then [0.08 * (2.0 * Uniform (G) - 1.0), 0.25 * Along,
+                                          0.1 + 0.08 * (2.0 * Uniform (G) - 1.0)]
+                                    else [0.08 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along,
+                                          0.1 + 0.08 * (2.0 * Uniform (G) - 1.0)]));
+                           Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
+                           U, V  : Real;
+                           Ahead : Boolean;
+                        begin
+                           Project (A, Point, K, Readings, U, V, Ahead);
+                           Check (Ahead, "a point of a synthetic arm is behind the fixed eye");
+                           View.U (I) := U;
+                           View.V (I) := V;
+                           View.Gu (I) := 30.0 * Cos (Angle);
+                           View.Gv (I) := 30.0 * Sin (Angle);
+                           View.Link (I) := K;
+                           for J in 1 .. 3 loop
+                              View.Sigma (I, J) := Sigma;
+                              if J <= K then
+                                 declare
+                                    Step     : constant Real := 1.0E-3;
+                                    Up, Back : Real_Array := Readings;
+                                    U1, V1, U2, V2 : Real;
+                                    A1, A2   : Boolean;
+                                 begin
+                                    Up (J) := Readings (J) + Step;
+                                    Back (J) := Readings (J) - Step;
+                                    Project (A, Point, K, Up, U1, V1, A1);
+                                    Project (A, Point, K, Back, U2, V2, A2);
+                                    View.Rate (I, J) :=
+                                      -(View.Gu (I) * (U1 - U2) + View.Gv (I) * (V1 - V2)) / (2.0 * Step)
+                                      + Sigma * Gaussian (G);
+                                 end;
+                              else
+                                 View.Rate (I, J) := Sigma * Gaussian (G);
+                              end if;
+                           end loop;
+                        end;
+                     end loop;
+                     Views (A) (P) := View;
+                  end;
+               end if;
+            end;
+         end loop;
+         In_Arms (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Joints (A).all'Unchecked_Access,
+                         Unit_Sigma => null);
+         Worlds (A) := (Pictures => Pictures (A).all'Unchecked_Access, Lens => Wrist_Lens,
+                        Table    => (Centre => [0.0, 0.25, Table_Z], Normal => [0.0, 0.0, 1.0],
+                                     Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+                                     Offset_Sigma => 1.0E-4, Tilt_11 => 1.0E-8, Tilt_12 => 0.0, Tilt_22 => 1.0E-8,
+                                     Points => 1000, Scatter => 1.0),
+                        Variants => null);
+      end loop;
+      Fixed := Picture_Of (Truth, (Fx => Focal, Fy => Focal * Aspect, Cx => Real (Width) / 2.0,
+                                   Cy => Real (Height) / 2.0, K1 | K2 => 0.0), Width, Height);
+      Flow.Fit_Eye (In_Arms, Width, Height, Result);
+      declare
+         Flows_Off : constant Real := Table_Off (Result);
+      begin
+         Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Result);
+         Check (Result.Determined, "the eye placed again is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
+         Check (Table_Off (Result) < Flows_Off, "the table's points lie no nearer the true eye's places than the flows' "
+                & "eye put them:" & Real'Image (Table_Off (Result)) & " px against" & Real'Image (Flows_Off));
+      end;
+      if Result.Determined then
+         Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Focal)
+                <= Driver.Conventions.Z * Sqrt (Result.Covariance (1, 1)),
+                "the focal length is off its sigma:" & Real'Image (Result.Lens.Fx));
+         Check (abs (Result.Lens.Cx - Real (Width) / 2.0) <= Driver.Conventions.Z * Sqrt (Result.Covariance (2, 2))
+                and then abs (Result.Lens.Cy - Real (Height) / 2.0)
+                         <= Driver.Conventions.Z * Sqrt (Result.Covariance (3, 3)),
+                "the principal point is off its sigma:" & Real'Image (Result.Lens.Cx) & Real'Image (Result.Lens.Cy));
+         Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fy / Result.Lens.Fx / Aspect)
+                <= Driver.Conventions.Z * Sqrt (Result.Covariance (4, 4)),
+                "the aspect is off its sigma:" & Real'Image (Result.Lens.Fy / Result.Lens.Fx));
+         for A in 1 .. Arms loop
+            declare
+               Off_C  : constant Vec3 := Minus (Result.Poses (A).Translation, Truth.Translation);
+               Turned : constant Vec3 :=
+                 Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (A).Rotation));
+               O      : constant Natural := Flow.Terms_For (A) - 6;   --  the terms before arm A's
+            begin
+               for X in 1 .. 3 loop
+                  Check (abs Off_C (X) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + 3 + X, O + 3 + X)),
+                         "arm" & A'Image & "'s centre is off its sigma along axis" & X'Image & ":"
+                         & Real'Image (Off_C (X)));
+                  Check (abs Turned (X) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + X, O + X)),
+                         "arm" & A'Image & "'s turn is off its sigma about axis" & X'Image & ":"
+                         & Real'Image (Turned (X)));
+               end loop;
+            end;
+         end loop;
+      end if;
+      --  The same scene placed by the arms' joints off the truth as a fit would hand them (each axis tilted along a
+      --  direction across it, its point moved along the other and its unit scaled, the sense turning joint by joint),
+      --  the wrist eyes' places by those joints, and their sigmas handed over as each arm's variants
+      --  (Arm_World.Variants, every term of every joint a sigma either way): the eye's spread grows with them, and
+      --  holds the arms' joints where the true eye sees them.
+      declare
+         Off_Tilt : constant Real := 0.004;   --  radians
+         Off_Move : constant Real := 0.002;   --  metres
+         Off_Unit : constant Real := 0.005;   --  of the unit
+         type Variants_Access is access Flow.Arm_Variant_Array;
+         type Rigids_Access is access Flow.Rigid_Array;
+         Off      : array (1 .. Arms) of Joints_Access;
+         Shown    : array (1 .. Arms) of Pictures_Access;
+         Variants : array (1 .. Arms) of Variants_Access;
+         Arms_Off : Flow.Arm_Flow_Array (1 .. Arms);
+         Worlds_Off : Flow.Arm_World_Array (1 .. Arms);
+         Placed   : Flow.Report (Arms => Arms, Count => Flow.Terms_For (Arms));
+         --  Joints J moved by By along term T of joint K (KFit.Joint_Term's: a tilt or a move along a direction across
+         --  its axis, or its unit).
+         procedure Move (J : in out KFit.Joint_Array; K : Positive; T : KFit.Joint_Term; By : Real) is
+            E1, E2 : Vec3;
+         begin
+            KFit.Across (J (K).W, E1, E2);
+            case T is
+               when KFit.Tilt_1  => J (K).W := Unit (Plus (J (K).W, Scaled (By, E1)));
+               when KFit.Tilt_2  => J (K).W := Unit (Plus (J (K).W, Scaled (By, E2)));
+               when KFit.Point_1 => J (K).P := Plus (J (K).P, Scaled (By, E1));
+               when KFit.Point_2 => J (K).P := Plus (J (K).P, Scaled (By, E2));
+               when KFit.Scale   => J (K).C := J (K).C * (1.0 + By);
+            end case;
+         end Move;
+         function Sigma_Of (T : KFit.Joint_Term) return Real is
+           (case T is when KFit.Tilt_1 | KFit.Tilt_2 => Off_Tilt, when KFit.Point_1 | KFit.Point_2 => Off_Move,
+                      when KFit.Scale => Off_Unit);
+         --  The wrist eye's places by joints J, every picture's.
+         function Eyes_By (A : Positive; J : KFit.Joint_Array) return Rigids_Access is
+            E : constant Rigids_Access := new Flow.Rigid_Array (1 .. 2 * Poses);
+         begin
+            for P in E'Range loop
+               E (P) := KFit.Eye_At (J, [1, 2, 3], Readings_At (A, P)) * Rest_At (A);
+            end loop;
+            return E;
+         end Eyes_By;
+         --  How far the eye of R puts the arms' joints as given (at every flow pose) from where the true eye sees the
+         --  true joints, at most.
+         function Joints_Off (R : Flow.Report) return Real is
+            Worst : Real := 0.0;
+         begin
+            for A in 1 .. Arms loop
+               for P in 1 .. Poses loop
+                  for K in 1 .. 3 loop
+                     declare
+                        Given : constant Vec3 :=
+                          KFit.Eye_At (Off (A) (1 .. K - 1), [for I in 1 .. K - 1 => I],
+                                       Readings_At (A, P) (1 .. K - 1))
+                          * Off (A) (K).P;
+                        True_X : constant Vec3 :=
+                          KFit.Eye_At (Joints (A) (1 .. K - 1), [for I in 1 .. K - 1 => I],
+                                       Readings_At (A, P) (1 .. K - 1)) * Joints (A) (K).P;
+                        Ct : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (True_X, Truth.Translation));
+                        Cf : constant Vec3 :=
+                          Transposed_Times (R.Poses (A).Rotation, Minus (Given, R.Poses (A).Translation));
+                     begin
+                        if Ct (3) > 0.0 and then Cf (3) > 0.0 then
+                           Worst := Real'Max
+                             (Worst, Sqrt ((R.Lens.Cx + R.Lens.Fx * Cf (1) / Cf (3)
+                                            - (Focal * Ct (1) / Ct (3) + Real (Width) / 2.0)) ** 2
+                                           + (R.Lens.Cy + R.Lens.Fy * Cf (2) / Cf (3)
+                                              - (Focal * Ct (2) / Ct (3) + Real (Height) / 2.0)) ** 2));
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            return Worst;
+         end Joints_Off;
+      begin
+         for A in 1 .. Arms loop
+            Off (A) := new KFit.Joint_Array'(Joints (A).all);
+            for K in 1 .. 3 loop
+               declare
+                  Sense : constant Real := (if K mod 2 = 0 then -1.0 else 1.0);
+               begin
+                  Move (Off (A).all, K, KFit.Tilt_1, Sense * Off_Tilt);
+                  Move (Off (A).all, K, KFit.Point_2, Sense * Off_Move);
+                  Move (Off (A).all, K, KFit.Scale, Sense * Off_Unit);
+               end;
+            end loop;
+            Shown (A) := new Flow.Wrist_Picture_Array'(Pictures (A).all);
+            declare
+               E : constant Rigids_Access := Eyes_By (A, Off (A).all);
+            begin
+               for P in Shown (A)'Range loop
+                  Shown (A) (P).Eye := E (P);
+               end loop;
+            end;
+            Variants (A) := new Flow.Arm_Variant_Array (1 .. 2 * KFit.Joint_Terms * 3);
+            for K in 1 .. 3 loop
+               for T in KFit.Joint_Term loop
+                  for E in 1 .. 2 loop
+                     declare
+                        J : constant Joints_Access := new KFit.Joint_Array'(Off (A).all);
+                     begin
+                        Move (J.all, K, T, (if E = 1 then -1.0 else 1.0) * Sigma_Of (T));
+                        Variants (A) (2 * (KFit.Joint_Terms * (K - 1) + KFit.Joint_Term'Pos (T)) + E) :=
+                          (Joints => J.all'Unchecked_Access, Eyes => Eyes_By (A, J.all).all'Unchecked_Access,
+                           Lens => Wrist_Lens, Table => Worlds (A).Table);
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            Arms_Off (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Off (A).all'Unchecked_Access,
+                             Unit_Sigma => null);
+            Worlds_Off (A) := (Pictures => Shown (A).all'Unchecked_Access, Lens => Wrist_Lens,
+                               Table => Worlds (A).Table, Variants => Variants (A).all'Unchecked_Access);
+         end loop;
+         Flow.Fit_Eye (Arms_Off, Width, Height, Placed);
+         Flow.Refine_By_Scene (Arms_Off, Worlds_Off, Fixed.all, Width, Height, Placed);
+         Check (Placed.Spread > Result.Spread, "the arms' fits' variants leave the eye's spread no wider:"
+                & Real'Image (Placed.Spread) & " px against" & Real'Image (Result.Spread));
+         Check (Placed.Spread < Real'Last
+                and then Joints_Off (Placed) <= Driver.Conventions.Z * Placed.Spread,
+                "the arms' joints off the truth leave them farther from the true eye's places than Z spreads:"
+                & Real'Image (Joints_Off (Placed)) & " px against a spread of" & Real'Image (Placed.Spread));
+      end;
+      for A in 1 .. Arms loop
+         for P of Pictures (A).all loop
+            declare
+               L : Flow.Luma_Access := P.Luma;
+            begin
+               Free (L);
+            end;
+         end loop;
+      end loop;
+      Free (Fixed);
+   end Scene_Places_A_Fixed_Eye;
 
    procedure Register is
    begin
-      Driver.Tests.Register ("robot.kinematics.scales", "the floor of the scales residuals are judged at is the noise "
-                             & "they show together though their sightings state more as they moved further, so those "
-                             & "that moved far are outliers", Scales_Beside_Stated_Sigmas'Access);
+      Driver.Tests.Register ("robot.flow.eye", "a fixed eye placed by a synthetic arm's edge flow is not told or comes "
+                             & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
+      Driver.Tests.Register ("robot.flow.scene", "a fixed eye placed again by the table two arms' own eyes see is "
+                             & "not told, comes back off its own sigmas, or puts the table's points no nearer their "
+                             & "places than the flows' eye; placed by the arms' joints off the truth and their sigmas, "
+                             & "its spread is no wider or leaves the arms' joints farther than Z spreads from the true "
+                             & "eye's places", Scene_Places_A_Fixed_Eye'Access);
+      Driver.Tests.Register ("robot.kinematics.scales", "the floor and gain of the scales residuals are judged at are "
+                             & "read beside what their sightings state, whatever part of it the residuals bear out, so "
+                             & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
-      Driver.Robot.Kinematics.Fixed.Tests.Register;
+      Driver.Robot.Surfaces.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);
       Driver.Tests.Register ("robot.probe.limits", "a channel at its limit one way is asked ever further that way though "
@@ -7460,11 +9105,18 @@ package body Driver.Robot.Tests is
                              Probe_Limits_And_Deadbands'Access);
       Driver.Tests.Register ("robot.probe.droop", "a probe calls a joint at its end when the fraction of each offset "
                              & "it delivers shrinks, though it still follows", Probe_A_Drooping_Joint'Access);
+      Driver.Tests.Register ("robot.probe.delayed", "a probe of a body whose readings show a command a beat later, "
+                             & "before any delay is measured, reads each level a beat after sending it: the joint's "
+                             & "end comes a level late, the first level is cut short before its answer, and levels "
+                             & "are sent into the answer of the one before", Probe_A_Delayed_Joint'Access);
       Driver.Tests.Register ("robot.probe.apart", "a probe that asks for the estimates as it begins loses what an eye saw "
                              & "when they come back beats later", Probe_Confirms_Through_Apart_Estimates'Access);
       Driver.Tests.Register ("robot.probe.lost", "a probe whose channel's noise was lost measures it again before "
                              & "it reads anything and takes its first step from it",
                              Probe_Reads_After_It_Measures'Access);
+      Driver.Tests.Register ("robot.probe.lockin", "a channel probed on its own that an eye sees is confirmed by a "
+                             & "run of moves back and forth instead of by the lock-in's regression after one estimate",
+                             Probe_Confirms_By_The_Lockin'Access);
       Driver.Tests.Register ("robot.reach", "the readings that put an arm's eye at a pose are not found",
                              Reach_A_Pose'Access);
       Driver.Tests.Register ("robot.reach.turn", "a reach ends a joint that turns a whole period of its fit from "
@@ -7508,6 +9160,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.drawn_recording", "the same recording with its readings in another order "
                              & "and in other units is not determined, its lens off by a percent, or its joints' order "
                              & "along the arm not found", Kinematics_On_A_Drawn_Recording'Access);
+      Driver.Tests.Register ("robot.order.exam", "the order exam's arms come out with a wrong order told", Order_Exam'Access);
+      Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",
                              Kinematics_Of_A_Drawn_Synthetic_Arm'Access);
@@ -7521,6 +9175,8 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.kinematics.pending", "a joint whose widest keyframes have no sightings yet (their "
                              & "matches have not come back) raises in the search of its axis, or leaves the arm "
                              & "unfitted", Kinematics_With_Matches_Pending'Access);
+      Driver.Tests.Register ("robot.kinematics.own_unit", "every length of an arm scaled together leaves the eye's place "
+                             & "uncertain in the arm's own unit, or one length alone does not", Place_In_Own_Unit'Access);
       Driver.Tests.Register ("robot.kinematics.unit", "a keyframe taken after the arm was fitted moves the lengths of "
                              & "its frame (the unit follows every keyframe, not the first fit's), or the refit leaves "
                              & "it out", Unit_Holds_As_Keyframes_Arrive'Access);
@@ -7536,44 +9192,16 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.body.recorded", "a body file the driver reads is not in the recording once, "
                              & "where it was read, or its recorded text reloads another body",
                              Body_File_In_The_Recording'Access);
+      Driver.Tests.Register ("robot.body.line", "a body file of one line of tens of megabytes is not loaded, or is "
+                             & "another body than it held", Body_File_One_Long_Line'Access);
       Driver.Tests.Register ("robot.estimate.recorded", "a decider's Estimate_Now is not in the recording once per "
                              & "call, or Observe's own recomputations are", Estimate_In_The_Recording'Access);
-      Driver.Tests.Register ("robot.world.place", "a second arm whose eye sees the first arm's table is placed in the "
-                             & "wrong spot, turn or scale, beyond its own sigma, or not through its own eye",
-                             Place_A_Second_Arm'Access);
       Driver.Tests.Register ("robot.world.head", "two arms whose eyes never see each other's table are not placed "
                              & "through a fixed eye that sees both, or beyond the placement's own sigma",
                              Place_Through_A_Head'Access);
-      Driver.Tests.Register ("robot.world.false", "answers for points the second eye does not show, as from the first "
-                             & "eye's centre, place the second arm there instead of through the fixed eye",
-                             Place_Despite_False_Wrist_Matches'Access);
       Driver.Tests.Register ("robot.world.precise", "a head more precise than the arms' own fits does not place the "
                              & "second arm within its sigma: the arms' lenses and tables are taken as exact",
                              Place_Through_A_Precise_Head'Access);
-      Driver.Tests.Register ("robot.world.moved", "a head that moved between the two arms' views places the second arm",
-                             Moved_Head_Places_Nothing'Access);
-      Driver.Tests.Register ("robot.head.pose",
-                             "a fixed eye with a lens of its own, seeing the arms' tables and boxes, is not placed in "
-                             & "the world within Z of its sigmas, or a line of sight through its pixels is off by more "
-                             & "than its sigma, or a point along one does not land on its pixel",
-                             Measure_The_Head'Access);
-      Driver.Tests.Register ("robot.head.last",
-                             "a fixed eye is not placed because no keyframe answers the arm's last reference point "
-                             & "(the fit has a track fewer than the arm has reference points, and the eye asks for "
-                             & "a row of depth gains for each)", Head_Is_Placed_Without_The_Last_Reference'Access);
-      Driver.Tests.Register ("robot.head.few",
-                             "a fixed eye is placed from five true answers, or says nothing of why not",
-                             Head_Needs_Answers'Access);
-      Driver.Tests.Register ("robot.head.plane",
-                             "a fixed eye is placed from answers that all lie on the table, whose plane fixes it only "
-                             & "up to one term", Head_Needs_More_Than_A_Plane'Access);
-      Driver.Tests.Register ("robot.head.lone",
-                             "a fixed eye is placed, with a few points off the table, further from the truth than its "
-                             & "own covariance says", Head_Among_Few_Off_The_Table'Access);
-      Driver.Tests.Register ("robot.head.noisy",
-                             "a fixed eye is placed from answers that err by 36 pixels (its linearised covariance not "
-                             & "standing over its own sigma), or one with answers off by 0.4 pixel is not placed",
-                             Head_With_Noisy_Answers'Access);
       Driver.Tests.Register ("robot.head.file",
                              "a fixed eye's place is lost, or changed in the covariance or the lines of sight, by the "
                              & "body file", Head_In_The_Body_File'Access);
@@ -7588,6 +9216,15 @@ package body Driver.Robot.Tests is
                              & "less than a keyframe's match can tell is not fitted", Kinematics_With_An_Offset_Reference'Access);
       Driver.Tests.Register ("robot.kinematics.small", "a sweep too small to determine the lens and the joints is "
                              & "reported fitted", Kinematics_Of_A_Small_Sweep'Access);
+      Driver.Tests.Register ("robot.kinematics.plane", "a desktop arm swept to 34 degrees in a servo's ticks, its eye on "
+                             & "a plane of points or on the same with relief, is not fitted right",
+                             Kinematics_On_A_Plane_In_Ticks'Access);
+      Driver.Tests.Register ("robot.kinematics.plane_turn", "a plane's points seen before and after a turn about an "
+                             & "axis do not give back the turn, or the plane and the shift", Turn_On_A_Plane'Access);
+      Driver.Tests.Register ("robot.kinematics.desktop", "a desktop servo arm swept by 1.5 to 3.4 degrees, its sightings "
+                             & "erring by a pixel, a quarter of the points left, is reported fitted with a lens off by "
+                             & "more than Z of its sigma, or swept to 11.5 degrees is not fitted right",
+                             Kinematics_In_A_Desktop_Regime'Access);
       Driver.Tests.Register ("robot.kinematics", "the arm's axes, the eye's lens or the eye's pose at a new pose come "
                              & "out wrong from noisy matches of single-joint and Hadamard keyframes",
                              Kinematics_Of_A_Synthetic_Arm'Access);
@@ -7598,6 +9235,12 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.boot.pause", "a recognition round's hold after a push keeps doubling with the "
                              & "rounds after every eye's lag is measured: B0_1 held 384 beats a push at 32 times the "
                              & "amounts with the lags measured at 1", Pause_Follows_The_Measured_Lag'Access);
+      Driver.Tests.Register ("robot.boot.hold", "an eye that sees nothing of a group keeps its recognition hold at "
+                             & "the doubled guess because its own lag is never measured (B0a: the head eye)",
+                             Hold_Counts_The_Seeing_Eyes'Access);
+      Driver.Tests.Register ("robot.boot.servos", "arms on servos that read whole ticks, stand off a goal by a "
+                             & "deadband and move so many ticks a beat are not recognized, or their delay is taken "
+                             & "from a push a stop swallowed", Boot_With_Servos'Access);
       Driver.Tests.Register ("robot.boot.short", "an arm whose joints read less than they are sent is left unswept: "
                              & "its first pushes, sized by the keyframe step, rest short of it, leave no keyframe, "
                              & "and the sweep's ladder stops there as if the aligner had lost them",
@@ -7623,17 +9266,26 @@ package body Driver.Robot.Tests is
                              & "the arm stopped gives no keyframe", Boot_With_Settling_Views'Access);
       Driver.Tests.Register ("robot.boot.keeps", "a boot that fails after recognizing the body leaves no body file to "
                              & "reload it from", Boot_Keeps_What_It_Measured'Access);
+      Driver.Tests.Register ("robot.sweep.untold", "the fit names joints next to each other whose swap it tells, or "
+                             & "misses two never turned together", Untold_Neighbours'Access);
+      Driver.Tests.Register ("robot.sweep.stepping", "no keyframe is taken in a step under way, and one once the step "
+                             & "is over", No_Keyframe_In_A_Step'Access);
       Driver.Tests.Register ("robot.sweep.twin", "an arm at rest takes no still twin of its reference, or its sweep "
                              & "starts where the view moves less than the matcher errs", Twin_Before_The_Sweep'Access);
-      Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts below where one cell of its eye tells the "
-                             & "view moved", Sweep_Starts_Where_A_Cell_Tells'Access);
-      Driver.Tests.Register ("robot.answers.unlisted", "the answers to an arm the graph no longer lists are never read, "
-                             & "so the wait for every answer never ends", Answers_Read_For_An_Unlisted_Arm'Access);
+      Driver.Tests.Register ("robot.sweep.start", "a joint's sweep starts at the turn that moves its eye's view by half "
+                             & "the aligner's patch, never below the least turn a keyframe counts, and above the step one "
+                             & "cell of its eye tells", Sweep_Starts_Where_A_Cell_Tells'Access);
       Driver.Tests.Register ("robot.steps.jitter", "a push never ends when the held reading jitters more than it did at "
                              & "rest", Step_Ends_Despite_New_Jitter'Access);
       Driver.Tests.Register ("robot.steps.unanswered", "a push of a group that never answered yet, which nothing "
                              & "answers, is waited for longer than any push of the body took to answer",
                              Unanswered_Push_Of_An_Unanswered_Group'Access);
+      Driver.Tests.Register ("robot.steps.creeping", "a push of a closer at its limit whose reading creeps, which "
+                             & "nothing answers, is taken as answered by the creep since it began",
+                             Unanswered_Push_Of_A_Creeping_Group'Access);
+      Driver.Tests.Register ("robot.steps.born", "a push sent while its group is still on its way from the push "
+                             & "before is answered at its own start, and the body's delay is measured as nothing "
+                             & "from it", Push_Born_Moving_Gives_No_Delay'Access);
       Driver.Tests.Register ("robot.channels.rounds", "the channels' noise and push rounds alternate for good, or take a "
                              & "beat whose mark alternates for rest", Alternating_Rounds_Stop'Access);
       Driver.Tests.Register ("robot.channels.echo", "a group held by sending it its own reading, never commanded, has no rest and no noise because its target changes at every beat", Held_Group_Reaches_Its_Noise'Access);
@@ -7655,6 +9307,10 @@ package body Driver.Robot.Tests is
                              & "meanwhile, or joins the free pushes, or a push the joint is moved against by a visible "
                              & "motion is not blocked with a negative delivered fraction",
                              Step_Let_Go_Is_Not_Blocked'Access);
+      Driver.Tests.Register ("robot.steps.deadband",
+                             "a push that asks less than the least ask the body is known to execute, and is not "
+                             & "answered, is judged blocked or delivered, or one that asks as much is not blocked",
+                             Step_Within_The_Dead_Band_Is_Not_Judged'Access);
       Driver.Tests.Register ("robot.steps.free", "a push of a joint an eye watches is called blocked though it stopped short by "
                              & "no more than every free push of the joint does, because the joint's own error is as large "
                              & "as the step an eye can see", Step_Free_Error_As_Big_As_The_Step'Access);
@@ -7694,6 +9350,15 @@ package body Driver.Robot.Tests is
                              & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.roles.split", "a group whose channels move two eyes apart is not one arm, and a "
+                             & "channel an eye is undecided about does not split it",
+                             Group_Of_Different_Eyes_Has_An_Arm_Each'Access);
+      Driver.Tests.Register ("robot.roles.clearer", "a closer's remembered eye yields to another eye on an arm whose "
+                             & "patch of it significantly outnumbers its own, and only to such a one",
+                             Clearer_Eye_Takes_A_Closer'Access);
+      Driver.Tests.Register ("robot.roles.keyframes", "an arm loses the eye its keyframes tell moves with it when the "
+                             & "lock-in is undecided about it, or keeps one the lock-in sees it move nothing in",
+                             Keyframes_Hold_An_Eye_On_Its_Arm'Access);
       Driver.Tests.Register ("robot.roles.noisy", "an eye that a group carries is called a patch of it because part of its "
                              & "picture is too faintly textured for its cells to tell the group's push, or a patch "
                              & "among well-textured cells is called the whole picture",
@@ -7704,6 +9369,17 @@ package body Driver.Robot.Tests is
                              Noisy_Cells_Far_Above_The_Rest'Access);
       Driver.Tests.Register ("robot.unprobed", "a group never pushed on its own is given a role from what moved "
                              & "with it", Unprobed_Group_Stays_Unclassified'Access);
+      Driver.Tests.Register ("robot.channels.creep", "a reading that crawls at the start and then repeats exactly, never "
+                             & "pushed, is given its crawl as rest noise", Channel_Noise_Of_A_Crawl'Access);
+      Driver.Tests.Register ("robot.channels.flips", "a reading that steps by four units and flips one step at rest is "
+                             & "given a jitter of its step, so a change of two steps in a beat is no motion",
+                             Noise_Of_Single_Step_Flips'Access);
+      Driver.Tests.Register ("robot.channels.gate", "a group whose channels' noises rest on few changes is blind to a "
+                             & "change far beyond them (the gate widened by the fewest degrees of freedom)",
+                             Change_Against_Noise_Of_Few_Changes'Access);
+      Driver.Tests.Register ("robot.channels.integers", "readings that come as integers are given a float's resolution, "
+                             & "so the first push of a tick-counting joint is a trillionth of a tick (R0)",
+                             Resolution_Of_Integer_Readings'Access);
       Driver.Tests.Register ("robot.channels", "reading noise is misjudged (a reading that mostly repeats exactly is "
                              & "given noise zero, so its jitter passes for motion), a hold is taken for a push, or a "
                              & "push never ends", Channel_Noise_And_Pushes'Access);

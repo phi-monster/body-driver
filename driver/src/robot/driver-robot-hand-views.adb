@@ -346,6 +346,9 @@ package body Driver.Robot.Hand.Views is
    function High_Closer (T : Tracker; Channel : Positive) return Real_Array is
      (T.Ends.Constant_Reference.Element (Channel).High.Constant_Reference.Element.Closer.Element);
 
+   function Low_Rest (T : Tracker; Channel : Positive) return Real_Array is
+     (T.Ends.Constant_Reference.Element (Channel).Low.Constant_Reference.Element.Rest.Element);
+
    function Stops (T : Tracker; Channel : Positive) return Natural is
      (if Has_Ends (T, Channel) then Natural (T.Ends.Constant_Reference.Element (Channel).Between.Length) else 0);
 

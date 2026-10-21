@@ -3,6 +3,7 @@ with Ada.Containers.Vectors;
 with Ada.Unchecked_Deallocation;
 with Driver.Robot.Channels;
 with Driver.Stats;
+with Driver.Log;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Robot.Flow;
@@ -164,12 +165,15 @@ package body Driver.Robot.Lag is
    --  (A56: the bursts of the first probe, a push every seven beats, gave eye
    --  2 a lag of 35 beats and eye 3 one of 31, and every probe after waited
    --  that long to look). Without two pushes, every shift the stream allows.
-   function Identifiable (M : Model; Last : Natural) return Natural is
-      package Natural_Vectors is new Ada.Containers.Vectors (Positive, Natural);
-      package Sorting is new Natural_Vectors.Generic_Sorting;
-      Starts : Natural_Vectors.Vector;   --  where a burst starts
-      Pushes : Natural_Vectors.Vector;   --  where any push starts
+   package Natural_Vectors is new Ada.Containers.Vectors (Positive, Natural);
+   package Sorting is new Natural_Vectors.Generic_Sorting;
+
+   --  Where the bursts of pushes start (a push that cut the one before it short is of its burst), and where any push
+   --  starts, each in order.
+   procedure Starts_Of (M : Model; Starts, Pushes : out Natural_Vectors.Vector) is
    begin
+      Starts.Clear;
+      Pushes.Clear;
       for S of M.Groups loop
          if S.Commandable then
             declare
@@ -187,6 +191,13 @@ package body Driver.Robot.Lag is
       end loop;
       Sorting.Sort (Starts);
       Sorting.Sort (Pushes);
+   end Starts_Of;
+
+   function Identifiable (M : Model; Last : Natural) return Natural is
+      Starts : Natural_Vectors.Vector;   --  where a burst starts
+      Pushes : Natural_Vectors.Vector;   --  where any push starts
+   begin
+      Starts_Of (M, Starts, Pushes);
       declare
          --  The median stretch between distinct starts of a list, 0 for none.
          function Median_Gap (List : Natural_Vectors.Vector) return Natural is
@@ -215,16 +226,69 @@ package body Driver.Robot.Lag is
    function Longest (M : Model) return Natural is
      (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
 
+   type Natural_Array is array (Natural range <>) of Natural;
+   type Natural_Access is access Natural_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
+
    procedure Measure (M : in out Model) is
       Last : constant Integer := M.Beats - 1;
-      Bound : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
+      --  A shift up to the median stretch between bursts (Identifiable) is told over every beat, as it always was. A
+      --  longer one lines most pushes' responses up with the next burst's pushes, and is told only where a response
+      --  shows before the next burst starts: the eye's motion at a beat is set against the pushes the shift back only
+      --  when no burst started between the two beats (both in one window, from a burst's start to the next's), and
+      --  such shifts are tried as long as the longest window. Capped at the median stretch, the shifts stopped short
+      --  of an eye ten beats behind its readings where the first probe's levels came three beats apart: its lag was
+      --  taken at one beat, the eye's motion went with the wrong pushes, and the arm it rides was never swept with it
+      --  (robot.boot.reread, 10-17). Told within windows at every shift instead, a picture that flickers for beats
+      --  after each move (robot.boot.settling) fitted shifts of two and three beats better than its own one: its
+      --  trails ran into the next windows, which only the shortest shifts were told over.
+      Starts, Pushes : Natural_Vectors.Vector;
+      Window : Natural_Access := new Natural_Array (0 .. Natural'Max (0, Last));
+      Every  : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
+      Bound  : Natural := Every;
+      --  An eye whose lag is known keeps it until the stream has doubled since the lags were last all measured, as the
+      --  estimates themselves are redone (Observe); one whose lag is not known is measured at every estimate, as it
+      --  was. A lag is a constant of the eye and the evidence for it grows with the pushes: told again over every beat
+      --  at every estimate a decider asked for, the known lags took 6 to 10 s of each late in a sweep and 90 s at beat
+      --  33040 (s41, servo seed 6 of the fake robot, 10-17, replayed: 31521 shifts up to 15763 beats). Measured only
+      --  as the stream doubled, every eye's, an arm's noisy eye kept the lag its first pushes gave it, the lock-in
+      --  read it fixed in the world, and its arm was never swept with it (robot.boot.undecided).
+      Due       : constant Boolean := M.Lag_Evidence = 0 or else M.Beats >= 2 * M.Lag_Evidence;
+      Was_Lags  : constant Lag_Vectors.Vector := M.Lags;
+      Was_Known : constant Eye_Flag_Vectors.Vector := M.Lag_Known;
+      function Kept (E : Eye_Id) return Boolean is
+        (not Due and then Natural (E) <= Natural (Was_Known.Last_Index) and then Was_Known (E));
    begin
+      --  Every eye kept: nothing to measure, and the lags stand as they are.
+      if not M.Eyes.Is_Empty and then (for all E in M.Eyes.First_Index .. M.Eyes.Last_Index => Kept (E)) then
+         Free (Window);
+         return;
+      end if;
+      Starts_Of (M, Starts, Pushes);
+      declare
+         K : Natural := 0;   --  the bursts begun by the beat
+      begin
+         for B in Window'Range loop
+            while K < Natural (Starts.Length) and then Starts (Starts.First_Index + K) <= B loop
+               K := K + 1;
+            end loop;
+            Window (B) := K;
+         end loop;
+         for I in Starts.First_Index .. Starts.Last_Index loop
+            --  Bursts of groups that start on one beat are one start: no window between them.
+            Bound := Natural (Integer'Max
+              (Bound, (if I < Starts.Last_Index then Starts (I + 1) - 1 else Integer'Max (Last, Starts (I))) - Starts (I)));
+         end loop;
+      end;
       M.Lags.Clear;
       M.Lag_Known.Clear;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-         M.Lags.Append (0);
-         M.Lag_Known.Append (False);
+         M.Lags.Append ((if Kept (E) then Was_Lags (E) else 0));
+         M.Lag_Known.Append (Kept (E));
       end loop;
+      if Due then
+         M.Lag_Evidence := M.Beats;
+      end if;
       if Last < 1 then
          return;
       end if;
@@ -264,16 +328,70 @@ package body Driver.Robot.Lag is
          --  the pushes do: the eye's differenced motion ranks regressed on every
          --  varying group's differenced speed ranks at once, each of which can
          --  only add motion, against the F distribution of that fit.
+         function Row (Motion : Series; Shift : Integer; I : Positive) return Boolean is
+           (Motion.Have (I) and then I - Shift in Motion.Value'Range
+            and then (abs Shift <= Every
+                      or else (I - 1 in Window'Range and then I - Shift - 1 in Window'Range
+                               and then Window (I - 1) = Window (I - Shift - 1)))
+            and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift)));
+
+         --  Every row of a shift, in order: of every beat for a short one, and for a longer one of the beats of each
+         --  window long enough to hold the shift, the shift into it. Every beat scanned for every shift took the lag
+         --  measure 0.7 to 1.1 s of a 3 s estimate at 5900 beats, 1011 shifts up to 508 (b09, 10-17), 0.0 to 0.2 before
+         --  the longer shifts.
+         procedure Each_Row (Motion : Series; Shift : Integer; Visit : not null access procedure (I : Positive)) is
+         begin
+            if abs Shift <= Every then
+               for I in Motion.Value'Range loop
+                  if Row (Motion, Shift, I) then
+                     Visit (I);
+                  end if;
+               end loop;
+               return;
+            end if;
+            declare
+               Lo : Integer := 0;   --  the window's first beat
+            begin
+               for W in 0 .. Natural (Starts.Length) loop
+                  declare
+                     Hi : constant Integer :=
+                       (if W < Natural (Starts.Length) then Starts (Starts.First_Index + W) - 1 else Last);
+                  begin
+                     if Hi - Lo >= abs Shift then
+                        for B in Lo + Integer'Max (0, Shift) .. Hi + Integer'Min (0, Shift) loop
+                           if B + 1 in Motion.Value'Range and then Row (Motion, Shift, B + 1) then
+                              Visit (B + 1);
+                           end if;
+                        end loop;
+                     end if;
+                     Lo := Integer'Max (Lo, Hi + 1);
+                  end;
+               end loop;
+            end;
+         end Each_Row;
+
+         --  Whether a shift has rows enough for its fit.
+         function Testable (Motion : Series; Shift : Integer) return Boolean is
+            Rows : Natural := 0;
+            procedure Count (I : Positive) is
+               pragma Unreferenced (I);
+            begin
+               Rows := Rows + 1;
+            end Count;
+         begin
+            Each_Row (Motion, Shift, Count'Access);
+            return K > 0 and then Rows > K + 1;
+         end Testable;
+
          function Fit_Tail (Motion : Series; Shift : Integer) return Real is
             Rows    : Natural := 0;
+            procedure Count (I : Positive) is
+               pragma Unreferenced (I);
+            begin
+               Rows := Rows + 1;
+            end Count;
          begin
-            for I in Motion.Value'Range loop
-               if Motion.Have (I) and then I - Shift in Motion.Value'Range
-                 and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift))
-               then
-                  Rows := Rows + 1;
-               end if;
-            end loop;
+            Each_Row (Motion, Shift, Count'Access);
             if K = 0 or else Rows <= K + 1 then
                return 1.0;
             end if;
@@ -282,18 +400,16 @@ package body Driver.Robot.Lag is
                Y    : Real_Access := new Real_Array (1 .. Rows);
                R    : Natural := 0;
                Used : Natural;
+               procedure Fill (I : Positive) is
+               begin
+                  R := R + 1;
+                  Y (R) := Motion.Value (I);
+                  for J in 1 .. K loop
+                     X (R, J) := Speeds (Varying (J)).Value (I - Shift);
+                  end loop;
+               end Fill;
             begin
-               for I in Motion.Value'Range loop
-                  if Motion.Have (I) and then I - Shift in Motion.Value'Range
-                    and then (for all J in 1 .. K => Speeds (Varying (J)).Have (I - Shift))
-                  then
-                     R := R + 1;
-                     Y (R) := Motion.Value (I);
-                     for J in 1 .. K loop
-                        X (R, J) := Speeds (Varying (J)).Value (I - Shift);
-                     end loop;
-                  end if;
-               end loop;
+               Each_Row (Motion, Shift, Fill'Access);
                declare
                   R2 : constant Real := Regression.Explained_Nonnegative (X.all, Y.all, Used);
                begin
@@ -322,8 +438,10 @@ package body Driver.Robot.Lag is
                Best   : Real := 1.0;     --  the smallest chance of a fit this good by noise
                Lag    : Integer := 0;
                Tests  : Natural := 0;
+               Beyond : Real := 1.0;     --  the smallest at a shift longer than Every, told within windows
+               Beyond_Lag : Integer := 0;
             begin
-               if N > 0 then
+               if N > 0 and then not Kept (E) then
                   for B in 1 .. Natural'Min (Last, Natural (S.Measured.Length) - 1) loop
                      if S.Measured (B) then
                         declare
@@ -355,19 +473,40 @@ package body Driver.Robot.Lag is
                   --  shift the same chance), so none is tried and the lag stays unmeasured, as before.
                   if K > 0 then
                      for Shift in -Bound .. Bound loop
-                        declare
-                           Tail : constant Real := Fit_Tail (Motion.all, Shift);
-                        begin
-                           Tests := Tests + 1;
-                           if Tail < Best then
-                              Best := Tail;
-                              Lag := Shift;
-                           end if;
-                        end;
+                        if Testable (Motion.all, Shift) then
+                           declare
+                              Tail : constant Real := Fit_Tail (Motion.all, Shift);
+                           begin
+                              Tests := Tests + 1;
+                              if abs Shift <= Every then
+                                 if Tail < Best then
+                                    Best := Tail;
+                                    Lag := Shift;
+                                 end if;
+                              elsif Tail < Beyond then
+                                 Beyond := Tail;
+                                 Beyond_Lag := Shift;
+                              end if;
+                           end;
+                        end if;
                      end loop;
                   end if;
                   --  The best of many shifts is one of a family: the lag is
                   --  measured only when it stands out of all of them.
+                  --  A longer shift is told over fewer beats, the windows where the shorter ones' trails do not reach: it
+                  --  displaces the best of the shorter ones only when its fit is the less likely by noise by Z's tail.
+                  --  The aliased one beat of robot.boot.reread's eye 2 had a chance of 1e-18, its true ten beats 1e-270;
+                  --  robot.boot.settling's flickering eye 1 had 2.4e-8 at its true one beat and 2.0e-8 at two.
+                  if Tests > 0 then
+                     Driver.Log.Line (Driver.Log.Robot, "lag: eye" & E'Image & " best at" & Lag'Image & " beats of the"
+                                      & Every'Image & " told over every beat, chance" & Real'Image (Best)
+                                      & "; beyond, at" & Beyond_Lag'Image & ", chance" & Real'Image (Beyond)
+                                      & "; of" & Tests'Image & " shifts up to" & Bound'Image);
+                  end if;
+                  if Beyond < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) * Best then
+                     Best := Beyond;
+                     Lag := Beyond_Lag;
+                  end if;
                   if Tests > 0
                     and then Best < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests)
                   then
@@ -383,6 +522,7 @@ package body Driver.Robot.Lag is
             Free (Speeds (G));
          end loop;
       end;
+      Free (Window);
    end Measure;
 
 end Driver.Robot.Lag;

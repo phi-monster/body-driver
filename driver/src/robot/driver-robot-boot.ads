@@ -26,6 +26,16 @@ package Driver.Robot.Boot is
 
    function Pause_After_A_Push (Every_Lag_Known : Boolean; Longest_Lag : Natural; Guess : Natural) return Natural is
      (if Every_Lag_Known then Longest_Lag else Guess);
+
+   function Hold_After_A_Push (M : Model; G : Group_Id; Guess : Natural) return Natural;
+   --  Pause_After_A_Push for group G: the eyes that count are those that see
+   --  the group move at all (their response to it is not Nothing); every one
+   --  of them measured gives the longest of their lags, one of them unmeasured
+   --  gives Guess. An eye that sees nothing of the group never gets a lag from
+   --  its pushes and must not keep the hold at the doubled guess (B0a, 10-13:
+   --  the head eye saw nothing of either arm, its lag stayed unmeasured, and
+   --  every round held 16 to 26 beats a push with the arms' own eyes measured
+   --  at 1 beat; B0a_2 spent 533 of a 766-beat round holding).
    --  How many beats a recognition round holds after each push before the
    --  pictures are asked to settle. The hold is for an eye whose picture
    --  trails the readings: settled the beat after they stop, before it has

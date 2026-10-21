@@ -47,7 +47,7 @@ private package Driver.Robot.Lockin is
    --  disagree that a picture moves whole: they are enough to say it (even all of them showing it would be a significant
    --  majority) and a significant majority of them do not show it. Too few of them to say anything do not disagree.
 
-   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean; Quiet : Boolean := False) return Shown
      with Pre  => Pool'Length > 0 and then Typical > 0.0 and then (for all C of Pool => C.Variance > 0.0),
           Post => Cells_Shown'Result.Least <= Cells_Shown'Result.Most and then Cells_Shown'Result.Most <= Pool'Length;
    --  Of cells whose noise is too much for them to tell a motion of the energy Typical, how many show a motion of that
@@ -64,6 +64,13 @@ private package Driver.Robot.Lockin is
    --  called an arm), and the others are read without them. A whole picture's nearer parts, a few cells that show
    --  more, stay in the mean when the cells that can tell agree (A31's first arm, at 252 beats: 14 cells carried
    --  three quarters of the energy and 103 of its 108 cells that can tell showed the motion).
+
+   function Still_A_Patch (Responding, Textured : Natural) return Boolean;
+   --  Whether an eye with that many of its textured cells responding to a group is a patch by the verdict's
+   --  own rule: the silent cells are a significant majority. The boot asks it of a patch's responding count
+   --  doubled: a patch one more doubling of the push cannot make anything else is not pushed on (R5 on the
+   --  Pi, 10-13: a gripper's own patch in its wrist eye grew 17, 22, 46 of 525 with every doubling, as a jaw
+   --  opening wider does, and the rounds went to 64 times the amounts for it).
 
    function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response;
    --  What an eye makes of a group from how many of its Textured cells Responding to it and how many show its motion,
@@ -90,7 +97,9 @@ private package Driver.Robot.Lockin is
    --  The eye's image moved at that beat as the lock-in can tell: more of its
    --  textured cells resolved a displacement beyond their noise at rest (their
    --  floor times the eye's rest factor, Measure_Rest_Noise), or
-   --  moved too far to be resolved, than that per-cell test alarms on by
+   --  moved too far to be resolved, than the rest's beats do: significantly
+   --  above the rest counts' median by their robust scatter (Rest_Count_Level),
+   --  or, before the rest is measured, than that per-cell test alarms on by
    --  chance. The step that makes an eye move this way is one the lock-in
    --  can measure; a change the stillness judgment sees (a pixel's rounding
    --  flipping) can be far smaller.

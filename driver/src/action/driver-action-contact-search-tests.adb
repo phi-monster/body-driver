@@ -51,6 +51,8 @@ package body Driver.Action.Contact.Search.Tests is
       end if;
       if Hands = 2 then
          X.S.Hands.Append (Gripper (1, 1, 0.08, 0.04, Sigma));
+      elsif Hands = 1 then
+         X.S.Hands.Append (One_Jaw (1, 1, 0.08, 0.04, Sigma));
       elsif Hands = 5 then
          X.S.Hands.Append (Five_Lobes (1, 1, 0.06, 0.012, 0.05, Sigma));
       end if;
@@ -93,6 +95,7 @@ package body Driver.Action.Contact.Search.Tests is
             Check (Found, "no contact set raises a bar a gripper spans: " & Say (Tried));
             if Found then
                Check (Natural (Best.Touches.Length) = 2, "a two-lobe set has" & Best.Touches.Length'Image & " touches");
+               Check (Best.Near = Best.Tool, "a hand whose faces all move is given a last stretch onto a face");
                Check (abs (Across (Best) * Long) < 0.1, "the lobes close along the bar's length, not across it");
                Check (abs (Best.Touches (1).Inward * Best.Touches (2).Inward + 1.0) < 0.1,
                       "the two touches do not oppose each other");
@@ -417,8 +420,126 @@ package body Driver.Action.Contact.Search.Tests is
              & "is shut");
    end Way_In_Asked_Before_The_Reach;
 
+   --  A jaw swung onto a part of the hand it does not move (a gripper as the kiwi's SO-101 arms have it): the body
+   --  measures one lobe moving, and the hand still holds a bar between that lobe and the face it closes onto. A
+   --  pair of plates closing onto each other has no such face added.
+   procedure One_Jaw_Holds_A_Bar is
+   begin
+      for Place of Both_Frames loop
+         declare
+            X     : constant Scene := Make (Bar (0.2, 0.02, 0.02), Place, 0.4, 1);
+            Pair  : constant Scene := Make (Bar (0.2, 0.02, 0.02), Place, 0.4, 2);
+            Best  : Candidate;
+            Found : Boolean;
+            Tried : Account;
+         begin
+            Check (Natural (Effector_Of (X.S, 1).Pads.Length) = 2,
+                   "a hand with one jaw moving has" & Effector_Of (X.S, 1).Pads.Length'Image
+                   & " faces, not the jaw and the face it closes onto");
+            Check (Natural (Effector_Of (Pair.S, 1).Pads.Length) = 2,
+                   "a pair of plates closing onto each other has" & Effector_Of (Pair.S, 1).Pads.Length'Image
+                   & " faces, not its two plates");
+            Search (X, Slide (Up_Of (X)), Best, Found, Tried);
+            Check (Found, "no contact set raises a bar between a jaw and the face it closes onto: " & Say (Tried));
+            if Found then
+               Check (Natural (Best.Touches.Length) = 2,
+                      "the one-jaw set has" & Best.Touches.Length'Image & " touches");
+               Check (abs (Best.Touches (1).Inward * Best.Touches (2).Inward + 1.0) < 0.1,
+                      "the jaw and the face do not oppose each other across the bar");
+               --  The face cannot open: the hand comes down beside the bar and moves onto it along the way the face
+               --  looks, into the bar where the face touches it (the second touch: the face is the second pad).
+               Check (abs (Best.Tool.Translation - Best.Near.Translation) > 0.0,
+                      "the hand comes straight down onto the face's touch, sliding the face down the bar");
+               if abs (Best.Tool.Translation - Best.Near.Translation) > 0.0 then
+                  Check (Unit (Best.Tool.Translation - Best.Near.Translation) * Best.Touches (2).Inward > 0.9,
+                         "the hand's last stretch is not along the way the face looks into the bar");
+               end if;
+            end if;
+         end;
+      end loop;
+   end One_Jaw_Holds_A_Bar;
+
+   --  A bar an eye sees from one side, up and across its width: its top and the long side facing the eye, nothing
+   --  of the far side. No hand closes across it on those samples alone; with the sides no eye saw (Unseen_Sides),
+   --  a hand closes across it and touches the far side where the bar's outline puts it.
+   procedure Seen_From_One_Side is
+      --  The radius of the jaws' ends where they touch, measured (Lobe_State.Footprint): the kiwi's SO-101 pads
+      --  are about two centimetres across. Two ends that touch at points hold no turn about the line between them
+      --  (Point_Ends_Do_Not_Hold_Flat_Scissors), and the line between a seen side and a filled-in one never passes
+      --  through the centre exactly.
+      Pad_Radius : constant := 0.01;
+   begin
+      for Place of Both_Frames loop
+         for Hands in 1 .. 2 loop
+            declare
+               X      : Scene := Make (Bar (0.2, 0.04, 0.03), Place, 0.4, Hands);
+               Across : constant Vec3 := Rotate (X.Thing_Frame, [0.0, 1.0, 0.0]);
+               Toward : constant Vec3 := Unit (Up_Of (X) + Across);   --  from the bar to the eye
+               Seen   : Sample_Vectors.Vector;
+               Best   : Candidate;
+               Found  : Boolean;
+               Tried  : Account;
+               Name   : constant String := (if Hands = 1 then "one jaw" else "two plates");
+            begin
+               declare
+                  H : Hand_State := X.S.Hands (1);
+               begin
+                  for K in H.Lobes.First_Index .. H.Lobes.Last_Index loop
+                     declare
+                        L : Lobe_State := H.Lobes (K);
+                     begin
+                        L.Footprint := Pad_Radius;
+                        H.Lobes.Replace_Element (K, L);
+                     end;
+                  end loop;
+                  X.S.Hands.Replace_Element (1, H);
+               end;
+               for Q of X.S.Things (1).Samples loop
+                  if Q.Normal * Toward > 0.0 then
+                     Seen.Append (Q);
+                  end if;
+               end loop;
+               declare
+                  T : Thing_State := X.S.Things (1);
+               begin
+                  T.Samples := Seen;
+                  X.S.Things.Replace_Element (1, T);
+               end;
+               Search (X, Slide (Up_Of (X)), Best, Found, Tried);
+               Check (not Found, Name & ": a hand closed across a bar whose far side no eye saw: " & Say (Tried));
+               declare
+                  Sides : constant Sample_Vectors.Vector :=
+                    Unseen_Sides (Seen, Pitch, Place.Translation, Up_Of (X));
+                  Far   : Natural := 0;
+                  T     : Thing_State := X.S.Things (1);
+               begin
+                  for Q of Sides loop
+                     T.Samples.Append (Q);
+                     --  Facing away from the eye across the bar: the far side.
+                     Far := Far + Boolean'Pos (Q.Normal * Across < 0.0);
+                  end loop;
+                  X.S.Things.Replace_Element (1, T);
+                  Check (Far > 0, Name & ": no side was put where the eye did not see");
+               end;
+               Search (X, Slide (Up_Of (X)), Best, Found, Tried);
+               Check (Found, Name & ": no hand closes across a bar whose far side is filled in: " & Say (Tried));
+               if Found then
+                  Check ((for some T of Best.Touches => T.Inward * Across > 0.9),
+                         Name & ": the set does not touch the far side the bar's outline puts there");
+               end if;
+            end;
+         end loop;
+      end loop;
+   end Seen_From_One_Side;
+
    procedure Register is
    begin
+      Driver.Tests.Register ("action.search.unseen", "a hand closes across a thing whose far side no eye saw, or "
+                             & "not across one whose sides are filled in under what is seen of it",
+                             Seen_From_One_Side'Access);
+      Driver.Tests.Register ("action.search.one_jaw", "a hand whose closer swings one jaw onto a part of it that "
+                             & "does not move has no face to hold against, or a pair of plates is given one",
+                             One_Jaw_Holds_A_Bar'Access);
       Driver.Tests.Register ("action.search.bar", "a gripper closes along a bar instead of across it, or is chosen "
                              & "at the very friction it needs and squeezes without bound",
                              Bar_Closes_Across_Its_Width'Access);

@@ -91,6 +91,9 @@ package Driver.Robot.Hand.Slide is
       Peak    : Real := 0.0;        --  the greatest score, levels
       Still   : Real := 0.0;        --  and the score with the patch where it was
       Typical : Real := 0.0;        --  and the spread of the scores at the shifts that are not near the greatest, levels
+      Middle  : Real := 0.0;        --  the scores' middle, levels
+      Level   : Real := 0.0;        --  what a peak must stand above to be one, levels
+      Halves  : Natural := 0;       --  how many of the patch's two halves gave a peak of their own
    end record;
 
    procedure Measure (P : Patch; Under : Picture; Result : out Shift);

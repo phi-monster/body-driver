@@ -130,15 +130,21 @@ package body Driver.Brain.Keyboard is
 
    Line_Break : constant String := "\n";
 
-   Sentence_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.\'])*";
+   --  An apostrophe in a character class is itself: llama.cpp's grammar parser knows no escape \' and refused every
+   --  grammar that had one with status 400 (f15b on 10-15: no brain call of the episode answered).
+   Sentence_Rule : constant String := "sent ::= [a-zA-Z] ([a-zA-Z0-9 ,.'])*";
    --  No "=" in a free sentence: the look key is the only way to type one.
 
+   --  The look key is a rule of its own (look): a program says it once at most, since the eye it names is the one
+   --  of the next round, and a program of look after look said nothing (the 4B of 10-16, greedy, on the quantity
+   --  keyboard: say look = 2, 3, 1, 2, 3 ... to the token limit; the 9B began three of its programs with three).
    function Word_Rules (K : Keyboard) return String is
      ("word ::= " & Quoted (Say_Word & " ") & " sent"
-      & (if K.Eyes.Is_Empty then "" else " | " & Quoted (Say_Word & " " & Look_Sign & " ") & " eyeno")
       & " | " & Quoted (Done_Word) & NL
       & Sentence_Rule & NL
-      & (if K.Eyes.Is_Empty then "" else "eyeno ::= " & Or_List (Eye_Numbers (K), True, " | ") & NL));
+      & (if K.Eyes.Is_Empty then ""
+         else "look ::= " & Quoted (Say_Word & " " & Look_Sign & " ") & " eyeno" & NL
+              & "eyeno ::= " & Or_List (Eye_Numbers (K), True, " | ") & NL));
 
    Placeholder_Name_Word : constant String := "[a-z] ([a-z])*";
 
@@ -161,14 +167,25 @@ package body Driver.Brain.Keyboard is
    begin
       case K.Keys is
          when Speech_Only =>
-            Rule ("root ::= line (line)*");
+            if K.Eyes.Is_Empty then
+               Rule ("root ::= line (line)*");
+            else
+               Rule ("root ::= line (line)* (seen (line)*)? | seen (line)*");
+               Rule ("seen ::= look " & Quoted (Line_Break));
+            end if;
             Rule ("line ::= word " & Quoted (Line_Break));
             Append (G, Word_Rules (K));
 
          when Quantity_Keys =>
             --  One stretch at most: without control flow a second one could not
             --  depend on how the first ended.
-            Rule ("root ::= (said)* stretch (said)* | said (said)*");
+            if K.Eyes.Is_Empty then
+               Rule ("root ::= (said)* stretch (said)* | said (said)*");
+            else
+               Rule ("root ::= (said)* (seen (said)*)? stretch (said)* | (said)* stretch (said)* seen (said)*"
+                     & " | said (said)* (seen (said)*)? | seen (said)*");
+               Rule ("seen ::= look " & Quoted (Line_Break));
+            end if;
             Rule ("stretch ::= (change" & (if Has_Any (K.Relations) then " | placing" else "") & ") "
                   & Quoted (Line_Break));
             Rule ("said ::= word " & Quoted (Line_Break));
@@ -202,7 +219,25 @@ package body Driver.Brain.Keyboard is
                Append (Forms, (if Length (Forms) > 0 then " | " else "") & Who & " "
                        & Quoted (" " & Word (Close) & " ") & " what | " & Who & " " & Quoted (" " & Word (Open))
                        & " | " & Who & " " & Quoted (" " & Word (Still)));
-               Rule ("root ::= line (line)*");
+               --  With eyes, the lines with no look (line) and those with the one look of the program somewhere in
+               --  them (lone: the look itself, or a block with it in one of its runs of lines, lseq).
+               if K.Eyes.Is_Empty then
+                  Rule ("root ::= line (line)*");
+               else
+                  Rule ("root ::= line (line)* | (line)* lone (line)*");
+                  Rule ("lone ::= (look | lcontrol | ldecl) " & Quoted (Line_Break));
+                  Rule ("lseq ::= (line)* lone (line)*");
+                  Rule ("lcontrol ::= " & Quoted (Repeat_Word & " ") & " num " & Quoted (" " & Times_Word & ":" & Line_Break)
+                        & " lseq " & Quoted (End_Word)
+                        & " | " & Quoted (If_Word & " ") & " outcome " & Quoted (":" & Line_Break)
+                        & " (lseq (" & Quoted (Else_Word & ":" & Line_Break) & " line (line)*)? | line (line)* "
+                        & Quoted (Else_Word & ":" & Line_Break) & " lseq) " & Quoted (End_Word)
+                        & " | " & Quoted (Try_Word & ":" & Line_Break) & " (lseq " & Quoted (Or_Word & ":" & Line_Break)
+                        & " line (line)* | line (line)* " & Quoted (Or_Word & ":" & Line_Break) & " lseq) "
+                        & Quoted (End_Word));
+                  Rule ("ldecl ::= " & Quoted (To_Word & " ") & " name " & Quoted (":" & Line_Break) & " lseq "
+                        & Quoted (End_Word));
+               end if;
                Rule ("line ::= (interval | control | decl | word) " & Quoted (Line_Break));
                Rule ("interval ::= " & Quoted (Do_Word & " ") & " cons (" & Quoted (" " & And_Word & " ")
                      & " cons)* " & Quoted (" " & Until_Word & " ") & " outc ("
@@ -432,7 +467,7 @@ package body Driver.Brain.Keyboard is
         & " | " & Done_Word & NL
         & (if K.Eyes.Is_Empty then ""
            else Eye_Slot & " ::= " & Or_List (Eye_Numbers (K), False, " | ")
-                & "   (from the next round on, the large picture is what that eye sees)" & NL)
+                & "   (from the next round on, the large picture is what that eye sees; once in a program at most)" & NL)
         & Gloss_Indent & Done_Word & " = the program ends here; " & Done_Means
         & ", it also tells me the task is finished, and I ask you nothing more for this task" & NL;
    end Speech_Sheet;

@@ -42,10 +42,17 @@ package Driver.Alignment.Keyframes is
    type Answer_Array is array (Positive range <>) of Answer;
    type Flag_Array is array (Positive range <>) of Boolean;
 
-   procedure Begin_Reference (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array);
+   procedure Begin_Reference
+     (C : out Chain; Reference : Driver.Images.Image; Points : Point_Array; Own_Points : Boolean := False);
    --  Starts the chain from the reference picture and the points that will be asked of it; no keyframe yet.
+   --  Own_Points: the points move each by its own, not as one view (a fixed eye watching an arm: the arm's points
+   --  move by the joints of their links, the rest of the picture stands). No field of the whole view is told or
+   --  fitted for such a chain: every point is asked as predicted and every point found agrees (Add, Realign).
 
    function Has_Reference (C : Chain) return Boolean;
+
+   procedure Release (C : out Chain);
+   --  Lets the chain go: the pictures, the points and the keyframes aligned are no more.
 
    function Point_Count (C : Chain) return Natural;
    --  How many points are asked of every keyframe.
@@ -68,23 +75,40 @@ package Driver.Alignment.Keyframes is
    No_Offer : constant Prediction_Array (1 .. 0) := [];
    --  For a caller with no model of its own to offer.
 
+   type Point_Slope is record
+      U, V     : Real := 0.0;         --  the pixels a point moves per reading unit of a channel, along each axis
+      Variance : Real := Real'Last;   --  of either, the larger; Real'Last where the point's keyframes do not tell it
+   end record;
+   type Point_Slope_Array is array (Positive range <>) of Point_Slope;
+   No_Point_Slopes : constant Point_Slope_Array (1 .. 0) := [];
+   No_Misfit       : constant Driver.Real_Array (1 .. 0) := [];
+   --  For a caller that measures no point's own motion.
+
    procedure Predict
-     (C       : in out Chain;
-      Change  : Driver.Real_Array;
-      Noise   : Driver.Real_Array;
-      Shift   : Driver.Real_Array;
-      Offered : Prediction_Array;
-      Into    : out Prediction_Array;
-      From    : out Source)
+     (C            : in out Chain;
+      Change       : Driver.Real_Array;
+      Noise        : Driver.Real_Array;
+      Shift        : Driver.Real_Array;
+      Offered      : Prediction_Array;
+      Into         : out Prediction_Array;
+      From         : out Source;
+      Point_Slopes : Point_Slope_Array := No_Point_Slopes;
+      Point_Misfit : Driver.Real_Array := No_Misfit)
      with Pre => Has_Reference (C) and then Change'Length = Noise'Length and then Change'Length = Shift'Length
                  and then Into'Length = Point_Count (C) and then (for all N of Noise => N < Real'Last)
-                 and then (Offered'Length = 0 or else Offered'Length = Point_Count (C));
+                 and then (Offered'Length = 0 or else Offered'Length = Point_Count (C))
+                 and then (Point_Slopes'Length = 0
+                           or else (Point_Slopes'Length = Point_Count (C) * Change'Length
+                                    and then Point_Misfit'Length = Point_Count (C)));
    --  The prediction of every point of the reference in a keyframe at that change of readings (the keyframe's
    --  from the reference's, per channel), from the keyframes before it. Noise is the standard deviation of one
    --  reading of each channel, Shift the pixels the view moves per reading unit of it (zero when not measured: a
    --  change that moves the view by no amount known is predicted to have moved it as far as the aligner searches).
    --  Offered is the caller's own prediction (a fitted model's), or none: it competes with the rest, and the one
-   --  that states the least (the median of the standard deviations over the points) is used.
+   --  that states the least (the median of the standard deviations over the points) is used. Point_Slopes, for a
+   --  chain whose points move each by its own (Begin_Reference's Own_Points), are each point's own motion per
+   --  reading unit of each channel as the caller measured it (point by point, a row of the channels each), and
+   --  Point_Misfit how far each point's measured line leaves its own answers (px): none, no point has a line.
    --  Into has an element per point. The chain remembers the predictions of each order that it made, for the Add
    --  that follows.
 
@@ -98,7 +122,12 @@ package Driver.Alignment.Keyframes is
                  and then Agree'Length = Answers'Length;
    --  Aligns every point of the reference into Image from the given prediction, as Add does, and keeps nothing: the
    --  chain is not changed. For a keyframe aligned before from a prediction too uncertain to search, and now offered
-   --  a better one. Agree is as Add's.
+   --  a better one. The prediction is the caller's at every point (Add's Supplied_At). Agree is as Add's.
+
+   procedure Forget_Last (C : in out Chain)
+     with Pre => Keyframes (C) > 0;
+   --  Drops the keyframe added last, as if Add had not been called for it: for a keyframe whose prediction was too
+   --  uncertain to find anything, to be added again from another prediction (Kinematics.Align_Arm).
 
    function Prediction_Caused (A : Answer) return Boolean;
    --  The aligner's refusal may be the prediction's doing and not the point's: it found no place within what the
@@ -108,15 +137,45 @@ package Driver.Alignment.Keyframes is
      with Pre => Has_Reference (C) and then Answers'Length = Point_Count (C) and then Agree'Length = Answers'Length;
    --  Which of the answers found lie in a smooth field of displacements with the others (as Add says of a keyframe's).
 
+   type Motion is record
+      Told       : Boolean := False;   --  a field of displacements the points agree with, beyond any other
+      Level      : Natural := 0;       --  the size of the pyramids it was told at, or tried at last
+      Points     : Natural := 0;       --  the points that had places of their own to go to there
+      Agree      : Natural := 0;       --  of them, the ones that have a place on the field
+      Own, Other : Natural := 0;       --  on the field and not on the next best one, and the other way round
+      Turn       : Real := 0.0;        --  how far the field turns the view, in radians
+      Shift_U, Shift_V : Real := 0.0;  --  how far it moves the picture's centre, in pixels
+      Sigma      : Real := 0.0;        --  how far the places of the points on it lie from it, in pixels
+      Draws      : Natural := 0;       --  the pairs of places the fields were drawn from, over the sizes tried
+      Unmoved    : Natural := 0;       --  the points whose best place was where they stood, which drew no field
+      Set_Aside  : Boolean := False;   --  told none, every point on it where it stood, against a prediction that
+                                       --  moves them: the points that stood ride with the eye (Add)
+      Searched   : Boolean := False;   --  it was searched: the keyframe's prediction had windows wider than a patch
+      Own_Places : Natural := 0;   --  the points asked at a place of their own on the field (Common_Motion's Placed)
+   end record;
+   --  The view's common motion a keyframe was asked from (Add): every keyframe whose prediction's windows are wider
+   --  than a patch, a new direction's among them.
+
+   procedure Stood_And_Moved (C : Chain; Stood, Moved : out Flag_Array)
+     with Pre => Has_Reference (C) and then Stood'Length = Point_Count (C) and then Moved'Length = Stood'Length;
+   --  Per point, of the view's common motion the keyframe added last was asked from: its best place was where it
+   --  stood while the field told moved it there beyond what the size scanned resolves (Stood), or it moved, on the
+   --  field (Moved); neither where no field was told or the point had no place there. A point of the world stands
+   --  so only by a false peak: one that stands so again and again rides with the eye (Kinematics.Align_Arm).
+
+   No_Riding : constant Flag_Array (1 .. 0) := [];
+
    procedure Add
      (C       : in out Chain;
       Image   : Driver.Images.Image;
       Change  : Driver.Real_Array;
       Given   : Prediction_Array;
       Answers : out Answer_Array;
-      Agree   : out Flag_Array)
+      Agree   : out Flag_Array;
+      Riding  : Flag_Array := No_Riding)
      with Pre => Has_Reference (C) and then Given'Length = Point_Count (C) and then Answers'Length = Given'Length
-                 and then Agree'Length = Answers'Length;
+                 and then Agree'Length = Answers'Length
+                 and then (Riding'Length = 0 or else Riding'Length = Point_Count (C));
    --  Aligns every point of the reference into Image from its prediction (the one Predict gave, or the caller's
    --  own), and keeps the answers as a keyframe the next is predicted from. Agree says which points the keyframe
    --  lies in a smooth field of displacements with (the displacements of the found points, a quadratic of the place,
@@ -125,6 +184,22 @@ package Driver.Alignment.Keyframes is
    --  are too few found points for a field. The predictions of each order that
    --  Predict made are judged by the answers (how far each was off beyond what it stated), whichever one was used,
    --  and the relative error that showed is what the next use of that order allows for.
+   --
+   --  A keyframe Predict could only give a new direction (the points have moved as far as the aligner searches)
+   --  is asked from the view's common motion instead: the field of displacements of a turned view that more of the
+   --  points have places of their own on than on any other, significantly, at the coarsest size of the pyramids
+   --  that tells it (Last_Motion). Searched alone over a window that wide, each point was refused or found where
+   --  something that does not move lies (f15c on 10-15: the arm's base turned ten degrees, the view moved 90 px and
+   --  turned with it, and every point searched at the 20 by 15 size was refused or found at no motion, where the
+   --  arm's own hand and the grain of the table lie). When no field is told, no point is asked.
+   --  Riding marks the points the caller knows to ride with the eye (its own body in its picture: they stay where
+   --  they are whatever the view does): they tell nothing of the view's motion and are left out of it, though they
+   --  are asked from it like the rest. Where they are most of the points, the field of no motion is theirs and
+   --  wins (f15c on 10-15, arm 2: the wrist eye's picture mostly its own fingers, thumb and palm, the arm's base
+   --  turned 44 degrees, the table moved 60 px, and the field the most points agreed on was no motion).
+
+   function Last_Motion (C : Chain) return Motion;
+   --  The view's common motion the keyframe added last was asked from; not Told when it was not asked so.
 
 private
 
@@ -135,6 +210,8 @@ private
 
    package Real_Vectors is new Ada.Containers.Vectors (Positive, Real);
    package Pixel_Vectors is new Ada.Containers.Vectors (Positive, Driver.Images.Pixel);
+   package Flag_Vectors is new Ada.Containers.Vectors (Positive, Boolean);
+   package Answer_Vectors is new Ada.Containers.Vectors (Positive, Answer);
 
    type Field_Fit is record
       U, V    : Real_Array (1 .. Terms) := [others => 0.0];   --  the displacement as a polynomial of the place, per axis
@@ -171,6 +248,9 @@ private
       Weight_Sum  : Real := 0.0;
       --  The same of a prediction of this keyframe as the sum of the moves of keyframes that changed one channel
       --  each (Combination), per unit of the squared sum of the amounts it changed the channels by.
+      Answers : Answer_Vectors.Vector;
+      --  per point, of a chain whose points move each by its own: what the aligner answered at this keyframe, which
+      --  the keyframes after it near it are predicted from (Predict)
    end record;
 
    --  A prediction from the fields of earlier keyframes.
@@ -218,6 +298,10 @@ private
       Latest   : Candidate_Array;   --  per order, the prediction that stated the least for the keyframe being added
       Combined : Combination;   --  the sum of single-channel moves considered for the keyframe being added
       Last     : Source := Supplied;   --  where the last prediction came from, until the keyframe it was for is added
+      Motion   : Driver.Alignment.Keyframes.Motion;   --  the common motion the keyframe added last was asked from
+      Stood, Moved_On : Flag_Vectors.Vector;   --  per point, of that motion (Stood_And_Moved)
+      Supplied_At : Flag_Vectors.Vector;   --  per point, whether the last prediction there was the caller's (Predict)
+      Own_Points : Boolean := False;   --  the points move each by its own (Begin_Reference)
    end record;
 
 end Driver.Alignment.Keyframes;

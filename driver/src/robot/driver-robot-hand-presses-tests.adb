@@ -38,7 +38,8 @@ package body Driver.Robot.Hand.Presses.Tests is
    --  The height of the tool each of those commands asks for; zero, not given.
 
    function Run
-     (Stream : Stream_Kind; Commanded : Commands_Kind := [1 .. 0 => False]; Asked : Asked_Kind := [1 .. 0 => 0.0])
+     (Stream : Stream_Kind; Commanded : Commands_Kind := [1 .. 0 => False]; Asked : Asked_Kind := [1 .. 0 => 0.0];
+      Felt : Commands_Kind := [1 .. 0 => False])
       return Found_Array
    is
       W     : Watcher;
@@ -49,6 +50,10 @@ package body Driver.Robot.Hand.Presses.Tests is
       Got   : Found_Array (1 .. Stream'Length);
    begin
       for B in Stream'Range loop
+         --  Felt: the press says before this beat that what it met pushed the closer off its opening (Met).
+         if B in Felt'Range and then Felt (B) then
+            Met (W, Pose_At (Stream (B).Height));
+         end if;
          Observe (W, Driver.Clock.Beat (B), Stream (B).Blocked, Stream (B).Pushing, Stream (B).Still,
                   Pose_At (Stream (B).Height), [1 => Stream (B).Height], [1 => 0.04], Found, Press,
                   Retargeted => B in Commanded'Range and then Commanded (B),
@@ -82,6 +87,29 @@ package body Driver.Robot.Hand.Presses.Tests is
          Check (Got (1).Event.Arm.Element (1) = 0.099, "the arm's readings at the press were not kept");
       end if;
    end One_Press;
+
+   --  A press stopped the moment the closer was pushed off its opening, its push never judged blocked (a20's tilted
+   --  presses at open, 10-16): told what it met (Met), the watcher takes the rest after the let-go for the press;
+   --  untold, it sees none, and the hand measure waited the stream's length for it.
+   procedure Felt_Press is
+      Stream : constant Stream_Kind :=
+        [1 => (False, False, True, 0.200),   --  free, at rest above the table
+         2 => (False, True, False, 0.150),   --  the descent
+         3 => (False, True, False, 0.110),   --  the closer is pushed off here: the press stops the push
+         4 => (False, False, False, 0.105),  --  held where the stop left it: the push ended, not blocked
+         5 => (False, False, False, 0.104),
+         6 => (False, False, True, 0.104)];  --  at rest on what it met
+      Felt : constant Commands_Kind := [1 .. 3 => False, 4 => True];
+      Told   : constant Found_Array := Run (Stream, Felt => Felt);
+      Untold : constant Found_Array := Run (Stream);
+   begin
+      Check (Told'Length = 1 and then Told (Told'First).Beat = 6 and then Told (Told'First).Height = 0.104,
+             "a press the closer felt gave" & Told'Length'Image & " presses, not the rest after it");
+      Check (Told'Length = 1 and then Told (Told'First).Event.Approach.Sigma < Real'Last
+             and then Told (Told'First).Event.Approach.Unit_Vector (1) > 0.999,
+             "the felt press is not given the way the tool came down");
+      Check (Untold'Length = 0, "a push never blocked and never felt gave a press");
+   end Felt_Press;
 
    procedure Unmoved_Press_Has_No_Direction is
       W     : Watcher;
@@ -276,6 +304,8 @@ package body Driver.Robot.Hand.Presses.Tests is
 
    procedure Register is
    begin
+      Driver.Tests.Register ("hand.presses.felt", "a press stopped where the closer was pushed off its opening, its push "
+                             & "not judged blocked, gives no press at the rest after it", Felt_Press'Access);
       Driver.Tests.Register ("hand.presses.hold", "a hold that began no push is not the let-go, or the rest after the "
                              & "retreat is taken for the press",
                              Hold_Begins_No_Push'Access);

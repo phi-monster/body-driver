@@ -23,10 +23,6 @@ package body Driver.Action.Contact.Search is
    use type Driver.Robot.Arm_Id;
    use type Driver.World.Surface_Id;
 
-   function Largest_Sigma (Covariance : Mat3) return Real is
-     (if Covariance (1, 1) >= Real'Last then Real'Last
-      else Sqrt (Real'Max (Covariance (1, 1), Real'Max (Covariance (2, 2), Covariance (3, 3)))));
-
    --  The least rotation taking the direction From onto To.
    function Align (From, To : Vec3) return Mat3 is
       F : constant Vec3 := Unit (From);
@@ -120,6 +116,7 @@ package body Driver.Action.Contact.Search is
    function Effector_Of (S : Snapshot; A : Arm_Id) return Effector is
       Arm_S   : constant Arm_State := Arm (S, A);
       E       : Effector := (Arm => A, Tool => Arm_S.Tool.Pose, others => <>);
+      Faces   : Sample_Vectors.Vector;   --  the faces of the hand its moving lobes close onto (below), tool frame
       Tip_Sum : Vec3 := Zero3;
       Tips    : Natural := 0;
       Depth   : Real := Real'Last;
@@ -171,6 +168,53 @@ package body Driver.Action.Contact.Search is
                      end if;
                   end;
                end loop;
+               --  Moving lobes that do not close onto one another close onto the body: no two of them come at each
+               --  other (their ways closing are never opposed, as one lobe alone has none to oppose), so where they
+               --  end closed on nothing is where the hand itself stops them, a face of it the closer does not move.
+               --  That face is the hand's too: it holds what the moving lobes press against it. A jaw swung onto a
+               --  fixed jaw (the kiwi's SO-101 grippers, 10-15), fingers curled onto a palm; a pair of plates closing
+               --  onto each other (the x5's) has its face already, in the other plate. Nothing here asks which hand
+               --  it is: only how the lobes the body measured move. The body measures a lone lobe closing only
+               --  towards its own still pixels ahead of it (Driver.Robot.Hand.Lobes.Direction): one whose lead meets
+               --  none is not taken for a closer at all, so the one taken closes towards a part of the body, and the
+               --  face is put where it ends closed: where that part is when the lobe meets it (a lobe its own end
+               --  stops short of the part puts the face that much nearer than the part is), uncertain as their tips
+               --  are, facing back the way they come at the end (a jaw swung on a pivot comes in along its arc
+               --  there, not along the chord from open to closed). A lobe the body measured not moving is that face
+               --  already, and none is added.
+               declare
+                  Opposed  : Boolean := False;
+                  Still    : Boolean := False;
+                  Approach : Vec3 := Zero3;
+                  Sd       : Real := 0.0;
+               begin
+                  for L of H.Lobes loop
+                     if Moves (L) then
+                        Approach := Approach + Facing_At (L, 1.0);
+                        Sd := Real'Max (Sd, Tip_Sigma (L));
+                        for K of H.Lobes loop
+                           if Moves (K)
+                             and then Dot (Closed_Tip (L) - Open_Tip (L), Closed_Tip (K) - Open_Tip (K)) < 0.0
+                           then
+                              Opposed := True;
+                           end if;
+                        end loop;
+                     else
+                        Still := True;
+                     end if;
+                  end loop;
+                  if Moving > 0 and then not Opposed and then not Still and then abs Approach > 0.0 then
+                     declare
+                        At_End : constant Vec3 := Meet / Real (Moving);
+                        Face   : constant Lobe_State := Straight (At_End, At_End, Sd);
+                     begin
+                        E.Pads.Append (Pad'(Closer => C, Lobe => Face, Facing => -Unit (Approach)));
+                        Faces.Append (Sample'(Point => At_End, Normal => Zero3));
+                        Tip_Sum := Tip_Sum + At_End;
+                        Tips := Tips + 1;
+                     end;
+                  end if;
+               end;
             end;
          end if;
       end loop;
@@ -184,6 +228,10 @@ package body Driver.Action.Contact.Search is
                                       Normal => E.Along));
             end loop;
          end if;
+      end loop;
+      --  The faces the moving lobes close onto are ends of the hand as well, where they are.
+      for F of Faces loop
+         E.Ends.Append (Sample'(Point => F.Point, Normal => E.Along));
       end loop;
       E.Depth := (if Unknown or else Depth = Real'Last then 0.0 else Depth);
       declare
@@ -437,6 +485,7 @@ package body Driver.Action.Contact.Search is
       subtype Closer_Index is Positive range 1 .. Positive'Max (1, N_Closers);
       type Fractions is array (Closer_Index) of Real;
       type Pad_Hits is array (1 .. N_Pads) of Natural;
+      type Pad_Patches is array (1 .. N_Pads) of Real;   --  each touching face's patch radius (First_Meeting)
 
       function To_Vector (F : Fractions) return Real_Vectors.Vector is
          V : Real_Vectors.Vector;
@@ -465,13 +514,22 @@ package body Driver.Action.Contact.Search is
       --  footprint; Real'Last when none does before the closer is shut. Of
       --  samples met within the resolution of each other (a flat face meets
       --  a flat face all at once), the touch is the one nearest the face's
-      --  centre line: the middle of the patch the faces share.
+      --  centre line: the middle of the patch the faces share. Spread is how
+      --  far across the face the samples met with it lie from it, the
+      --  patch's radius: as far as the footprint on a flat side, nothing at
+      --  an edge or a corner. A touch with a patch resists a turn about its
+      --  normal (Driver.Action.Contact.Wrench), and two touches that oppose
+      --  each other hold a thing only so: two points resist no turn about the
+      --  line through them, and samples never lie so that it passes through
+      --  the thing's centre (10-15: the touches of every pinch found across a
+      --  bar seen from one side came from two grids a fraction of a pitch
+      --  apart, and every one needed friction without bound).
       --
       --  The arithmetic is written out per component: this runs for every
       --  sample and every face at every placement, and the standard vector
       --  operators return their results through the secondary stack.
       procedure First_Meeting
-        (A0, V, Facing, Back : Vec3; Face : Footprint; S : out Real; Hit : out Natural)
+        (A0, V, Facing, Back : Vec3; Face : Footprint; S : out Real; Hit : out Natural; Spread : out Real)
       is
          Speed : constant Real := V * Facing;
          Fx    : constant Real := Facing (1);
@@ -485,6 +543,7 @@ package body Driver.Action.Contact.Search is
       begin
          S := Real'Last;
          Hit := 0;
+         Spread := 0.0;
          if Speed <= 0.0 then
             return;
          end if;
@@ -532,6 +591,18 @@ package body Driver.Action.Contact.Search is
                Off := Met (J).Centred;
             end if;
          end loop;
+         if Hit /= 0 then
+            for J in 1 .. Count loop
+               if (Met (J).Sq - S) * Speed <= Res then
+                  declare
+                     D      : constant Vec3 := Pts (Met (J).Sample) - Pts (Hit);
+                     Across : constant Vec3 := D - Real'(D * Facing) * Facing;
+                  begin
+                     Spread := Real'Max (Spread, abs Across);
+                  end;
+               end if;
+            end loop;
+         end if;
       end First_Meeting;
 
       --  Where a face first meets the thing as its closer closes from open: its centre at a fraction is Where (F),
@@ -546,11 +617,13 @@ package body Driver.Action.Contact.Search is
          Back   : Vec3;
          Face   : Footprint;
          S      : out Real;
-         Hit    : out Natural)
+         Hit    : out Natural;
+         Spread : out Real)
       is
       begin
          S := Real'Last;
          Hit := 0;
+         Spread := 0.0;
          for K in Breaks'First .. Breaks'Last - 1 loop
             declare
                Fa : constant Real := Breaks (K);
@@ -558,12 +631,14 @@ package body Driver.Action.Contact.Search is
                A0 : constant Vec3 := Where (Fa);
                T  : Real;
                H  : Natural;
+               Sp : Real;
             begin
                if Fb > Fa then
-                  First_Meeting (A0, Where (Fb) - A0, Look ((Fa + Fb) / 2.0), Back, Face, T, H);
+                  First_Meeting (A0, Where (Fb) - A0, Look ((Fa + Fb) / 2.0), Back, Face, T, H, Sp);
                   if H /= 0 then
                      S := Fa + T * (Fb - Fa);
                      Hit := H;
+                     Spread := Sp;
                      return;
                   end if;
                end if;
@@ -581,7 +656,7 @@ package body Driver.Action.Contact.Search is
       --  faces meets the thing.
       procedure Contacts
         (K, I : Positive; R : Mat3; Face : Footprint;
-         X : out Vec3; Stops : out Fractions; Hits : out Pad_Hits; Result : out Outcome)
+         X : out Vec3; Stops : out Fractions; Hits : out Pad_Hits; Patches : out Pad_Patches; Result : out Outcome)
       is
          PK     : constant Pad := E.Pads (K);
          Back   : constant Vec3 := -(R * E.Along);
@@ -589,6 +664,7 @@ package body Driver.Action.Contact.Search is
          Meet   : array (1 .. N_Pads) of Real;
       begin
          Hits := [others => 0];
+         Patches := [others => 0.0];
          Stops := [others => 0.0];
          X := Zero3;
          for J in 1 .. N_Pads loop
@@ -597,6 +673,7 @@ package body Driver.Action.Contact.Search is
                   PJ  : constant Pad := E.Pads (J);
                   S   : Real;
                   Hit : Natural;
+                  Spread : Real;
                   --  Face J's setting as the pinned face's closer closes to F: F itself when it is that closer's
                   --  face, else where its own closer stands now. A finger of another closer does not move with
                   --  this one, but it is there to be met: a hand of several closers, each a finger, meets the
@@ -609,7 +686,7 @@ package body Driver.Action.Contact.Search is
                   function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, Setting (F)));
                begin
                   First_Meeting_Along (Merged (Breaks_Of (PJ), Breaks_Of (PK)), Relative'Access, Look'Access, Back, Face,
-                                       S, Hit);
+                                       S, Hit, Spread);
                   S_Star := Real'Min (S_Star, S);
                end;
             end if;
@@ -625,17 +702,36 @@ package body Driver.Action.Contact.Search is
                function Placed (F : Real) return Vec3 is (X + R * At_Fraction (PJ, F));
                function Look (F : Real) return Vec3 is (R * Facing_Of (PJ, F));
             begin
-               First_Meeting_Along (Breaks_Of (PJ), Placed'Access, Look'Access, Back, Face, Meet (J), Hits (J));
+               if Moves (PJ) then
+                  First_Meeting_Along (Breaks_Of (PJ), Placed'Access, Look'Access, Back, Face, Meet (J), Hits (J),
+                                       Patches (J));
+               else
+                  --  A face that does not move meets the thing where it stands: what lies within the resolution
+                  --  of it either way along the way it looks (the hand is placed so the face comes to rest on
+                  --  the sample it was pinned against, which then lies on its plane, and the rest of the patch
+                  --  within the resolution before it), as a face coming over that stretch would meet it.
+                  declare
+                     Way : constant Vec3 := Look (0.0);
+                     T   : Real;
+                  begin
+                     First_Meeting (Placed (0.0) - Res * Way, 2.0 * Res * Way, Way, Back, Face, T, Hits (J), Patches (J));
+                     Meet (J) := (if Hits (J) /= 0 then 0.0 else Real'Last);
+                  end;
+               end if;
             end;
          end loop;
          --  Each closer stops where its first face meets the thing; one that
-         --  meets nothing keeps its present fraction.
+         --  meets nothing keeps its present fraction. A face the closer does
+         --  not move does not stop it: it touches the thing or not wherever
+         --  the closer stands (the face a jaw swings onto, 10-15: counted as
+         --  stopping the closer at once, every set of a one-jaw hand "closed
+         --  on nothing").
          for C in 1 .. N_Closers loop
             declare
                Stop : Real := Real'Last;
             begin
                for J in 1 .. N_Pads loop
-                  if E.Pads (J).Closer = C then
+                  if E.Pads (J).Closer = C and then Moves (E.Pads (J)) then
                      Stop := Real'Min (Stop, Meet (J));
                   end if;
                end loop;
@@ -654,10 +750,13 @@ package body Driver.Action.Contact.Search is
          declare
             Count : Natural := 0;
          begin
+            --  A moving face touches where it met the thing at its closer's stop; a face that does not move
+            --  touches where it meets the thing at all.
             for J in 1 .. N_Pads loop
-               if Hits (J) /= 0 and then Moves (E.Pads (J))
-                 and then abs (At_Fraction (E.Pads (J), Meet (J)) - At_Fraction (E.Pads (J), Stops (E.Pads (J).Closer)))
-                          <= Res
+               if Hits (J) /= 0
+                 and then (not Moves (E.Pads (J))
+                           or else abs (At_Fraction (E.Pads (J), Meet (J))
+                                        - At_Fraction (E.Pads (J), Stops (E.Pads (J).Closer))) <= Res)
                then
                   Count := Count + 1;
                else
@@ -668,14 +767,18 @@ package body Driver.Action.Contact.Search is
          end;
       end Contacts;
 
-      procedure Touches_Of (Hits : Pad_Hits; T : out Touch_Vectors.Vector; P : out Index_Vectors.Vector) is
+      procedure Touches_Of
+        (Hits : Pad_Hits; Patches : Pad_Patches; T : out Touch_Vectors.Vector; P : out Index_Vectors.Vector)
+      is
       begin
          T.Clear;
          P.Clear;
          for J in Hits'Range loop
             if Hits (J) /= 0 then
-               T.Append (Touch'(Point => Pts (Hits (J)), Inward => -Nrm (Hits (J)), Patch => 0.0,
-                                Tension => False));
+               --  The patch the face and the thing share: no wider than the lobe's end, nor than what of the
+               --  thing the face met at once.
+               T.Append (Touch'(Point => Pts (Hits (J)), Inward => -Nrm (Hits (J)),
+                                Patch => Real'Min (E.Pads (J).Lobe.Footprint, Patches (J)), Tension => False));
                P.Append (J);
             end if;
          end loop;
@@ -733,10 +836,11 @@ package body Driver.Action.Contact.Search is
                               X      : Vec3;
                               Stops  : Fractions;
                               Hits   : Pad_Hits;
+                              Patches : Pad_Patches;
                               Result : Outcome;
                            begin
                               Tried.Placements := Tried.Placements + 1;
-                              Contacts (K, I, Pin_Rotation (K, I, Psi), Disc, X, Stops, Hits, Result);
+                              Contacts (K, I, Pin_Rotation (K, I, Psi), Disc, X, Stops, Hits, Patches, Result);
                               case Result is
                                  when On_Air    => Tried.Close_On_Air := Tried.Close_On_Air + 1;
                                  when Not_First => Tried.Into_Material := Tried.Into_Material + 1;
@@ -747,7 +851,7 @@ package body Driver.Action.Contact.Search is
                                        Pin : constant Pin_Record :=
                                          (Pad_Index => K, Sample => I, Psi => Psi, Any_Angle => Steps = 1);
                                     begin
-                                       Touches_Of (Hits, T, P);
+                                       Touches_Of (Hits, Patches, T, P);
                                        declare
                                           Key : constant String := Key_Of (T, P);
                                           Pos : Group_Maps.Cursor := Groups.Find (Key);
@@ -826,6 +930,47 @@ package body Driver.Action.Contact.Search is
          return False;
       end Any_Inside;
 
+      --  Some point is within Margin of the lobe anywhere along a straight move of it by Way: of its end and back
+      --  along it by Length, as Any_Inside, moved by up to Way. Each of the point's three measures from the lobe
+      --  (along its facing, across it, back along it) changes in proportion to how far the move has gone, so each
+      --  lies within its bounds over one stretch of the move; the point is reached when the three stretches meet.
+      function Any_Swept (B : Box; Way : Vec3; Points : Vec3_Array; Margin : Real) return Boolean is
+         Wn : constant Real := Way * B.Facing;
+         Ws : constant Real := Way * B.Side;
+         Wb : constant Real := Way * B.Back;
+         --  Of the part [Lo, Hi] of the move, what keeps A - S * W within [Low, High].
+         procedure Narrow (A, W, Low, High : Real; Lo, Hi : in out Real) is
+         begin
+            if W = 0.0 then
+               if A < Low or else A > High then
+                  Hi := Lo - 1.0;
+               end if;
+            elsif W > 0.0 then
+               Lo := Real'Max (Lo, (A - High) / W);
+               Hi := Real'Min (Hi, (A - Low) / W);
+            else
+               Lo := Real'Max (Lo, (A - Low) / W);
+               Hi := Real'Min (Hi, (A - High) / W);
+            end if;
+         end Narrow;
+      begin
+         for P of Points loop
+            declare
+               D  : constant Vec3 := P - B.Face;
+               Lo : Real := 0.0;
+               Hi : Real := 1.0;
+            begin
+               Narrow (D * B.Facing, Wn, -Margin, Margin, Lo, Hi);
+               Narrow (D * B.Side, Ws, -Margin, Margin, Lo, Hi);
+               Narrow (D * B.Back, Wb, -Margin, B.Length + Margin, Lo, Hi);
+               if Lo <= Hi then
+                  return True;
+               end if;
+            end;
+         end loop;
+         return False;
+      end Any_Swept;
+
       function Below_Floor (P : Vec3) return Boolean is
         (abs Thing.Floor_Up > 0.0 and then (P - Thing.Floor_Point) * Thing.Floor_Up < -Z * Thing.Floor_Sigma);
 
@@ -836,8 +981,12 @@ package body Driver.Action.Contact.Search is
 
       --  The hard conditions of one placement: closers at Before on the way
       --  in, the hand coming in along its lobes from where every lobe's end
-      --  has left the thing behind, Z sigma further.
-      function Judge (R : Mat3; X : Vec3; Before, At_Touch : Fractions; Travel : out Real) return Verdict is
+      --  has left the thing behind, Z sigma further, down to the tool at X;
+      --  and nothing of the thing reaching further between the lobes than
+      --  the hand's depth with the tool at Touch, where it holds the thing
+      --  (X itself, unless the hand moves on from X onto faces it does not
+      --  open: Onto, below).
+      function Judge (R : Mat3; X, Touch : Vec3; Before, At_Touch : Fractions; Travel : out Real) return Verdict is
          Back  : constant Vec3 := -(R * E.Along);
          Bx    : constant Real := Back (1);
          By    : constant Real := Back (2);
@@ -854,7 +1003,7 @@ package body Driver.Action.Contact.Search is
          end loop;
          for P of E.Pads loop
             Reach := Real'Max (Reach, Far - Box_Of (P, R, X, Before (P.Closer), 0.0).Face * Back);
-            Mid := Mid + Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);
+            Mid := Mid + Box_Of (P, R, Touch, At_Touch (P.Closer), 0.0).Face / Real (N_Pads);
          end loop;
          Travel := Reach + Z * Sig;
          for P of E.Pads loop
@@ -874,7 +1023,7 @@ package body Driver.Action.Contact.Search is
          --  hand's depth.
          for P of E.Pads loop
             declare
-               F : constant Vec3 := Box_Of (P, R, X, At_Touch (P.Closer), 0.0).Face - Mid;
+               F : constant Vec3 := Box_Of (P, R, Touch, At_Touch (P.Closer), 0.0).Face - Mid;
             begin
                Span := Real'Max (Span, abs (F - Real'(F * Back) * Back));
             end;
@@ -902,6 +1051,61 @@ package body Driver.Action.Contact.Search is
          return Fits;
       end Judge;
 
+      --  The last stretch of a set some of whose faces do not move: the hand, come down with the tool at X - Way,
+      --  moves straight on by Way, every closer at Before. Each face of the set that does not move must meet the
+      --  thing first where it touches, within the resolution of the end, as a closing face must; every other face
+      --  keeps clear of the thing and of what is beside it by the margin the way down keeps; none ends below the
+      --  surface the thing lies on.
+      function Onto (R : Mat3; X, Way : Vec3; Before : Fractions; G : Group) return Verdict is
+         Back  : constant Vec3 := -(R * E.Along);
+         --  On past the end by the resolution: the touch is met there.
+         Ahead : constant Vec3 := Way + Res * Unit (Way);
+      begin
+         for J in 1 .. N_Pads loop
+            declare
+               P     : constant Pad := E.Pads (J);
+               Which : Natural := 0;
+            begin
+               if Below_Floor (Box_Of (P, R, X, Before (P.Closer), 0.0)) then
+                  return Through_Surface;
+               end if;
+               if not Moves (P) then
+                  for K in 1 .. Natural (G.Pads.Length) loop
+                     if G.Pads (K) = J then
+                        Which := K;
+                     end if;
+                  end loop;
+               end if;
+               if Which /= 0 then
+                  declare
+                     Look : constant Vec3 := R * Facing_Of (P, 0.0);
+                     S    : Real;
+                     Hit  : Natural;
+                     Spread : Real;
+                  begin
+                     First_Meeting (X - Way + R * At_Fraction (P, 0.0), Ahead, Look, Back, Whole_Face, S, Hit, Spread);
+                     if Hit = 0 or else S * (Ahead * Look) < Way * Look - Res
+                       or else abs (Pts (Hit) - G.Touches (Which).Point) > Res
+                     then
+                        return Into_Material;
+                     end if;
+                  end;
+               else
+                  declare
+                     From : constant Box := Box_Of (P, R, X - Way, Before (P.Closer), 0.0);
+                  begin
+                     if Any_Swept (From, Way, Pts, Z * Sig) then
+                        return Into_Material;
+                     elsif Any_Swept (From, Way, Obs, Z * Sig) then
+                        return Through_Others;
+                     end if;
+                  end;
+               end if;
+            end;
+         end loop;
+         return Fits;
+      end Onto;
+
       --  Second pass for a closing set: each pin of it, at its own turn or,
       --  when the set does not depend on the turn, at every turn in steps of
       --  one pitch at the whole faces' lever, least turning first; whole
@@ -923,9 +1127,10 @@ package body Driver.Action.Contact.Search is
                      X     : Vec3;
                      Stops : Fractions;
                      Hits  : Pad_Hits;
+                     Patches : Pad_Patches;
                      Result : Outcome;
                   begin
-                     Contacts (Pin.Pad_Index, Pin.Sample, R, Whole_Face, X, Stops, Hits, Result);
+                     Contacts (Pin.Pad_Index, Pin.Sample, R, Whole_Face, X, Stops, Hits, Patches, Result);
                      if Result = Touching
                        and then (for all J in 1 .. Natural (G.Pads.Length) =>
                                    Hits (G.Pads (J)) /= 0
@@ -933,12 +1138,38 @@ package body Driver.Action.Contact.Search is
                      then
                         declare
                            Before : Fractions;
-                           Travel : Real;
-                           V      : Verdict;
+                           Travel : Real := 0.0;
+                           V      : Verdict := Into_Material;
+                           --  The faces of the set that do not move cannot open as a closer opens its lobes: the
+                           --  hand brings them onto their touches itself, coming down with them Clear of the thing
+                           --  and then moving straight along the way they look, by enough that each starts Clear
+                           --  of its touch (10-15: a jaw swung onto a face of the hand had every such set refused,
+                           --  the face sliding down the thing within the margin). Way is that last stretch, zero
+                           --  when every face of the set moves; when the faces look so far apart that no one
+                           --  stretch brings each onto its touch from clear, the pin is refused.
+                           Toward : Vec3 := Zero3;
+                           Least  : Real := Real'Last;
+                           Way    : Vec3 := Zero3;
                         begin
+                           for J of G.Pads loop
+                              if not Moves (E.Pads (J)) then
+                                 Toward := Toward + R * Facing_Of (E.Pads (J), 0.0);
+                              end if;
+                           end loop;
+                           if abs Toward > 0.0 then
+                              for J of G.Pads loop
+                                 if not Moves (E.Pads (J)) then
+                                    Least := Real'Min (Least, Unit (Toward) * (R * Facing_Of (E.Pads (J), 0.0)));
+                                 end if;
+                              end loop;
+                              if Least > 0.0 then
+                                 Way := (Clear / Least) * Unit (Toward);
+                              end if;
+                           end if;
                            --  On the way in each closer that touches is open far
                            --  enough that its slowest face stays Clear of where it
-                           --  will touch.
+                           --  will touch, and further by the last stretch, which may
+                           --  bring it that much nearer.
                            for C in 1 .. N_Closers loop
                               declare
                                  Slow : Real := Real'Last;
@@ -949,27 +1180,35 @@ package body Driver.Action.Contact.Search is
                                     end if;
                                  end loop;
                                  Before (C) := (if Slow = Real'Last or else Stops (C) = E.Closers (C).Now then Stops (C)
-                                                else Real'Max (0.0, Stops (C) - Clear / Slow));
+                                                else Real'Max (0.0, Stops (C) - (Clear + abs Way) / Slow));
                               end;
                            end loop;
-                           V := Judge (R, X, Before, Stops, Travel);
+                           if Least > 0.0 then
+                              V := Judge (R, X - Way, X, Before, Stops, Travel);
+                              if V = Fits and then abs Way > 0.0 then
+                                 V := Onto (R, X, Way, Before, G);
+                              end if;
+                           end if;
                            case V is
                               when Fits =>
                                  --  The same lobes in the same places from each tool
                                  --  pose the hand's symmetry allows: the first reachable.
                                  declare
                                     Tool  : Rigid := (Rotation => R, Translation => X);
-                                    Hover : Rigid := (Rotation => R, Translation => X - Travel * (R * E.Along));
+                                    Near  : Rigid := (Rotation => R, Translation => X - Way);
+                                    Hover : Rigid := (Rotation => R, Translation => X - Way - Travel * (R * E.Along));
                                     Undo  : constant Rigid := Inverse (E.Repeat);
                                  begin
                                     for Variant in 1 .. E.Repeats loop
                                        --  The way in first: it is geometry, and a reach is an
-                                       --  inverse kinematics solve many times dearer; all three
+                                       --  inverse kinematics solve many times dearer; all of them
                                        --  must hold whatever the order.
                                        if Can_Travel (Hover, To_Vector (Before))
                                          and then Reachable (Tool) and then Reachable (Hover)
+                                         and then (abs Way = 0.0 or else Reachable (Near))
                                        then
-                                          Out_C := (Tool => Tool, Hover => Hover, Before => To_Vector (Before),
+                                          Out_C := (Tool => Tool, Hover => Hover, Near => Near,
+                                                    Before => To_Vector (Before),
                                                     At_Touch => To_Vector (Stops), Touches => G.Touches,
                                                     Mu_Nominal => G.Mu_Nominal, Mu_Worst => G.Mu_Worst,
                                                     Force => G.Worst);
@@ -977,6 +1216,7 @@ package body Driver.Action.Contact.Search is
                                           return;
                                        end if;
                                        Tool := Tool * Undo;
+                                       Near := Near * Undo;
                                        Hover := Hover * Undo;
                                     end loop;
                                  end;
@@ -1077,7 +1317,7 @@ package body Driver.Action.Contact.Search is
                                  if Can_Travel (Hover, Now_Closers)
                                    and then Reachable (Tool) and then Reachable (Hover)
                                  then
-                                    Out_C := (Tool => Tool, Hover => Hover, Before => Now_Closers,
+                                    Out_C := (Tool => Tool, Hover => Hover, Near => Tool, Before => Now_Closers,
                                               At_Touch => Now_Closers, Touches => G.Touches,
                                               Mu_Nominal => G.Mu_Nominal, Mu_Worst => G.Mu_Worst, Force => G.Worst);
                                     Ok := True;

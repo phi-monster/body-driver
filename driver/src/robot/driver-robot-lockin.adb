@@ -1,4 +1,6 @@
 with Ada.Containers;
+with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Clock;
@@ -7,6 +9,7 @@ with Driver.Distributions;
 with Driver.Log;
 with Driver.Shared_For;
 with Driver.Robot.Channels;
+with Driver.Robot.Kinematics;
 with Driver.Robot.Flow;
 with Driver.Robot.Lag;
 with Driver.Robot.Regression;
@@ -49,6 +52,9 @@ package body Driver.Robot.Lockin is
    --  moves (Cells_Shown).
    Half : constant Real := 0.5;
 
+   Whole_Rounding : constant Real := 1.0 / 12.0;
+   --  The variance of a uniform rounding to a whole number: of a count of cells.
+
    --  A regressor: one channel of one commandable group.
    type Column is record
       Group   : Group_Id;
@@ -76,7 +82,8 @@ package body Driver.Robot.Lockin is
      (Regression.Count_Significant (Showing + Silent, Showing + Silent, Half)
       and then not Regression.Count_Significant (Showing, Showing + Silent, Half));
 
-   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean) return Shown is
+   function Cells_Shown (Pool : Noisy_Cell_Array; Typical : Real; Able_Disagree : Boolean; Quiet : Boolean := False)
+     return Shown is
       Z : constant Real := Driver.Conventions.Z;
 
       --  The variance of a cell's energy at the typical energy: Var ** 2 times that of its statistic.
@@ -120,10 +127,12 @@ package body Driver.Robot.Lockin is
             Low   : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));
             High  : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean + Z * Sigma) / Typical));
          begin
+            if not Quiet then
             Driver.Log.Line (Driver.Log.Robot, "lock-in: the" & Pool'Length'Image & " cells too noisy to tell show together "
                              & Driver.Log.Image (Mean, 4) & " +- " & Driver.Log.Image (Sigma, 4) & " of the typical energy "
                              & Driver.Log.Image (Typical, 4) & " (their energies sum to " & Driver.Log.Image (Sum_Energy, 4)
                              & ", their variances to " & Driver.Log.Image (Sum_Variance, 4) & ";" & Far'Image & " far above)");
+            end if;
             return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
                     Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
          end;
@@ -162,7 +171,8 @@ package body Driver.Robot.Lockin is
       Noise      : Real_Vectors.Vector;
       Least, Most : out Natural;
       Disagree    : out Boolean;
-      Resting     : out Real)
+      Resting     : out Real;
+      Quiet       : Boolean := False)
    is
       Z        : constant Real := Driver.Conventions.Z;
       Tail     : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z);
@@ -255,7 +265,7 @@ package body Driver.Robot.Lockin is
             Disagree := Cells_Disagree (Able, Silent);
             if Too_Noisy > 0 then
                declare
-                  Show : constant Shown := Cells_Shown (Pool (1 .. Too_Noisy), Typical, Disagree);
+                  Show : constant Shown := Cells_Shown (Pool (1 .. Too_Noisy), Typical, Disagree, Quiet);
                begin
                   Least := Natural'Max (Count, Able + Show.Least);
                   Most := Natural'Max (Count, Able + Show.Most);
@@ -266,6 +276,9 @@ package body Driver.Robot.Lockin is
       end if;
       Free (Energies);
    end Cells_Showing;
+
+   function Still_A_Patch (Responding, Textured : Natural) return Boolean is
+     (Responding < Textured and then Regression.Count_Significant (Textured - Responding, Textured, Half));
 
    function Judge (Responding, Textured, Least, Most : Natural; Able_Disagree : Boolean) return Eye_Response is
       --  The per-cell test's own false-alarm rate.
@@ -345,6 +358,8 @@ package body Driver.Robot.Lockin is
       end loop;
       M.Graph.Effects.Clear;
       M.Graph.Effects.Append (Eye_Effect'(others => <>), Ada.Containers.Count_Type (Groups * Eyes));
+      M.Graph.Channels.Clear;
+      M.Graph.Channels.Append (Channel_Effect_Vectors.Empty_Vector, Ada.Containers.Count_Type (Eyes));
       for S of M.Groups loop
          if S.Commandable then
             All_Columns := All_Columns + S.Size;
@@ -385,13 +400,16 @@ package body Driver.Robot.Lockin is
 
             --  How long the eye's picture goes on settling after the body stops moving: from the last beat any
             --  commandable group moved or was pushed to the first beat after it at which the picture had settled
-            --  (the stillness watch), the longest such stretch in the stream. The picture of a renderer that
-            --  accumulates its frames drifts for beats after the readings stop, and carries the tail of a motion
-            --  into the beats after it.
+            --  (the stillness watch), each such stretch of the stream, and of them the bound Z robust deviations above
+            --  their median. The picture of a renderer that accumulates its frames drifts for beats after the
+            --  readings stop, and carries the tail of a motion into the beats after it. Not the longest stretch: one
+            --  stretch where the picture never settled (a hand resting on the table, creeping) made it 1317 beats,
+            --  every push of the hand's closer was then within it of another group's, its column left the regression,
+            --  and the closer lost its role and the arm its hand (f15t on 10-15; f15f's was 1893).
             function Settling_Tail return Natural is
-               Longest : Natural := 0;
-               Last    : Natural := 0;   --  the last beat a group moved or was pushed
-               Waiting : Boolean := False;
+               Stretches : Real_Vectors.Vector;
+               Last      : Natural := 0;   --  the last beat a group moved or was pushed
+               Waiting   : Boolean := False;
             begin
                for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
                   if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
@@ -400,11 +418,22 @@ package body Driver.Robot.Lockin is
                      Last := B;
                      Waiting := True;
                   elsif Waiting and then S.Settled_At (B) then
-                     Longest := Natural'Max (Longest, B - Last);
+                     Stretches.Append (Real (B - Last));
                      Waiting := False;
                   end if;
                end loop;
-               return Longest;
+               if Stretches.Is_Empty then
+                  return 0;
+               end if;
+               declare
+                  Values : Real_Array (1 .. Natural (Stretches.Length));
+               begin
+                  for I in Values'Range loop
+                     Values (I) := Stretches (Stretches.First_Index + I - 1);
+                  end loop;
+                  return Natural (Real'Ceiling (Driver.Stats.Median (Values)
+                                                 + Driver.Conventions.Z * Driver.Stats.Robust_Sigma (Values)));
+               end;
             end Settling_Tail;
             Tail : constant Natural := Settling_Tail;
 
@@ -606,9 +635,16 @@ package body Driver.Robot.Lockin is
                      return True;
                   end;
                end if;
-               return True;
+               --  A beat that no group pushes is at rest only once the eye's picture has settled since the body last
+               --  moved (the stillness watch): the picture goes on changing after the readings stop, and a row of
+               --  motion with no push is noise in the regression. The sweep's pushes left the arm's own eye settling
+               --  for up to 31 beats after each, the cells' noise grew with it, and the eye read as showing a patch
+               --  (f15j on 10-15). Asked beat by beat, not as the stream's longest settling: one stretch of a hand
+               --  creeping on the table made that 1893 beats (f15f), and would have left out every rest after it.
+               return B < Natural (S.Settled_At.Length) and then S.Settled_At (B);
             end Usable;
          begin
+            S.Settling_Tail := Tail;
             S.Noise.Clear;
             S.Textured.Clear;
             S.Kept_Groups.Clear;
@@ -679,6 +715,13 @@ package body Driver.Robot.Lockin is
                           new Real_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0.0]];
                         Dof : Natural_Grid_Access :=
                           new Natural_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => 0]];
+                        --  The same for each column alone (the grids' second index is the column, not a group).
+                        Col_Responding : Flag_Grid_Access :=
+                          new Flag_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => False]];
+                        Col_Energy : Real_Grid_Access :=
+                          new Real_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0.0]];
+                        Col_Dof : Natural_Grid_Access :=
+                          new Natural_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0]];
                         Textured : Flags_Access := new Flags'[1 .. N => False];
                         --  Each cell's results, cell by cell: its noise, and for each regressor its gain, the gain's
                         --  variance and its shift (nothing, where it does not respond). The cells are fitted at once
@@ -691,6 +734,13 @@ package body Driver.Robot.Lockin is
                         Gain_Of   : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Spread_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         Shift_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        --  Every textured cell's signed coefficients for each regressor, and their variances
+                        --  (zero where the cell has none): the cells that do not respond to a group are pooled
+                        --  on them (Rest_Pull).
+                        Beta_U_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Beta_V_Of : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Var_U_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
+                        Var_V_Of  : Real_Access := new Real_Array'(1 .. N * Kept => 0.0);
                         --  One cell: its displacements regressed on the pushes, over
                         --  the beats where the cell resolved one, and for every
                         --  group whether its block responds.
@@ -758,6 +808,23 @@ package body Driver.Robot.Lockin is
                                     end if;
                                  end;
                               end loop;
+                              --  Each column alone: whether this cell's displacement follows that channel, and the
+                              --  energy and degrees of freedom of the test.
+                              for K in 1 .. Kept loop
+                                 declare
+                                    Su, Sv : Real;
+                                    Ku, Kv : Natural;
+                                    Col    : constant Group_Id := Group_Id (K);
+                                 begin
+                                    Regression.Test_Block (Fu, K + 1, K + 1, Su, Ku);
+                                    Regression.Test_Block (Fv, K + 1, K + 1, Sv, Kv);
+                                    Col_Responding (Cell, Col) :=
+                                      Ku + Kv > 0
+                                      and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv) > Driver.Conventions.Z;
+                                    Col_Energy (Cell, Col) := (Su - Real (Ku)) * Fu.Scale ** 2 + (Sv - Real (Kv)) * Fv.Scale ** 2;
+                                    Col_Dof (Cell, Col) := Ku + Kv;
+                                 end;
+                              end loop;
                               --  Each regressor's gain in this cell: its displacement per
                               --  reading unit in units of the cell's noise, squared, less
                               --  what estimating it adds on average (its own variance in
@@ -767,6 +834,14 @@ package body Driver.Robot.Lockin is
                                  Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
                               begin
                                  for K in 1 .. Kept loop
+                                    if Var_U (K + 1) > 0.0 and then Var_V (K + 1) > 0.0
+                                      and then Var_U (K + 1) < Real'Last and then Var_V (K + 1) < Real'Last
+                                    then
+                                       Beta_U_Of ((Cell - 1) * Kept + K) := Fu.Beta (K + 1);
+                                       Beta_V_Of ((Cell - 1) * Kept + K) := Fv.Beta (K + 1);
+                                       Var_U_Of ((Cell - 1) * Kept + K) := Var_U (K + 1);
+                                       Var_V_Of ((Cell - 1) * Kept + K) := Var_V (K + 1);
+                                    end if;
                                     if Responding (Cell, Cols (K).Group) and then Fu.Scale > 0.0 and then Fv.Scale > 0.0 then
                                        declare
                                           Bu : constant Real := Fu.Beta (K + 1) / Fu.Scale;
@@ -906,11 +981,48 @@ package body Driver.Robot.Lockin is
                                        Cells_Showing (G, Textured.all, Responding.all, Energy.all, Dof.all, S.Noise,
                                                       Least, Most, Disagree, Resting);
                                        Effect.Resting := Resting;
+                                       --  The cells that did not respond, pulled together along the push: for each
+                                       --  of the group's regressors, their signed coefficients pooled by inverse
+                                       --  variance (a mean gain over its standard error, in each picture direction,
+                                       --  a chi-square of two degrees of freedom), the most significant regressor's.
+                                       --  A far part of the view moved with the push by less than any one cell can
+                                       --  tell shows as a consistent pull (every cell's gain the same sign); a base
+                                       --  shaken by the push moves the cells either way and pools to nothing. Their
+                                       --  pooled ENERGY (Resting) grows with any motion whatever moves them, which is
+                                       --  why it was dropped from the boot's rounds (R5 on the Pi, 10-13: the head
+                                       --  eye on a shaken base was pushed to 128 times the amounts).
+                                       Effect.Rest_Pull := 0.0;
+                                       for K in 1 .. Kept loop
+                                          if Cols (K).Group = G then
+                                             declare
+                                                Pu, Wu, Pv, Wv : Real := 0.0;
+                                             begin
+                                                for Cell in 1 .. N loop
+                                                   if Textured (Cell) and then not Responding (Cell, G)
+                                                     and then Var_U_Of ((Cell - 1) * Kept + K) > 0.0
+                                                     and then Var_V_Of ((Cell - 1) * Kept + K) > 0.0
+                                                   then
+                                                      Pu := Pu + Beta_U_Of ((Cell - 1) * Kept + K) / Var_U_Of ((Cell - 1) * Kept + K);
+                                                      Wu := Wu + 1.0 / Var_U_Of ((Cell - 1) * Kept + K);
+                                                      Pv := Pv + Beta_V_Of ((Cell - 1) * Kept + K) / Var_V_Of ((Cell - 1) * Kept + K);
+                                                      Wv := Wv + 1.0 / Var_V_Of ((Cell - 1) * Kept + K);
+                                                   end if;
+                                                end loop;
+                                                if Wu > 0.0 and then Wv > 0.0 then
+                                                   Effect.Rest_Pull :=
+                                                     Real'Max (Effect.Rest_Pull,
+                                                               Driver.Distributions.Chi_Square_Deviate
+                                                                 (Pu ** 2 / Wu + Pv ** 2 / Wv, 2));
+                                                end if;
+                                             end;
+                                          end if;
+                                       end loop;
                                        Effect.Responding := Count;
                                        Effect.Textured := T;
                                        Effect.Fraction :=
                                          (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
                                        Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Effect.Could_Be_Whole := Regression.Count_Significant (Most, T, Half);
                                        Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & " group" & G'Image & ":"
                                                         & Count'Image & " of" & T'Image & " textured cells respond, "
                                                         & Least'Image & " to" & Most'Image & " show the motion"
@@ -921,12 +1033,68 @@ package body Driver.Robot.Lockin is
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);
                               end;
                            end loop;
+                           --  And of each channel alone, as of a group (the same tests of the column's cells).
+                           for K in 1 .. Kept loop
+                              declare
+                                 Col    : constant Group_Id := Group_Id (K);
+                                 Count  : Natural := 0;
+                                 Effect : Eye_Effect;
+                              begin
+                                 if T > 0 then
+                                    for Cell in 1 .. N loop
+                                       if Textured (Cell) and then Col_Responding (Cell, Col) then
+                                          Count := Count + 1;
+                                       end if;
+                                    end loop;
+                                    declare
+                                       F           : constant Real := Real (Count) / Real (T);
+                                       Least, Most : Natural;
+                                       Disagree    : Boolean;
+                                       Resting     : Real;
+                                    begin
+                                       Cells_Showing (Col, Textured.all, Col_Responding.all, Col_Energy.all, Col_Dof.all, S.Noise,
+                                                      Least, Most, Disagree, Resting, Quiet => True);
+                                       Effect.Resting := Resting;
+                                       Effect.Responding := Count;
+                                       Effect.Textured := T;
+                                       Effect.Fraction :=
+                                         (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (T)), Degrees_Of_Freedom => 0);
+                                       Effect.Verdict := Judge (Count, T, Least, Most, Disagree);
+                                       Effect.Could_Be_Whole := Regression.Count_Significant (Most, T, Half);
+                                    end;
+                                 end if;
+                                 M.Graph.Channels (E).Append
+                                   (Channel_Effect'(Group => Cols (K).Group, Channel => Cols (K).Channel, Effect => Effect));
+                              end;
+                           end loop;
+                           declare
+                              Whole_List : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for Item of M.Graph.Channels (E) loop
+                                 if Item.Effect.Verdict = Whole then
+                                    Ada.Strings.Unbounded.Append
+                                      (Whole_List, " g" & Ada.Strings.Fixed.Trim (Item.Group'Image, Ada.Strings.Left) & "c"
+                                       & Ada.Strings.Fixed.Trim (Item.Channel'Image, Ada.Strings.Left));
+                                 end if;
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": of the" & Kept'Image
+                                               & " channels kept, the view moves whole with"
+                                               & (if Ada.Strings.Unbounded.Length (Whole_List) = 0 then " none"
+                                                  else Ada.Strings.Unbounded.To_String (Whole_List)));
+                           end;
                         end;
                         Free (X);
                         Free (Responding);
                         Free (Energy);
                         Free (Dof);
+                        Free (Col_Responding);
+                        Free (Col_Energy);
+                        Free (Col_Dof);
                         Free (Textured);
+                        Free (Beta_U_Of);
+                        Free (Beta_V_Of);
+                        Free (Var_U_Of);
+                        Free (Var_V_Of);
                      end;
                   end if;
                   Free (Beat_Of);
@@ -944,98 +1112,154 @@ package body Driver.Robot.Lockin is
    end Measure;
 
    procedure Measure_Rest_Noise (M : in out Model) is
+      Half_Chi : constant Real := Driver.Distributions.Chi_Square_Quantile (0.5, 2);
    begin
-      for S of M.Eyes loop
-         declare
-            N     : constant Natural := Cells (S.Grid);
-            Beats : constant Natural := Natural'Min (Natural (S.Judged.Length), Natural (S.Measured.Length));
-            Count : Natural := 0;
-         begin
-            if N > 0 and then Natural (S.Luma_Variance.Length) >= N then
-               for B in 1 .. Beats - 1 loop
-                  if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
-                    and then S.Still_At (B - 1)
-                  then
-                     for C in 0 .. N - 1 loop
-                        if S.Condition (B * N + C) > 0.0 then
-                           Count := Count + 1;
-                        end if;
-                     end loop;
-                  end if;
-               end loop;
-               if Count > 0 then
-                  declare
-                     --  One ratio per still cell and beat: on the heap, a long
-                     --  stream has millions.
-                     Ratios : Real_Access := new Real_Array (1 .. Count);
-                     K      : Natural := 0;
-                  begin
-                     for B in 1 .. Beats - 1 loop
-                        if S.Measured (B) and then S.Judged (B) and then S.Still_At (B) and then S.Judged (B - 1)
-                          and then S.Still_At (B - 1)
-                        then
-                           for C in 0 .. N - 1 loop
-                              if S.Condition (B * N + C) > 0.0 then
-                                 K := K + 1;
-                                 Ratios (K) := (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2)
-                                   / Flow.Noise_Floor (S.Condition (B * N + C), S.Luma_Variance (C)) ** 2;
-                              end if;
-                           end loop;
-                        end if;
-                     end loop;
-                     S.Rest_Factor := Real'Max
-                       (1.0, Sqrt (Driver.Stats.Median (Ratios.all) / Driver.Distributions.Chi_Square_Quantile (0.5, 2)));
-                     Free (Ratios);
-                  end;
-               end if;
-            end if;
-         end;
-      end loop;
-      --  How many cells an eye counts as moved when no group is pushed: its own
-      --  fingers' jitter, the scene, the rest of the body's noise.
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
-            S    : Eye_Stream renames M.Eyes (E);
-            --  An eye whose lag is not measured may show a push as late as
-            --  any lag the stream can tell.
-            Lag  : constant Natural :=
+            S     : Eye_Stream renames M.Eyes (E);
+            N     : constant Natural := Cells (S.Grid);
+            Beats : constant Natural := Natural'Min (M.Beats, Natural (S.Measured.Length));
+            --  An eye whose lag is not measured may show a push as late as any
+            --  lag the stream can tell; and its picture goes on settling for
+            --  its settling tail after the body stops (Measure).
+            Lag   : constant Natural :=
               (if E <= M.Lag_Known.Last_Index and then M.Lag_Known (E)
                then Natural (Integer'Max (0, M.Lags (E)))
                else Driver.Robot.Lag.Longest (M));
-            Rest : Natural := 0;
-
-            function At_Rest (B : Natural) return Boolean is
-            begin
-               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-                  for K in Integer'Max (0, B - Lag) .. B loop
-                     if M.Groups (G).Commandable and then Channels.Pushed (M, G, K) then
-                        return False;
-                     end if;
-                  end loop;
-               end loop;
-               return B < Natural (S.Measured.Length) and then S.Measured (B);
-            end At_Rest;
+            Quiet : constant Natural := Lag + S.Settling_Tail;
+            --  Per beat: nothing commandable was pushed within Quiet beats before it, through it, and the eye
+            --  measured a displacement at it.
+            Rest_At : Flags_Access := new Flags'(1 .. Natural'Max (1, Beats) => False);
+            Rest    : Natural := 0;
          begin
-            for B in 1 .. M.Beats - 1 loop
-               if At_Rest (B) then
-                  Rest := Rest + 1;
-               end if;
-            end loop;
-            S.Rest_Counts_Known := Rest > 1;
-            if S.Rest_Counts_Known then
-               declare
-                  Count, Tested : Natural;
-               begin
-                  S.Rest_Count_Max := 0;
-                  for B in 1 .. M.Beats - 1 loop
-                     if At_Rest (B) then
-                        Count_Moved (S, B, Count, Tested);
-                        S.Rest_Count_Max := Natural'Max (S.Rest_Count_Max, Count);
+            if N > 0 and then Natural (S.Luma_Variance.Length) >= N and then Natural (S.Condition.Length) >= N * Beats then
+               for B in 1 .. Beats - 1 loop
+                  if S.Measured (B) then
+                     Rest_At (B) := True;
+                     for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                        for K in Integer'Max (0, B - Quiet) .. B loop
+                           if M.Groups (G).Commandable and then Channels.Pushed (M, G, K) then
+                              Rest_At (B) := False;
+                           end if;
+                        end loop;
+                     end loop;
+                     if Rest_At (B) then
+                        Rest := Rest + 1;
                      end if;
+                  end if;
+               end loop;
+            end if;
+            if Rest > 0 then
+               declare
+                  --  One ratio per resting beat of a cell: on the heap, a long stream has thousands.
+                  Ratios  : Real_Access := new Real_Array (1 .. Rest);
+                  Counts  : Real_Access := new Real_Array (1 .. Rest);
+                  Of_Cell : Real_Access := new Real_Array'(1 .. N => 0.0);   --  0: the cell resolved nothing at rest
+                  Typical : Real_Access := new Real_Array (1 .. N);
+                  Known   : Natural := 0;
+               begin
+                  --  A cell's noise at rest is what it showed at rest: its displacements over the floor its
+                  --  pixels' variance allows, the median of their squares against the median of a chi-square of
+                  --  two degrees. Per cell, not one factor for the eye: a camera that quantizes its pictures
+                  --  (JPEG) leaves a cell's flat pixels unchanged from frame to frame and moves its textured ones
+                  --  by whole steps, so the pixels' variance (the median over the cell's pixels) says little of
+                  --  what a textured cell does at rest, and one factor for the whole eye is the flat cells' (R2's
+                  --  wrist eye on the Pi, 10-13: a hundred of 525 cells read as moved at every resting beat, the
+                  --  most at rest came to 290, and no push of its own arm was ever seen).
+                  for C in 0 .. N - 1 loop
+                     declare
+                        K : Natural := 0;
+                     begin
+                        for B in 1 .. Beats - 1 loop
+                           if Rest_At (B) and then S.Condition (B * N + C) > 0.0 then
+                              K := K + 1;
+                              Ratios (K) := (S.Du (B * N + C) ** 2 + S.Dv (B * N + C) ** 2)
+                                / Flow.Noise_Floor (S.Condition (B * N + C), S.Luma_Variance (C)) ** 2;
+                           end if;
+                        end loop;
+                        if K > 0 then
+                           Of_Cell (C + 1) := Real'Max (1.0, Sqrt (Driver.Stats.Median (Ratios (1 .. K)) / Half_Chi));
+                           Known := Known + 1;
+                           Typical (Known) := Of_Cell (C + 1);
+                        end if;
+                     end;
                   end loop;
-                  S.Rest_Count_Beats := Rest;
+                  if Known > 0 then
+                     S.Rest_Factor := Driver.Stats.Median (Typical (1 .. Known));
+                  end if;
+                  S.Rest_Factors.Clear;
+                  for C in 1 .. N loop
+                     S.Rest_Factors.Append (if Of_Cell (C) > 0.0 then Of_Cell (C) else S.Rest_Factor);
+                  end loop;
+                  --  How many cells an eye counts as moved when nothing is pushed (its own fingers' jitter, the
+                  --  scene, the rest of the body's noise): the most at any resting beat of the latest stationary
+                  --  stretch of those counts, by the readings' own rule of rest (Stats.Latest_Regime): a camera
+                  --  whose exposure was still settling when the stream began, or a resting beat something walked
+                  --  through, goes with the half of the stretch it is in, instead of setting the most for good.
+                  declare
+                     K : Natural := 0;
+                     Count, Tested : Natural;
+                  begin
+                     for B in 1 .. Beats - 1 loop
+                        if Rest_At (B) then
+                           K := K + 1;
+                           Count_Moved (S, B, Count, Tested);
+                           Counts (K) := Real (Count);
+                        end if;
+                     end loop;
+                     declare
+                        --  A count is a whole number: no scatter finer than the rounding to one. Counts mostly zero
+                        --  left both halves' median absolute deviations at zero, any difference of their means
+                        --  was significant, and the stretch was halved down to its last 4 and 7 beats (f15q_play on
+                        --  10-15).
+                        Start : constant Positive :=
+                          Driver.Stats.Latest_Regime (Counts (1 .. K), Floor => Sqrt (Whole_Rounding));
+                        Most  : Natural := 0;
+                     begin
+                        for I in Start .. K loop
+                           Most := Natural'Max (Most, Natural (Counts (I)));
+                        end loop;
+                        S.Rest_Count_Max := Most;
+                        S.Rest_Count_Beats := K - Start + 1;
+                        S.Rest_Counts_Known := S.Rest_Count_Beats > 1;
+                        --  Motion is a count significantly above what the rest produces: the rest counts' median
+                        --  plus Z of their robust scatter. The most of them is one beat's: a frame that flickered
+                        --  once among 116 at rest put it at 273 of 525 cells for the kiwi's wrist eye, and a jaw
+                        --  opening 1250 units moved 130 to 156 cells, unseen (R6, 10-14).
+                        --  And no scatter below the root of the counts' mean: a count of cells each moved at rest by
+                        --  chance is a sum of rare independent alarms, whose variance is its mean at the least.
+                        --  Counts mostly zero leave their median absolute deviation at zero and the level at the
+                        --  median, and a count of one or two at rest was motion (the fake's eyes looking at little
+                        --  texture, f15q_play on 10-15: the boot's probe saw a push of 1.9e-7 units).
+                        if S.Rest_Counts_Known then
+                           declare
+                              Sum : Real := 0.0;
+                           begin
+                              for I in Start .. K loop
+                                 Sum := Sum + Counts (I);
+                              end loop;
+                              S.Rest_Count_Level :=
+                                Driver.Stats.Median (Counts (Start .. K))
+                                + Driver.Conventions.Z
+                                  * Real'Max (Driver.Stats.Robust_Sigma (Counts (Start .. K)),
+                                              Sqrt (Sum / Real (K - Start + 1)));
+                              S.Rest_Count_Above := 0;
+                              for I in Start .. K loop
+                                 if Counts (I) > S.Rest_Count_Level then
+                                    S.Rest_Count_Above := S.Rest_Count_Above + 1;
+                                 end if;
+                              end loop;
+                           end;
+                        end if;
+                     end;
+                  end;
+                  Free (Ratios);
+                  Free (Counts);
+                  Free (Of_Cell);
+                  Free (Typical);
                end;
             end if;
+            Free (Rest_At);
          end;
       end loop;
    end Measure_Rest_Noise;
@@ -1062,9 +1286,8 @@ package body Driver.Robot.Lockin is
                if not S.Resolved (Beat * N + C)
                  or else Driver.Uncertain.Significant
                    (Gate, Sqrt (S.Du (Beat * N + C) ** 2 + S.Dv (Beat * N + C) ** 2),
-                    --  The cell's displacement noise at rest, as the eye's still
-                    --  frames measured it.
-                    S.Rest_Factor * Flow.Noise_Floor (Cond, S.Luma_Variance (C)))
+                    --  The cell's displacement noise at rest, as its own resting beats measured it.
+                    Rest_Factor_Of (S, C) * Flow.Noise_Floor (Cond, S.Luma_Variance (C)))
                then
                   Count := Count + 1;
                end if;
@@ -1081,12 +1304,10 @@ package body Driver.Robot.Lockin is
       if Tested = 0 then
          return False;
       end if;
-      --  More than at any beat nobody pushed (its own fingers' jitter, the
-      --  scene): a count at rest beats all n of them with chance 1 / (n + 1),
-      --  whatever their distribution. Before that is measured, against the
-      --  false alarms of the per-cell test alone.
+      --  More than the counts at the beats nobody pushed (its own fingers' jitter, the scene) reach but rarely
+      --  (Rest_Count_Level). Before those are measured, against the false alarms of the per-cell test alone.
       return (if S.Rest_Counts_Known
-              then Count > S.Rest_Count_Max
+              then Real (Count) > S.Rest_Count_Level
               else Regression.Count_Significant
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
@@ -1119,15 +1340,28 @@ package body Driver.Robot.Lockin is
       end;
    end Cell_Noise;
 
+   --  The arm that carries the eye moves its whole view, and its keyframes measure how far a unit of each channel moves
+   --  it in the eye they are seen in (Kinematics.Pixels_Per_Unit), where the lock-in's flow, a beat at a time, reads
+   --  that view hardly moving: s33 (servo seed 7 of the fake robot, 10-17) at beat 3217 had 0.0011 px a unit of the
+   --  arm's first channel in its own eye from the lock-in, 0.31 from the keyframes; no raise of the eye within the
+   --  arm's reach showed, its closer was seen from no second pose, and its hand was never made. The keyframes'
+   --  measure, once they have one; the lock-in's before, and for every other group and eye.
    function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean is
-      Noise : constant Real := Cell_Noise (M, E);
+      Noise   : constant Real := Cell_Noise (M, E);
+      Mount_E : constant Mount := Eye_Mount (M, E);
+      Carrier : constant Arm_Id'Base :=
+        (if Mount_E.Kind = Arm_Carried and then Natural (Mount_E.Arm) <= Arm_Count (M)
+           and then Arm_Group (M, Mount_E.Arm) = G and then Driver.Robot.Kinematics.Eye_Of (M, Mount_E.Arm) = E
+         then Mount_E.Arm else 0);
    begin
       if Noise = Real'Last then
          return False;
       end if;
       for C in Step'Range loop
          declare
-            Per_Unit : constant Real := Shift (M, E, G, C - Step'First + 1);
+            Kept     : constant Real :=
+              (if Carrier > 0 then Driver.Robot.Kinematics.Pixels_Per_Unit (M, Carrier, C - Step'First + 1) else 0.0);
+            Per_Unit : constant Real := (if Kept > 0.0 then Kept else Shift (M, E, G, C - Step'First + 1));
          begin
             if Per_Unit > 0.0 and then Driver.Uncertain.Significant (Step (C) * Per_Unit, Noise) then
                return True;

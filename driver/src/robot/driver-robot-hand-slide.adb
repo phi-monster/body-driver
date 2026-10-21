@@ -480,6 +480,9 @@ package body Driver.Robot.Hand.Slide is
       begin
          Result.Still := All_Curve (K + 1);
          Result.Typical := Spread;
+         Result.Middle := Middle;
+         Result.Level := Middle + Threshold (Scalar_Gate (Tests => 2 * K + 1)) * Real'Max (Spread, Sqrt (Quantization));
+         Result.Halves := Boolean'Pos (Lower.Proper) + Boolean'Pos (Higher.Proper);
          --  What is told of the finger is the peak nearest where it stood free of those that stand out of the
          --  other scores, one test of as many as there are shifts; with none the greatest score, which is not
          --  known to be anything.

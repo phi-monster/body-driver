@@ -62,13 +62,18 @@ package body Driver.Brain.Service.Tests is
                             Doc, Ok, Why);
          Check (Ok and then Driver.Json.Is_True (Doc, Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "stream"))
                 and then Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Driver.Json.Lookup
-                  (Doc, Driver.Json.Root (Doc), "structured_outputs"), "grammar")) = "root ::= x",
-                "the program request is JSON, streamed, with the grammar");
+                  (Doc, Driver.Json.Root (Doc), "structured_outputs"), "grammar")) = "root ::= x"
+                and then Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "grammar")) = "root ::= x",
+                "the program request is JSON, streamed, with the grammar in vLLM's member and in llama.cpp's");
          Driver.Json.Parse (Where_Request ("data:image/bmp;base64,AAAA", "the red cup"), Doc, Ok, Why);
          Check (Ok and then Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Driver.Json.Lookup
                   (Doc, Driver.Json.Root (Doc), "structured_outputs"), "grammar")) = Where_Answer_Grammar
+                and then Driver.Json.Text (Doc, Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "grammar"))
+                         = Where_Answer_Grammar
                 and then Driver.Json.Lookup (Doc, Driver.Json.Root (Doc), "stream") = Driver.Json.No_Node,
-                "the where request carries the answer's grammar and is not streamed");
+                "the where request carries the answer's grammar in both members and is not streamed");
+         Check (Members ("{""grammar"": ""root ::= y""}", Why) = "" and then Has (To_String (Why), "grammar"),
+                "the deployment may not set the grammar either");
       end;
    end Settings;
 

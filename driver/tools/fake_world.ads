@@ -55,6 +55,8 @@ package Fake_World is
       Link   : Natural := 0;
       Arm    : Natural := 0;        --  the arm whose contacts it takes part in, 0 for the world's
       Finger : Boolean := False;    --  a finger: what presses, and what a surface presses shut
+      Held_By  : Natural := 0;      --  a thing of the world: the arm whose fingers pinch it, 0 when none does
+      Held_Rel : Rigid := Identity; --  where it stands in that arm's tool frame while held
    end record;
 
    package Solid_Vectors is new Ada.Containers.Vectors (Positive, Solid);
@@ -75,12 +77,18 @@ package Fake_World is
       Tau        : Real := 1.0;              --  beats of the first-order response
       Rate       : Real := 0.0;              --  the most the position changes in a beat, radians or metres; 0 is unlimited
       Droop_Gain : Real := 0.0;              --  radians of sag per metre of horizontal lever, revolute joints
+      Dead       : Real := 0.0;              --  the servo's tolerance, reading units: an ask within it moves nothing, and a
+                                             --  move lands short of its target by up to it (Landing), as a servo bus does
+      Landing    : Real := 0.0;              --  how far short of the target in effect this move lands, drawn with the target
       Mirror     : Natural := 0;             --  a link whose position this one copies (the other finger)
       Pose       : Rigid := Identity;        --  the link's frame in the world, from Forward
       Moved_Beat : Natural := 0;             --  the last beat the position changed
       Touching   : Boolean := False;         --  a solid of this link rests on something
       Bounce     : Real := 0.0;              --  the easing-back offset a let-go left, reading units, applied in Q
       Bounce_Age : Natural := Natural'Last;  --  beats since the let-go; 'Last when none is going on
+      Play       : Real := 0.0;              --  the slack of its gears, reading units: the link turns this much without the
+                                             --  servo (whose reading the robot reports) turning, and gravity takes it up
+      Play_Offset : Real := 0.0;             --  how far the link stands from its reading now, taken up by gravity
    end record;
 
    package Link_Vectors is new Ada.Containers.Vectors (Positive, Link);
@@ -98,8 +106,10 @@ package Fake_World is
       Values      : Real_Vectors.Vector;
       Commandable : Boolean := False;
       Scalar      : Boolean := False;
+      Integers    : Boolean := False;      --  read in whole units and sent as integers (a servo bus's ticks)
       Echoed      : Real_Vectors.Vector;   --  the last command received, in reading units
       Reported    : Real_Vectors.Vector;   --  this beat's readings, noise and all, drawn once a beat (Step)
+      Silent      : Boolean := False;      --  its servos do not answer: not reported, commands not taken (a dead bus)
    end record;
 
    package Group_Vectors is new Ada.Containers.Vectors (Positive, Group);
@@ -130,30 +140,45 @@ package Fake_World is
       Drift         : Boolean := True;   --  readings creep without a command, far below anything visible
       Delay_Beats   : Natural := 1;      --  beats before a command takes effect
       Droop         : Boolean := True;   --  a joint under load settles short of its target
+      Dead          : Boolean := True;   --  a servo ignores an ask within its tolerance and lands short by up to it
       Creep         : Boolean := True;   --  a hand on the table never quite stands still
       Give          : Boolean := True;   --  an arm pushed against a surface goes a little way in
       Soft_Closer   : Boolean := True;   --  an open closer pressed on a surface is pressed shut
       Bounce        : Boolean := True;   --  an arm let go from a press eases back and shakes
+      Play          : Boolean := True;   --  each joint's gear slack, taken up by gravity, unseen by its reading
       Reading_Noise : Real := 0.0;       --  a real robot's reading noise, in reading units; the simulator's is 0
    end record;
 
    --  What an arm ends in. Drawn: the seed decides.
-   type Hand_Kind is (Drawn, Pair, Hook, Pair_And_Thumb, Fingers);
+   type Hand_Kind is (Drawn, Pair, Hook, Pair_And_Thumb, Fingers, Jaw);
    --  Pair            two plates sliding apart on one channel, 1 open and 0 closed (the lab's gripper)
    --  Hook            one prong slanting down from the palm: it presses and hooks, and nothing closes
    --  Pair_And_Thumb  the pair, and a plate that comes down on them on a second channel of the same group
    --  Fingers         five fingers side by side that curl down, each read as a group of its own
+   --  Jaw             one jaw swung onto a jaw that does not move, on one channel (a desktop arm's gripper)
 
    type Hand_Kinds is array (1 .. 2) of Hand_Kind;
 
    package Kind_Vectors is new Ada.Containers.Vectors (Positive, Hand_Kind);
 
+   --  What kind of body is drawn: two arms on a table, each with its eye on its wrist (the lab's, the kiwi's); a
+   --  humanoid standing at the table, every joint of its body in one group, an eye in its head and on some of its
+   --  wrists; a wheeled base that carries an arm and a mast with an eye; a drone, a body that its motors move
+   --  through space with an eye on it. Every kind but the first has its limbs drawn: how many joints, about which
+   --  of its axes each turns, how long each link is.
+   type Body_Class is (Table_Arms, Humanoid, Base_And_Arm, Drone);
+
    --  What a test forces on the drawn body; the rest the seed decides.
    type Template is record
+      Class       : Body_Class := Table_Arms;
       Hands       : Hand_Kinds := [others => Drawn];
       Eyeless     : Natural := 0;        --  the arm with no eye of its own; 0 for none
       Eye_Up      : Natural := 0;        --  the arm whose eye looks ahead at the wall, not down at the table; 0 for none
       Plain_Table : Boolean := False;    --  a table with no texture at all
+      White_Room  : Boolean := False;    --  a white table and white walls, faint broad veins their only texture
+      Dead_Arm    : Natural := 0;        --  the arm whose servos never answer (it stands at rest, seen); 0 for none
+      Ticks       : Natural := 0;        --  the ticks a turn of every arm whose unit is a servo bus's; 0: drawn (1024 to 16384)
+      Servo       : Boolean := False;    --  every arm reads in a servo bus's ticks, whatever its unit was drawn
    end record;
 
    type Due_Target is record

@@ -174,4 +174,86 @@ package body Driver.Numerics.Dense is
          raise;
    end Least_Squares;
 
+   procedure Small_Eigensystem (A : Real_Matrix; Values : out Real_Vector; Vectors : out Real_Matrix) is
+      N : constant Natural := A'Length (1);
+      D : Real_Matrix (1 .. N, 1 .. N);
+      V : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
+   begin
+      for P in 1 .. N loop
+         V (P, P) := 1.0;
+         for Q in 1 .. N loop
+            D (P, Q) := A (A'First (1) + Integer'Min (P, Q) - 1, A'First (2) + Integer'Max (P, Q) - 1);
+         end loop;
+      end loop;
+      for Sweep in 1 .. Real'Machine_Mantissa loop
+         exit when (for all P in 1 .. N - 1 => (for all Q in P + 1 .. N => D (P, Q) = 0.0));
+         for P in 1 .. N - 1 loop
+            for Q in P + 1 .. N loop
+               if D (P, Q) /= 0.0 then
+                  if abs D (P, P) + abs D (P, Q) = abs D (P, P) and then abs D (Q, Q) + abs D (P, Q) = abs D (Q, Q) then
+                     D (P, Q) := 0.0;
+                     D (Q, P) := 0.0;
+                  else
+                     declare
+                        H     : constant Real := D (Q, Q) - D (P, P);
+                        T     : Real;
+                        C, S  : Real;
+                        Tau   : Real;
+                        Apq   : constant Real := D (P, Q);
+                     begin
+                        if abs H + abs Apq = abs H then
+                           T := Apq / H;
+                        else
+                           declare
+                              Theta : constant Real := H / (2.0 * Apq);
+                           begin
+                              T := 1.0 / (abs Theta + Ada.Numerics.Long_Elementary_Functions.Sqrt (Theta * Theta + 1.0));
+                              if Theta < 0.0 then
+                                 T := -T;
+                              end if;
+                           end;
+                        end if;
+                        C := 1.0 / Ada.Numerics.Long_Elementary_Functions.Sqrt (T * T + 1.0);
+                        S := T * C;
+                        Tau := S / (1.0 + C);
+                        D (P, P) := D (P, P) - T * Apq;
+                        D (Q, Q) := D (Q, Q) + T * Apq;
+                        D (P, Q) := 0.0;
+                        D (Q, P) := 0.0;
+                        for R in 1 .. N loop
+                           if R /= P and then R /= Q then
+                              declare
+                                 Grp : constant Real := D (R, P);
+                                 Grq : constant Real := D (R, Q);
+                              begin
+                                 D (R, P) := Grp - S * (Grq + Tau * Grp);
+                                 D (R, Q) := Grq + S * (Grp - Tau * Grq);
+                                 D (P, R) := D (R, P);
+                                 D (Q, R) := D (R, Q);
+                              end;
+                           end if;
+                        end loop;
+                        for R in 1 .. N loop
+                           declare
+                              Vrp : constant Real := V (R, P);
+                              Vrq : constant Real := V (R, Q);
+                           begin
+                              V (R, P) := Vrp - S * (Vrq + Tau * Vrp);
+                              V (R, Q) := Vrq + S * (Vrp - Tau * Vrq);
+                           end;
+                        end loop;
+                     end;
+                  end if;
+               end if;
+            end loop;
+         end loop;
+      end loop;
+      for P in 1 .. N loop
+         Values (Values'First + P - 1) := D (P, P);
+         for Q in 1 .. N loop
+            Vectors (Vectors'First (1) + Q - 1, Vectors'First (2) + P - 1) := V (Q, P);
+         end loop;
+      end loop;
+   end Small_Eigensystem;
+
 end Driver.Numerics.Dense;

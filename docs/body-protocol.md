@@ -60,10 +60,21 @@ leaf by its shape:
 Arrays may be msgpack arrays or msgpack-numpy maps
 (`{"nd": true, "type": "<f4", "shape": [480, 640], "data": <bin>}`).
 
+Readings sent as integers (msgpack integers, or an integer dtype) are read as
+exact: such a reading changes by whole units or not at all, so the driver's
+first push of the joint is one unit. Floats are read to the resolution of the
+width they came in (16, 32 or 64 bits), and the first push is that resolution.
+Send a servo's tick count as the integer it is, not as a float: as a float it
+costs the recognition some forty doublings of a push too small to happen.
+
 The driver starts once an observation has at least one camera and one group
 of readings; until then it says what it lacks and waits for the next one.
 Keep every camera in every observation: a camera missing from one beat is a
-gap at its place, not a shift of the others.
+gap at its place, not a shift of the others. Send each frame once: a camera
+that has given no new frame since the beat before (a camera slower than the
+beat) is left out of that beat, a gap. A frame sent again tells the driver
+nothing, and the driver drops a frame whose pixels are those of the beat
+before as such a gap.
 
 ### Command keys
 

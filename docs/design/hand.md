@@ -277,6 +277,37 @@ ray with the inverse tool pose would count the arm's kinematics twice, since
 the arm carries both the eye and the tool. Where along that line the tip is
 comes only from touching.
 
+## The tip is a face
+
+The end of a finger is a face, not a point. Pressed onto a table, a hand rests on whichever corner of a finger's face
+leads into the table, and which corner it is, and of which finger, depends on the way the hand leans. By the truth of
+u18 (servo seed 3 of the fake robot, 10-19), each of the twelve presses a tip rested on stopped on a corner of a jaw's
+far face. The face was 9.5 by 21 mm, and its corners lay 57 and 70 mm from the wrist eye. Ten presses stopped on its
+bottom edge and two on its top. Taken as a point on the line of sight through the lobe's tip pixel, the tips of two
+jaws shut on one another lay at the one place where the jaws meet, and 3 of the 12 presses went to the jaw that did not
+touch.
+
+A lobe's face is the outline of its tip region (`Lobes.Tip_Outline`: the corners of `Tip_Cap`'s convex hull). Each
+corner is a line of sight in the tool frame, and the face is a plane through those lines (`Touch.Fit`'s Faces). The
+plane has three unknowns: its distance along the tip's line of sight and its two tilts across it.
+
+- A press rests on the face's corner lowest along the surface's normal at the press's pose, and the press's equation is
+  that corner's height.
+- The tilts' prior is that of a face the eye sees. Such a face turns from the line of sight by less than a right angle
+  either way, so each tilt is a uniform spread over a half turn.
+- A press leaning another way rests on another corner, so presses leaning several ways measure the face's tilts
+  (Tested, as a point's offsets across its line were).
+- A press goes to the lobe whose face leads into the surface. Before anything is fitted, that is the lobe with a
+  corner's line closest to the way the tool pressed. Once the faces are fitted, it is the lobe whose face has the
+  corner foremost along the surface's normal.
+
+The test `hand.touch.faces` presses the faces of three fingers at seven poses each. Each face is a 9.5 by 21 mm
+rectangle turned 30 degrees from its line of sight. No press may be left out, and every corner must come out within a
+millimetre of where it is. Fitted as points on their lines of sight, 15 of the 21 presses are left out. The presses
+lean further than the faces turn from their lines of sight: leaning less, a face rests on the two corners of its one
+edge that leads, and the plane turns freely about that edge. A press planner must lean that far to measure a face
+(u18: 10 of the 12 presses rested on the bottom edge).
+
 ## Presses
 
 A press is the arm blocked and then at rest once the push that drove it in has
@@ -348,8 +379,9 @@ way back is to the readings its descent began from.
 Each press goes to the lobe that leads into the surface: before anything is
 fitted, the lobe whose line of sight lies closest to the way the tool was
 pressing; once the surface is fitted, the lobe whose fitted tip is foremost
-along its normal. All presses are refitted and given out again until none
-moves, so a press that came in sideways ends up with the lobe that touched.
+along its normal (a face's by its corners: see "The tip is a face"). All
+presses are refitted and given out again until none moves, so a press that
+came in sideways ends up with the lobe that touched.
 
 ## Tips and the surface, fitted together
 

@@ -861,6 +861,83 @@ package body Driver.Alignment.Tests is
              & Keyframes.Source'Image (Near.Source));
    end Offered_Model;
 
+   procedure Offered_Points is
+      --  A fitted arm predicts the points it has a depth for, each at its own depth (Kinematics.Offer_Of), and states
+      --  no place for the rest. The points it predicts lie at another depth than the rest of the view and move by
+      --  another amount: here the right third of the picture moves thirty pixels further than the left. The chain
+      --  follows the left part. Each point the arm predicts is asked where the arm puts it in every round, and stands
+      --  found there, though the keyframe's field follows the left part (w11, servo seed 11 of the fake robot,
+      --  10-19: arm 2's points the arm predicted within 2 px were asked again from the field and the view's common
+      --  motion, and none stood with the keyframe).
+      Points  : constant Keyframes.Point_Array := Grid_Points;
+      Change  : constant Real_Array := [32.0, 0.0];
+      Extra   : constant Real := 30.0;
+      Linear  : constant Linear_Part := Linear_At (Change);
+      Su      : constant Real := Shift_At (Change, 1);
+      Sv      : constant Real := Shift_At (Change, 2);
+      C       : Keyframes.Chain;
+      Offer   : Keyframes.Prediction_Array (Points'Range);
+      Given   : Keyframes.Prediction_Array (Points'Range);
+      Answers : Keyframes.Answer_Array (Points'Range);
+      Agree   : Keyframes.Flag_Array (Points'Range);
+      Source  : Keyframes.Source;
+      Truth   : array (Points'Range) of Driver.Images.Pixel;
+      Right   : array (Points'Range) of Boolean;
+      Left_Most  : Real := Real'First;
+      Right_Least : Real := Real'Last;
+      Rights, Lefts, Right_Stood, Left_Stood : Natural := 0;
+   begin
+      Ada.Numerics.Float_Random.Reset (Gen, 26);
+      Keyframes.Begin_Reference (C, Picture (Textured, Identity_Part, 0.0, 0.0, 0.8), Points);
+      for K in 1 .. 4 loop
+         declare
+            Followed : constant Sweep_Outcome := Keyframe_Of (C, Points, [0.25 * 4.0 ** (K - 1), 0.0]);
+            pragma Unreferenced (Followed);
+         begin
+            null;
+         end;
+      end loop;
+      for K in Points'Range loop
+         Right (K) := Points (K).U > 0.55 * Real (Width);
+         Truth (K) := Moved (Linear, Su + (if Right (K) then Extra else 0.0), Sv, Points (K));
+         if Right (K) then
+            Right_Least := Real'Min (Right_Least, Truth (K).U);
+         else
+            Left_Most := Real'Max (Left_Most, Truth (K).U);
+         end if;
+         Offer (K) := (From => Points (K), To => Truth (K), Linear => Linear,
+                       Cov => (if Right (K) then (UU => 0.01, UV => 0.0, VV => 0.01)
+                               else (UU => Real'Last / 4.0, UV => 0.0, VV => Real'Last / 4.0)),
+                       Linear_Sigma => Real'Last);
+      end loop;
+      Keyframes.Predict (C, Change, Readings_Noise, Pixels_Per_Reading, Offer, Given, Source);
+      Keyframes.Add (C, Picture (Textured, Linear, Su, Sv, 0.8, Split => (Left_Most + Right_Least) / 2.0,
+                                 Right_Shift => Su + Extra),
+                     Change, Given, Answers, Agree);
+      for K in Points'Range loop
+         declare
+            Stood : constant Boolean := Answers (K).Verdict = Found and then Agree (K)
+              and then Sqrt ((Answers (K).To.U - Truth (K).U) ** 2 + (Answers (K).To.V - Truth (K).V) ** 2) <= 1.0;
+         begin
+            if Right (K) then
+               Rights := Rights + 1;
+               Right_Stood := Right_Stood + Boolean'Pos (Stood);
+            else
+               Lefts := Lefts + 1;
+               Left_Stood := Left_Stood + Boolean'Pos (Stood);
+            end if;
+         end;
+      end loop;
+      Check (Source /= Keyframes.Supplied,
+             "the keyframe was predicted as " & Keyframes.Source'Image (Source) & ", not from the chain");
+      Check (Right_Stood = Rights,
+             "of the" & Rights'Image & " points the arm predicted at another depth," & Right_Stood'Image
+             & " stood with the keyframe where they are");
+      Check (Left_Stood * 8 >= Lefts * 7,
+             "of the" & Lefts'Image & " points the chain predicted," & Left_Stood'Image
+             & " stood with the keyframe where they are");
+   end Offered_Points;
+
    procedure Field_Agreement is
       --  The answers of a keyframe, a third of them wrong places (a window that held the texture's likeness and not
       --  the place), the rest on a smooth field that turns and stretches the picture (a hundred pixels at the far
@@ -1080,6 +1157,9 @@ package body Driver.Alignment.Tests is
       Driver.Tests.Register
         ("alignment.offered", "a model of the caller's that states less than the chain is not the one used",
          Offered_Model'Access);
+      Driver.Tests.Register
+        ("alignment.offered_points", "points a caller's model predicts at their own depth are asked from the "
+         & "keyframe's field or extrapolation instead, and not found", Offered_Points'Access);
       Driver.Tests.Register
         ("alignment.field", "answers a third of which are wrong places are not told from the right ones by their field",
          Field_Agreement'Access);

@@ -78,6 +78,27 @@ private package Driver.Robot.Steps is
 
    function Episodes (M : Model; G : Group_Id) return Natural;
 
+   procedure Body_Delay (M : Model; Beats : out Natural; Known : out Boolean);
+   --  The longest wait any answered push of the body took, over every commandable group whose delay is
+   --  measured (Channels.Measure_Pushes): a command travels one path to every group. Known is False before any
+   --  push of the body was answered.
+
+   function First_Push (M : Model) return Natural;
+   --  The beat the body's first push started at: the stream's age then, the wait an unanswered push is given
+   --  before any push was answered (the same for every push: no wait is longer than all the waiting so far). 0
+   --  before any push.
+
+   function Free_Landing (M : Model; G : Group_Id) return Real;
+   --  How far off its target a free push of the group lands, either way, along its ask, in reading units: the bound
+   --  Z robust deviations above the median of what every push that was not blocked fell short by (a servo stops
+   --  anywhere within its dead band of its target, an arm sags by its load). Not the most of them: a push that met
+   --  an end before three free ones were known to judge it by was kept as free. 0 before three free pushes.
+
+   function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The least ask of the channel a push of the group moved it for, in reading units: the body is known to
+   --  execute asks that large, and nothing is known of smaller ones (a servo stands still for an ask within its
+   --  dead band: the kiwi's joints, asked 2.4 to 3.8 units, R5 on 10-14). Real'Last until a push moved it.
+
    function Latest (M : Model; G : Group_Id) return Episode
      with Pre => Episodes (M, G) > 0;
 

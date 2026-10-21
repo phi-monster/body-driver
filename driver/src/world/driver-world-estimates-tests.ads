@@ -1,9 +1,9 @@
---  Self test of Driver.World.Estimates as a whole: two pinhole eyes over a
---  table with a box on it, and an instrument that answers every match by the
---  scene's own geometry, with a matcher's noise and occlusions. The scene is
---  measured at a still beat, the box adopted rests on the table, a new
---  episode keeps the surfaces as earlier ones until they are seen again,
---  and a change on the box drops the box's own top.
+--  Self test of Driver.World.Estimates as a whole: a textured table with a box on it, seen by an eye that rides on
+--  the body (it moves between still beats, as an arm holds it at one place and another) and by an eye that stands in
+--  the world. The eyes place what they see by themselves from the views kept (Driver.World.Sight): the scene and its
+--  supports, a thing adopted in the moving eye and the points it stands on, a track started in the standing eye
+--  where the thing's points fall, a thing moved and found again in the standing eye by the aligner, and all of it
+--  inside a task with the decider's stack. The instrument only segments, answered by the scene's own geometry.
 
 package Driver.World.Estimates.Tests is
 
