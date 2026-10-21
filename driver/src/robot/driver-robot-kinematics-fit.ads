@@ -326,10 +326,19 @@ package Driver.Robot.Kinematics.Fit is
       --  turn its own keyframes were explained by nearly as well when stage 1 took it for a slide, which every fit
       --  begun from this one weighs against the slide again (Fit_Start); zero for a joint that turns, or has none.
       Slide_Turns : Real_Lists.Vector;
+      --  The joints whose turn stage 4 told from the slide that moves the eye as it does (either way: the two apart
+      --  by more than Z, the turn determined), in increasing order: a fit begun from this one keeps them turning
+      --  without weighing them again (Fit_Start). A joint that slides is never among them.
+      Turns_Told : Joint_Lists.Vector;
    end record;
+
+   type Flag_Array is array (Positive range <>) of Boolean;
 
    function Slide_Turns_Of (Report : Fit_Report; N : Natural) return Vec3_Array;
    --  Report.Slide_Turns, a turn a joint, for a fit begun from it (Fit_Start); every one zero when it has none.
+
+   function Turns_Told_Of (Report : Fit_Report; N : Natural) return Flag_Array;
+   --  Report.Turns_Told, a flag a joint, for a fit begun from it (Fit_Start).
 
    function Depth_Known (Depth, Sigma : Real) return Boolean;
    --  Whether a track's depth is one: positive, and significant against its own relative uncertainty (Sigma is that
@@ -355,6 +364,7 @@ package Driver.Robot.Kinematics.Fit is
       Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
       Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
       Slide_Turns    : Vec3_Array (1 .. N) := [others => [0.0, 0.0, 0.0]];   --  per joint (Fit_Report)
+      Turns_Told     : Flag_Array (1 .. N) := [others => False];   --  per joint (Fit_Report)
       Untold_Orders  : Joint_Lists.Vector;
       --  The orders its search left untold beside its order (Fit_Report.Untold_Orders, each N joints long): an order
       --  one move from that order and not among them was told from it, and stays told while it is kept.
@@ -465,8 +475,6 @@ package Driver.Robot.Kinematics.Fit is
    function Rayleigh_Median return Real;
    --  The median of the length of a vector of two components that are Gaussian with the same sigma, over that
    --  sigma: the sigma of what a least median of lengths found.
-
-   type Flag_Array is array (Positive range <>) of Boolean;
 
    --  A track as the reference eye has it: on the line of sight H (H (3) = 1)
    --  through its reference pixel, at Depth along it (0 when it has none),

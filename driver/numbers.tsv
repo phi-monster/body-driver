@@ -2025,9 +2025,12 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	f
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Mo, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Multi_M, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Power, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Power, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rep.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rep.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Report.Focal_Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rp.Cost_Judged - Report.Cost_Judged, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rs.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rt.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sd, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Single_F, 3)	3	format	digits printed in a log line or a message
@@ -2052,8 +2055,11 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	forma
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Multi_M, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (R.Focal_Sigma, 2) & "");	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rs.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & "")	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & (if Adequate then "" else "")	3	format	digits printed in a log line or a message
@@ -2083,6 +2089,7 @@ driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E
 driver-robot-kinematics-fit.adb	(Step.Cost_Judged - Report.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0);	2.0	statistics	a likelihood ratio at Z: twice the cost difference against Z squared
 driver-robot-kinematics-fit.adb	(W => (1.0 / Rate) * Omega, P => (1.0 / Rate ** 2) * Cross (Omega, V), C => Rate,	1.0	math	a turn from its rotation: the unit axis is the rotation over its rate, the axis point the rotation across the travel over the rate squared
 driver-robot-kinematics-fit.adb	(W => (1.0 / Rate) * Omega, P => (1.0 / Rate ** 2) * Cross (Omega, V), C => Rate,	1.0	math	a turn from its rotation: the unit axis is the rotation over its rate, the axis point the rotation across the travel over the rate squared
+driver-robot-kinematics-fit.adb	(W => (1.0 / Sqrt (Dot (V, V))) * V, P => Zero3, C => Sqrt (Dot (V, V)), Slide => True);	1.0	math	the slide's direction: the eye's travel a reading unit over its own length, a unit vector
 driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	2	structure	the three components of a sighting's equation, stored on three rows
 driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
 driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
@@ -2389,6 +2396,7 @@ driver-robot-kinematics-fit.adb	Rm : Real_Access := new Real_Array (1 .. 2 * M);
 driver-robot-kinematics-fit.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	Ro : constant Natural := 6 + 5 * (J - 1);	6	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
+driver-robot-kinematics-fit.adb	Root (C) := (if K (C, C) > 0.0 then Sqrt (K (C, C)) else 1.0);	1.0	math	an unknown with nothing on the diagonal kept in its own units: divided by one
 driver-robot-kinematics-fit.adb	Rows (1, Count + 1);	1	structure	the parameters' rows from the first, and one more for the depths' own sums
 driver-robot-kinematics-fit.adb	Rows (1, Parameters);	1	structure	the parameters' rows from the first
 driver-robot-kinematics-fit.adb	Rp : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down

@@ -593,6 +593,7 @@ procedure Driver.Robot.Step2_Bench is
             Last_Untold : Natural := Natural'Last;
             Climbed     : Boolean := False;   --  the arm's cells climbed once it was fitted
             Stalled     : Natural := 0;
+            Boot_Took   : Duration := 0.0;   --  from the eye's start to its last round's fit, before the truth's work
          begin
             for Round in 0 .. Rounds loop
                declare
@@ -628,6 +629,7 @@ procedure Driver.Robot.Step2_Bench is
                      Start.Order_Told := Prev.Order_Told;
                      Start.Untold_Orders := Prev.Untold_Orders;
                      Start.Slide_Turns := Fit.Slide_Turns_Of (Prev, N);
+                     Start.Turns_Told := Fit.Turns_Told_Of (Prev, N);
                      Start.Whole := True;
                   end if;
                   Fit.Fit (Changes, Asked, [for C in 1 .. N => abs Factor (C) * Visible (Order_D (C))], Seen,
@@ -748,6 +750,9 @@ procedure Driver.Robot.Step2_Bench is
                end;
                <<Next_Round>> null;
             end loop;
+            Boot_Took := Ada.Calendar."-" (Ada.Calendar.Clock, Began);
+            Put_Line ("  seed" & Seed'Image & " eye " & Name & ": the rounds over in" & Boot_Took'Image & " s, told "
+                      & Told'Image);
             --  With BENCH_TRUTH: every sighting against where the true joints put it, in the true order and in the one
             --  the fit took: whether the sightings tell the two apart at all, and how far the fit's joints are off.
             if Ada.Environment_Variables.Exists ("BENCH_TRUTH") and then Have_Prev then
@@ -1232,7 +1237,9 @@ procedure Driver.Robot.Step2_Bench is
                      for I in 1 .. N loop
                         Order (I) := I;
                      end loop;
-                     loop
+                     --  Every order ranked only where the order told is not the truth: the 362880 of nine joints took the
+                     --  humanoid 2:2's run past two minutes after its rounds were over in 56 s (10-22).
+                     while Prev_Chain /= Truth loop
                         declare
                            M : constant Real := Score (Order);
                         begin
@@ -1245,23 +1252,27 @@ procedure Driver.Robot.Step2_Bench is
                         end;
                         exit when not Next (Order);
                      end loop;
-                     declare
-                        Line : Unbounded_String;
-                     begin
-                        for C of Best_O loop
-                           Append (Line, C'Image);
-                        end loop;
-                        Put_Line ("  rank seed" & Seed'Image & " eye " & Name
-                                  & ": with the fit's joints the true order"
-                                  & " scores" & Natural'Image (Natural (1000.0 * True_M)) & "/1000 px, below it"
-                                  & Better'Image & " of" & Count'Image & " orders; the least" & To_String (Line)
-                                  & Milli (Best_M));
-                     end;
+                     if Count > 0 then
+                        declare
+                           Line : Unbounded_String;
+                        begin
+                           for C of Best_O loop
+                              Append (Line, C'Image);
+                           end loop;
+                           Put_Line ("  rank seed" & Seed'Image & " eye " & Name
+                                     & ": with the fit's joints the true order"
+                                     & " scores" & Natural'Image (Natural (1000.0 * True_M)) & "/1000 px, below it"
+                                     & Better'Image & " of" & Count'Image & " orders; the least" & To_String (Line)
+                                     & Milli (Best_M));
+                        end;
+                     end if;
                   end;
                   --  And each of the two orders kept as told and fitted again from the fit's last joints and lens
                   --  (Fit_Start with the order told: the stages after the search, every joint's terms refined in that
                   --  order): which of the two the sightings fit the better once the joints are fitted to each.
-                  for Which in 1 .. 2 loop
+                  --  Where the order told is the truth the two are one, and refitted twice they took the humanoid 2:2's
+                  --  run past its two minutes after its rounds were over in 70 s (10-21).
+                  for Which in 1 .. (if Prev_Chain = Truth then 0 else 2) loop
                      declare
                         F       : constant Positive := Frames;
                         Changes : Driver.Numerics.Arrays.Real_Matrix (1 .. F, 1 .. N) := [others => [others => 0.0]];
@@ -1292,6 +1303,7 @@ procedure Driver.Robot.Step2_Bench is
                         Start.Profiled_Over := Prev.Profiled_Over;
                         Start.Order_Told := False;
                         Start.Slide_Turns := Fit.Slide_Turns_Of (Prev, N);
+                        Start.Turns_Told := Fit.Turns_Told_Of (Prev, N);
                         Start.Fixed := True;
                         Start.Whole := True;
                         Fit.Fit (Changes, Asked, [for C in 1 .. N => abs Factor (C) * Visible (Order_D (C))], Seen,
@@ -1420,7 +1432,8 @@ procedure Driver.Robot.Step2_Bench is
                          & (if Have_Prev and then not Prev.Fitted then ", NOT DETERMINED (" & To_String (Prev.Why) & ")"
                             else "")
                          & ", keyframes" & Frames'Image & ", stalled rounds" & Stalled'Image & ", in"
-                         & Duration'Image (Ada.Calendar."-" (Ada.Calendar.Clock, Began)) & " s");
+                         & Duration'Image (Ada.Calendar."-" (Ada.Calendar.Clock, Began)) & " s, the rounds over in"
+                         & Boot_Took'Image & " s");
             end;
          end;
       end;

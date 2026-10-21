@@ -738,6 +738,8 @@ private
                                                  --  long as Chain each, by the readings' places (Fit_Report)
       Slide_Turns   : Real_Vectors.Vector;       --  per joint, three numbers: the turn a slide is weighed against
                                                  --  again (Fit_Report)
+      Turns_Told    : Count_Vectors.Vector;      --  the joints whose turn was told from its slide, not weighed again
+                                                 --  (Fit_Report)
       Made_At : Natural := 0;
       Why       : Ada.Strings.Unbounded.Unbounded_String;
       Covariance : Real_Vectors.Vector;   --  of the fit's parameters, row by row (Kinematics.Fit)

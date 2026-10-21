@@ -2537,6 +2537,11 @@ package body Driver.Robot.Kinematics is
                               end loop;
                            end loop;
                         end if;
+                        for J of R.Result.Turns_Told loop
+                           if J in 1 .. N then
+                              Start.Turns_Told (J) := True;
+                           end if;
+                        end loop;
                         --  A fit of an estimate before this one is begun from at the stages after the search; within
                         --  the estimate whose fit holds (Again), at its last stage alone.
                         Start.Whole := not (Again and then R.Result.Made_At = M.Beats);
@@ -2659,6 +2664,9 @@ package body Driver.Robot.Kinematics is
                                  Start_R.Whole := Start.Whole;
                                  Start_R.Profiled_Over := Start.Profiled_Over;
                                  Start_R.Order_Told := Start.Order_Told;
+                                 for J in 1 .. Count loop
+                                    Start_R.Turns_Told (J) := Start.Turns_Told (Index (J));
+                                 end loop;
                                  --  Each untold order as the reduced chain has it: its turned joints' places, in order.
                                  for W in 0 .. Natural (Start.Untold_Orders.Length) / N - 1 loop
                                     for J in 1 .. N loop
@@ -2746,6 +2754,14 @@ package body Driver.Robot.Kinematics is
                                  for P of Pairs loop
                                     Report.Untold.Append (Joint_Pair'(Earlier => Index (P.Earlier), Later => Index (P.Later)));
                                  end loop;
+                                 declare
+                                    Told : constant Fit.Joint_Lists.Vector := Report.Turns_Told;
+                                 begin
+                                    Report.Turns_Told.Clear;
+                                    for J of Told loop
+                                       Report.Turns_Told.Append (Index (J));
+                                    end loop;
+                                 end;
                                  --  Each untold order as the chain is: the turned joints' channels in it, then the held ones.
                                  Report.Untold_Orders.Clear;
                                  for W in 0 .. Natural (Ways.Length) / Count - 1 loop
@@ -2848,6 +2864,10 @@ package body Driver.Robot.Kinematics is
                      Result.Slide_Turns.Clear;
                      for X of Report.Slide_Turns loop
                         Result.Slide_Turns.Append (X);
+                     end loop;
+                     Result.Turns_Told.Clear;
+                     for J of Report.Turns_Told loop
+                        Result.Turns_Told.Append (J);
                      end loop;
                      Result.Untold_Turns.Clear;
                      if not Report.Order_Told then

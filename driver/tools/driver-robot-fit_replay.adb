@@ -159,6 +159,9 @@ begin
                From.Slide_Turns (J) (A) := Next_Real;
             end loop;
          end loop;
+         for J in 1 .. M loop
+            From.Turns_Told (J) := Next_Flag;
+         end loop;
          Began := Ada.Calendar.Clock;
          Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
                   Who => To_String (Who), From => From);
