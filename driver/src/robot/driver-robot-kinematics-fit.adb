@@ -2819,6 +2819,10 @@ package body Driver.Robot.Kinematics.Fit is
                         Flat    : Boolean := False;
                         Flat_To : Real := 0.0;
                         Told    : Boolean := False;   --  a step of the way the keyframes told from the solution
+                        --  The focal length's sigma (in the logarithm) the way's steps say, the widest of them: a
+                        --  step its distance from the solution away whose cost rose by C says a sigma of the distance
+                        --  over the root of 2 C, the distance itself where C stays under one sigma's half.
+                        Widest  : Real := 0.0;
                      end record;
                      Walked        : array (Sign_Way) of Walk_Result;
                      Walked_Joints : array (Sign_Way) of Joint_Array (Joints'Range);
@@ -2867,6 +2871,10 @@ package body Driver.Robot.Kinematics.Fit is
                               --  as its steps went untold, not as far as they were asked (the sightings pulled a step at
                               --  315 px back to 178, s22's arm 2, 10-20).
                               Last_F := Lp.Fx;
+                              Walked (Way).Widest := Real'Max
+                                (Walked (Way).Widest,
+                                 abs Ln (Lp.Fx / L.Fx)
+                                 / Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged), 1.0)));
                               declare
                                  Err : constant Real :=
                                    Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
@@ -2930,6 +2938,50 @@ package body Driver.Robot.Kinematics.Fit is
                            exit;
                         end if;
                      end loop;
+                     --  The focal length's sigma as wide as its profile says, where that is wider than the covariance's
+                     --  curvature at the solution: its variance raised along the focal length's own regression on the
+                     --  other terms (each term's covariance with it over its variance, the direction the profile's
+                     --  refits follow), so that every other term carries its share. A desktop arm swept 0.06 rad,
+                     --  a pixel of noise on every sighting, was fitted at 413 px for 340 with a sigma of 4.5, where
+                     --  its profile rose by 0.5 at 440 px and by 3.6 at 474 (robot.kinematics.desktop, 10-21; the
+                     --  order search's fits begun from joints a hair apart, the stage before it).
+                     if not Moved then
+                        declare
+                           Profile : constant Real :=
+                             Real'Max (Walked (Up).Widest, Walked (Down).Widest);   --  in the logarithm
+                           Reduced : constant Natural :=
+                             Natural (Sqrt (Real (Natural (Report.Covariance.Length))));
+                        begin
+                           if Reduced > 0 and then Report.Covariance (Report.Covariance.First_Index) > 0.0
+                             and then Profile ** 2 > Report.Covariance (Report.Covariance.First_Index)
+                           then
+                              declare
+                                 V11  : constant Real := Report.Covariance (Report.Covariance.First_Index);
+                                 Gain : constant Real := (Profile ** 2 - V11) / V11 ** 2;
+                                 Row1 : Real_Array (1 .. Reduced);
+                              begin
+                                 for Q in 1 .. Reduced loop
+                                    Row1 (Q) := Report.Covariance (Report.Covariance.First_Index + Q - 1);
+                                 end loop;
+                                 for P in 1 .. Reduced loop
+                                    for Q in 1 .. Reduced loop
+                                       declare
+                                          K : constant Positive :=
+                                            Report.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
+                                       begin
+                                          Report.Covariance.Replace_Element
+                                            (K, Report.Covariance (K) + Gain * Row1 (P) * Row1 (Q));
+                                       end;
+                                    end loop;
+                                 end loop;
+                                 Report.Focal_Sigma := L.Fx * Profile;
+                                 Driver.Log.Line (Driver.Log.Robot, "kinematics: the focal length's profile widens its "
+                                                  & "sigma to " & Driver.Log.Image (Report.Focal_Sigma, 2) & " px, "
+                                                  & "from the covariance's " & Driver.Log.Image (L.Fx * Sqrt (V11), 2));
+                              end;
+                           end if;
+                        end;
+                     end if;
                      --  A profile that stays as low as the solution's to the end of the range the search ranged over
                      --  leaves the focal length undetermined there, whatever the covariance at the solution says: its
                      --  curvature is the basin's, not the valley's. A drone's eye (the fake robot's, its motors moving

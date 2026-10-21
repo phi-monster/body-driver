@@ -2011,11 +2011,13 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (F_Least, 3) & "" & Driv
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Focal, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Here.L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (J.Needed, 2) & "" & J.Aside'Image	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (L.Fx * Sqrt (V11), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Mo, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Multi_M, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Power, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rep.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Report.Focal_Sigma, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rp.Cost_Judged - Report.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rt.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sd, 3)	3	format	digits printed in a log line or a message
@@ -2081,6 +2083,8 @@ driver-robot-kinematics-fit.adb	(if abs Z_Value <= Driver.Conventions.Z then 1.0
 driver-robot-kinematics-fit.adb	(if not Second then [-X0 (I), -Y0 (I), -1.0, 0.0, 0.0, 0.0, X1 (I) * X0 (I), X1 (I) * Y0 (I), X1 (I)]	1.0	math	the homogeneous coordinate of a pixel, in a homography's row
 driver-robot-kinematics-fit.adb	+ G (4) * V (4);	4	structure	the four entries of the planar essential matrix and their rows
 driver-robot-kinematics-fit.adb	+ Real'Min (Huber_Cost (All_R (2 * I) / Scale), Huber_Cost (Driver.Conventions.Z));	2	structure	two residuals a sighting, across and down
+driver-robot-kinematics-fit.adb	/ Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged), 1.0)));	1.0	math	the step's distance itself where 2 C stays under one: a rise under one sigma's half says no less
+driver-robot-kinematics-fit.adb	/ Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged), 1.0)));	2.0	math	the profile's likelihood: a step d from the solution whose cost (half the chi square) rose by C says a sigma of d over the root of 2 C
 driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Real (Ks * Km * (Ks + Km + 1)) / 12.0));	12.0	statistics	Mann-Whitney's U has the variance n1 n2 (n1 + n2 + 1) / 12
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	a 3 by 3 matrix's rows and columns
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	a 3 by 3 matrix's rows and columns
@@ -2854,8 +2858,8 @@ driver-robot-kinematics-flow_eye.adb	Result.U (I) := Real (C) + 0.5;	0.5	math	a 
 driver-robot-kinematics-flow_eye.adb	Result.V (I) := Real (R) + 0.5;	0.5	math	a pixel's centre
 driver-robot-kinematics-flow_eye.adb	Rotations := Natural'Min (2 * Rotations, Natural'Max (Rotations + 1, Sampled));	2	structure	the race's turns doubled until two races agree
 driver-robot-kinematics-flow_eye.adb	Row : Positive := 1;	1	structure	the rows from the first
-driver-robot-kinematics-flow_eye.adb	Row := Row + 2;	2	structure	two residuals a place: across and down
 driver-robot-kinematics-flow_eye.adb	Row := Row + 2;	2	structure	two residuals a place, across and down
+driver-robot-kinematics-flow_eye.adb	Row := Row + 2;	2	structure	two residuals a place: across and down
 driver-robot-kinematics-flow_eye.adb	Run_Every (1, Count);	1	structure	the pool's work from its first item
 driver-robot-kinematics-flow_eye.adb	S (A).Base := Times (S (A).Base, Driver.Numerics.Exp ([X (O), X (O + 1), X (O + 2)]));	2	structure	the turn's terms follow the lens's
 driver-robot-kinematics-flow_eye.adb	S (A).P.Twists := new Twist_Grid (Arm.Poses'Range, 1 .. Natural'Max (1, Arm.Joints'Length));	1	structure	an array of at least one element

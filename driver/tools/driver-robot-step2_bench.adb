@@ -16,6 +16,7 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Alignment;
 with Driver.Numerics;
+with Driver.Numerics.Dense;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Stats;
 with Fake_World;
@@ -825,6 +826,88 @@ procedure Driver.Robot.Step2_Bench is
                                   & Real'Image ((if Dw < 0.0 then -Fj.C else Fj.C) / True_J (C).C) & " of the truth's");
                      end;
                   end loop;
+                  --  The fit's own covariance against those errors: each axis's tilt along the two directions across
+                  --  it and each turn's unit, over their standard deviations, and the chi square of them all together
+                  --  (about as many as there are of them, when the covariance is honest). A slide's unit is a length,
+                  --  in the fit's free scale: left out.
+                  if Natural (Prev.Covariance.Length) = Fit.Terms (N) ** 2 then
+                     declare
+                        M     : constant Positive := Fit.Terms (N);
+                        function V (P, Q : Positive) return Real is
+                          (Prev.Covariance (Prev.Covariance.First_Index + (P - 1) * M + Q - 1));
+                        Index : array (1 .. 3 * N) of Positive := [others => 1];
+                        E     : Real_Vector (1 .. 3 * N) := [others => 0.0];
+                        K     : Natural := 0;
+                        procedure Add (Term : Positive; Error : Real) is
+                        begin
+                           K := K + 1;
+                           Index (K) := Term;
+                           E (K) := Error;
+                        end Add;
+                     begin
+                        for C in 1 .. N loop
+                           declare
+                              Fj   : Fit.Joint renames Prev_Joints (C);
+                              Dw   : constant Real :=
+                                Fj.W (1) * True_J (C).W (1) + Fj.W (2) * True_J (C).W (2) + Fj.W (3) * True_J (C).W (3);
+                              Sign : constant Real := (if Dw < 0.0 then -1.0 else 1.0);
+                              E1, E2 : Vec3;
+                              T1, T2, Tc : Positive;
+                           begin
+                              Fit.Across (Fj.W, E1, E2);
+                              T1 := Fit.Term_Of (C, Fit.Tilt_1);
+                              T2 := Fit.Term_Of (C, Fit.Tilt_2);
+                              Tc := Fit.Term_Of (C, Fit.Scale);
+                              Add (T1, Sign * (True_J (C).W (1) * E1 (1) + True_J (C).W (2) * E1 (2)
+                                               + True_J (C).W (3) * E1 (3)));
+                              Add (T2, Sign * (True_J (C).W (1) * E2 (1) + True_J (C).W (2) * E2 (2)
+                                               + True_J (C).W (3) * E2 (3)));
+                              if not Fj.Slide then
+                                 Add (Tc, Sign * True_J (C).C - Fj.C);
+                              end if;
+                              Put_Line ("    fit joint c" & C'Image & " against its covariance: tilts"
+                                        & Real'Image (E (K - (if Fj.Slide then 1 else 2))
+                                                      / EF.Sqrt (V (T1, T1)))
+                                        & Real'Image (E (K - (if Fj.Slide then 0 else 1)) / EF.Sqrt (V (T2, T2)))
+                                        & " sigmas (sigma"
+                                        & Real'Image (57.29577951308232 * EF.Sqrt (V (T1, T1) + V (T2, T2)))
+                                        & " deg)"
+                                        & (if Fj.Slide then ""
+                                           else ", unit" & Real'Image (E (K) / EF.Sqrt (V (Tc, Tc))) & " sigmas (sigma"
+                                                & Real'Image (EF.Sqrt (V (Tc, Tc)) / abs Fj.C) & " of it)"));
+                           end;
+                        end loop;
+                        declare
+                           Sub   : Real_Matrix (1 .. K, 1 .. K);
+                           Lower : Real_Matrix (1 .. K, 1 .. K);
+                           Pd    : Boolean;
+                        begin
+                           for P in 1 .. K loop
+                              for Q in 1 .. K loop
+                                 Sub (P, Q) := V (Index (P), Index (Q));
+                              end loop;
+                           end loop;
+                           Driver.Numerics.Dense.Cholesky (Sub, Lower, Pd);
+                           if Pd then
+                              declare
+                                 Y   : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lower, E (1 .. K));
+                                 Chi : Real := 0.0;
+                              begin
+                                 for P in 1 .. K loop
+                                    Chi := Chi + E (P) * Y (P);
+                                 end loop;
+                                 Put_Line ("    fit joints against their covariance: chi square" & Real'Image (Chi)
+                                           & " over" & K'Image & " tilts and units");
+                              end;
+                           else
+                              Put_Line ("    fit joints against their covariance: not positive definite");
+                           end if;
+                        end;
+                     end;
+                  else
+                     Put_Line ("    fit joints against their covariance: none (" & Prev.Covariance.Length'Image
+                               & " entries)");
+                  end if;
                   for Kp in Prev.Untold.First_Index .. Prev.Untold.Last_Index loop
                      declare
                         E  : constant Positive := Prev.Untold (Kp).Earlier;
