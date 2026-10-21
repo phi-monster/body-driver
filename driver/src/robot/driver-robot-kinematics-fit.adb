@@ -7068,11 +7068,13 @@ package body Driver.Robot.Kinematics.Fit is
       Together (Order, Joints, Lens0, Report.Sigma_Px, Report.Used, Report.Median_Px);
       L := Lens0;
 
-      --  The focal length's profile is walked by a fit that searched it, and by one begun from an earlier estimate's
-      --  once the sightings have doubled since the profile was last walked: until then its basin stands, and walked
-      --  at every estimate it cost the boot a hundred beats a step, fourteen steps an estimate, held still (f16h on
-      --  10-15, two runs and the self tests sharing the machine).
-      Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over);
+      --  The focal length's profile is walked by a fit that searched it, by one begun from an earlier estimate's once
+      --  the sightings have doubled since the profile was last walked (until then its basin stands: walked at every
+      --  estimate it cost the boot a hundred beats a step, fourteen steps an estimate, held still, f16h on 10-15, two
+      --  runs and the self tests sharing the machine), and by the one that tells the order, whose covariance is the
+      --  one the arm keeps: unwalked there, the step 2 bench's six bent mast heads stated their joints 69.9 chi
+      --  squares over 42 off the truth, walked 55.8 (10-22).
+      Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over or else Order_Is_Told);
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is

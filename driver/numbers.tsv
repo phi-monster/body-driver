@@ -2221,7 +2221,7 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / Sqrt (2.0 * Ada.Numerics.Pi);	2.0	math	the normal distribution: its quartile, its density, the variance of a median
 driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
 driver-robot-kinematics-fit.adb	Far : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));	1	structure	at least one element, for an array that may hold none
-driver-robot-kinematics-fit.adb	Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over);	2	structure	the profile walked again once the sightings have doubled since it was last walked (the ladder's doubling)
+driver-robot-kinematics-fit.adb	Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over or else Order_Is_Told);	2	structure	the profile walked again once the sightings have doubled since it was last walked (the ladder's doubling)
 driver-robot-kinematics-fit.adb	Finite (K + 2) := Av (I) - Sight (Sight'First + I - 1).V;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Finite (K + 2) := Hv (I) - Sight (Sight'First + I - 1).V;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Finite : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals a sighting, across and down
