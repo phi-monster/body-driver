@@ -8563,6 +8563,10 @@ package body Driver.Robot.Tests is
       Width  : constant := 320;
       Height : constant := 240;
       Focal  : constant Real := 150.0;
+      --  The pixels not square, by more than a camera's (the fake's eyes 0.995 to 1.005) so that the check tells the
+      --  fit's aspect from square pixels: its sigma is 0.86 % (at 1.03 the fit said 1.0233), and at 1.004 and 1.03 the
+      --  check passed against square pixels too (10-21).
+      Aspect : constant Real := 1.06;
       Joints : aliased constant KFit.Joint_Array :=
         [(W => [0.0, 0.0, 1.0], P => [0.0, 0.0, 0.0], C => 0.001, Slide => False),
          (W => [1.0, 0.0, 0.0], P => [0.0, 0.0, 0.1], C => 0.001, Slide => False),
@@ -8589,7 +8593,7 @@ package body Driver.Robot.Tests is
       begin
          Ahead := C (3) > 0.0;
          U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
-         V := (if Ahead then Focal * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+         V := (if Ahead then Focal * Aspect * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
       end Project;
    begin
       for P in 1 .. Poses loop
@@ -8654,15 +8658,19 @@ package body Driver.Robot.Tests is
          declare
             Off_F  : constant Real := Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Focal);
             Off_C  : constant Vec3 := Minus (Result.Poses (1).Translation, Truth.Translation);
+            O      : constant Natural := Flow.Terms_For (1) - 6;   --  the lens's terms, before the arm's
             Turned : constant Vec3 :=
               Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (1).Rotation));
          begin
             Check (abs Off_F <= Driver.Conventions.Z * Sqrt (Result.Covariance (1, 1)),
                    "the focal length is off its sigma:" & Real'Image (Result.Lens.Fx));
+            Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fy / Result.Lens.Fx / Aspect)
+                   <= Driver.Conventions.Z * Sqrt (Result.Covariance (4, 4)),
+                   "the aspect is off its sigma:" & Real'Image (Result.Lens.Fy / Result.Lens.Fx));
             for A in 1 .. 3 loop
-               Check (abs Off_C (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (6 + A, 6 + A)),
+               Check (abs Off_C (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + 3 + A, O + 3 + A)),
                       "the centre is off its sigma along axis" & A'Image & ":" & Real'Image (Off_C (A)));
-               Check (abs Turned (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (3 + A, 3 + A)),
+               Check (abs Turned (A) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + A, O + A)),
                       "the turn is off its sigma about axis" & A'Image & ":" & Real'Image (Turned (A)));
             end loop;
          end;
@@ -8683,6 +8691,9 @@ package body Driver.Robot.Tests is
       Width  : constant := 320;
       Height : constant := 240;
       Focal  : constant Real := 150.0;
+      --  The pixels not square, a camera's little: the table's places tell it from square pixels (checked against
+      --  them instead, the aspect's check fails, 10-21).
+      Aspect : constant Real := 0.996;
       Wrist_W : constant := 160;
       Wrist_H : constant := 120;
       Wrist_Lens : constant KFit.Lens := (Fx | Fy => 120.0, Cx => 80.0, Cy => 60.0, K1 | K2 => 0.0);
@@ -8757,7 +8768,7 @@ package body Driver.Robot.Tests is
       begin
          Ahead := C (3) > 0.0;
          U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
-         V := (if Ahead then Focal * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+         V := (if Ahead then Focal * Aspect * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
       end Project;
       type Pictures_Access is access Flow.Wrist_Picture_Array;
       Pictures : array (1 .. Arms) of Pictures_Access;
@@ -8784,7 +8795,7 @@ package body Driver.Robot.Tests is
                   if Ct (3) > 0.0 and then Cf (3) > 0.0 then
                      declare
                         Tu : constant Real := Focal * Ct (1) / Ct (3) + Real (Width) / 2.0;
-                        Tv : constant Real := Focal * Ct (2) / Ct (3) + Real (Height) / 2.0;
+                        Tv : constant Real := Focal * Aspect * Ct (2) / Ct (3) + Real (Height) / 2.0;
                      begin
                         if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
                            Worst := Real'Max
@@ -8894,8 +8905,8 @@ package body Driver.Robot.Tests is
                                      Points => 1000, Scatter => 1.0),
                         Variants => null);
       end loop;
-      Fixed := Picture_Of (Truth, (Fx | Fy => Focal, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
-                                   K1 | K2 => 0.0), Width, Height);
+      Fixed := Picture_Of (Truth, (Fx => Focal, Fy => Focal * Aspect, Cx => Real (Width) / 2.0,
+                                   Cy => Real (Height) / 2.0, K1 | K2 => 0.0), Width, Height);
       Flow.Fit_Eye (In_Arms, Width, Height, Result);
       declare
          Flows_Off : constant Real := Table_Off (Result);
@@ -8913,12 +8924,15 @@ package body Driver.Robot.Tests is
                 and then abs (Result.Lens.Cy - Real (Height) / 2.0)
                          <= Driver.Conventions.Z * Sqrt (Result.Covariance (3, 3)),
                 "the principal point is off its sigma:" & Real'Image (Result.Lens.Cx) & Real'Image (Result.Lens.Cy));
+         Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fy / Result.Lens.Fx / Aspect)
+                <= Driver.Conventions.Z * Sqrt (Result.Covariance (4, 4)),
+                "the aspect is off its sigma:" & Real'Image (Result.Lens.Fy / Result.Lens.Fx));
          for A in 1 .. Arms loop
             declare
                Off_C  : constant Vec3 := Minus (Result.Poses (A).Translation, Truth.Translation);
                Turned : constant Vec3 :=
                  Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (A).Rotation));
-               O      : constant Natural := 3 + 6 * (A - 1);
+               O      : constant Natural := Flow.Terms_For (A) - 6;   --  the terms before arm A's
             begin
                for X in 1 .. 3 loop
                   Check (abs Off_C (X) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + 3 + X, O + 3 + X)),

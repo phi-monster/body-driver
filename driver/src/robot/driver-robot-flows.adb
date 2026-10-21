@@ -265,23 +265,29 @@ package body Driver.Robot.Flows is
       end;
    end Variants_Of;
 
-   --  The flow's fit stored as the fixed eye's place (Fixed_Fit): its lens (one focal length both ways, the principal
-   --  point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the covariance
-   --  of the lens's six terms as an arm's fit has them (the logarithms of the two focal lengths, the principal point,
-   --  the two distortion terms, held) and of every arm's turn about the camera's own axes and centre; the world arm's
-   --  pose (the first arm's) and its twelve terms' covariance as the fixed eye's users read them, the eye known only
-   --  when it saw that arm. Its spread the place it leaves the arms' points in its picture uncertain by.
+   --  The flow's fit stored as the fixed eye's place (Fixed_Fit): its lens (its focal lengths across and down, the
+   --  principal point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the
+   --  covariance of the lens's six terms as an arm's fit has them (the logarithms of the two focal lengths, the
+   --  principal point, the two distortion terms, held) and of every arm's turn about the camera's own axes and centre;
+   --  the world arm's pose (the first arm's) and its twelve terms' covariance as the fixed eye's users read them, the
+   --  eye known only when it saw that arm. Its spread the place it leaves the arms' points in its picture uncertain by.
    procedure Store (M : in out Model; E : Eye_Id; Arms : Arm_Id_Array; Result : Flow.Report) is
       Slots : constant Natural := Arms'Length;
       Terms : constant Natural := KFit.Lens_Terms + 6 * Slots;
       Flow_Lens : constant Natural := Flow.Terms_For (Slots) - 6 * Slots;   --  the flow's own lens terms
       --  The flow's term behind each of the stored ones (nought: held, its rows and columns nought): both focal
-      --  lengths' logarithms its one, the principal point its, then the arms' six each in the same order.
+      --  lengths' logarithms its one, the principal point its, then the arms' six each in the same order; and the
+      --  term added to it (nought: none), the aspect's logarithm to the second focal length's.
       function From (P : Positive) return Natural is
         (if P <= KFit.Lens_Terms then (case P is when 1 | 2 => 1, when 3 => 2, when 4 => 3, when others => 0)
          else Flow_Lens + (P - KFit.Lens_Terms));
+      function Also (P : Positive) return Natural is (if P = 2 then 4 else 0);
+      function Cov (P, Q : Natural) return Real is
+        (if P > 0 and then Q > 0 then Result.Covariance (P, Q) else 0.0);
       function Joint_At (P, Q : Positive) return Real is
-        (if From (P) > 0 and then From (Q) > 0 then Result.Covariance (From (P), From (Q)) else 0.0);
+        (if From (P) > 0 and then From (Q) > 0
+         then Cov (From (P), From (Q)) + Cov (Also (P), From (Q)) + Cov (From (P), Also (Q)) + Cov (Also (P), Also (Q))
+         else 0.0);
       --  The world arm's place among the arms (nought: the eye did not see it).
       World : Natural := 0;
       --  A term of the world arm's twelve among the stored ones.

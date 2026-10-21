@@ -468,11 +468,12 @@ begin
          Gather (3 - Arm, Cache_Of ("FLOW_CACHE2"), Sets (2), Cache_Of ("FLOW_RICHARDSON2"));
       end if;
       --  FLOW_ARM_ERROR = "T,M,U" (a study): every arm's joints as a fit off the truth would hand them, each axis
-      --  tilted along the two directions across it and its point moved along them by Gaussian draws of T degrees and
-      --  M metres, its unit times 1 + a draw of U (a generator of their own, the seed's: the pictures' noise as without
-      --  them); the flows fitted with them, the wrist eyes' pictures placed by them (the eye at rest where it truly is,
-      --  as an arm's reference frame is its eye's), and the refinement handed those sigmas as every arm's variants
-      --  (Arm_World.Variants): what step 2's errors leave the fixed eye, and whether its spread says so.
+      --  tilted along the two directions across it and its point moved along them by Gaussian draws of T degrees and M
+      --  metres, its unit times 1 + a draw of U (a generator of their own, the seed's: the pictures' noise as without
+      --  them; FLOW_ERROR_DRAW = K another draw of them, the seed's K-th); the flows fitted with them, the wrist eyes'
+      --  pictures placed by them (the eye at rest where it truly is, as an arm's reference frame is its eye's), and the
+      --  refinement handed those sigmas as every arm's variants (Arm_World.Variants): what step 2's errors leave the
+      --  fixed eye, and whether its spread says so.
       if Ada.Environment_Variables.Exists ("FLOW_ARM_ERROR") then
          declare
             Tilt   : constant Real := Arm_Error (1);
@@ -486,7 +487,8 @@ begin
                return EF.Sqrt (-2.0 * EF.Log (U1)) * EF.Cos (2.0 * Ada.Numerics.Pi * U2);
             end Draw;
          begin
-            Ada.Numerics.Float_Random.Reset (Errors, Seed);
+            Ada.Numerics.Float_Random.Reset
+              (Errors, Seed + 1000 * Natural (Setting ("FLOW_ERROR_DRAW", 0.0)));
             for S of Sets loop
                for J in S.Joints'Range loop
                   declare
@@ -1343,13 +1345,14 @@ begin
                & Image (100.0 * (Result.Lens.Fx / Cam.Fx - 1.0), 1) & " %, sigma "
                & Image (100.0 * EF.Sqrt (Result.Covariance (1, 1)), 2) & " %), principal point ("
                & Image (Result.Lens.Cx, 1) & ", " & Image (Result.Lens.Cy, 1) & ") of (" & Image (Cam.Cx, 1) & ", "
-               & Image (Cam.Cy, 1) & ")");
+               & Image (Cam.Cy, 1) & "), aspect " & Image (Result.Lens.Fy / Result.Lens.Fx, 5) & " of "
+               & Image (Cam.Fy / Cam.Fx, 5) & " (sigma " & Image (100.0 * EF.Sqrt (Result.Covariance (4, 4)), 2) & " %)");
             for K in Sets'Range loop
                declare
                   Off    : constant Real := abs Minus (Result.Poses (K).Translation, Truth.Translation);
                   Turned : constant Real :=
                     Driver.Numerics.Angle (Times (Transposed (Truth.Rotation), Result.Poses (K).Rotation));
-                  O      : constant Natural := 3 + 6 * (K - 1);
+                  O      : constant Natural := Flow.Terms_For (K - Sets'First + 1) - 6;
                begin
                   Append (Line, "; arm" & Sets (K).Number'Image & " centre off by " & Image (1000.0 * Off, 1)
                           & " mm (sigma " & Image (1000.0 * EF.Sqrt (Result.Covariance (O + 4, O + 4)
@@ -1381,6 +1384,18 @@ begin
                type Mask_List is array (Positive range <>) of Flow.Pixel_Flags_Access;
                type Mask_List_Access is access Mask_List;
                Table_Masks : array (Sets'Range) of Mask_List_Access;
+               --  Per picture, where each pixel's ray meets the world first (its point) and which solid it meets (the
+               --  study's FLOW_STUDY_HIT: the true points of the things on the table, not the table's plane's alone).
+               type Hit_Map is array (Positive range <>) of Vec3;
+               type Hit_Map_Access is access Hit_Map;
+               type Solid_Map is array (Positive range <>) of Natural;
+               type Solid_Map_Access is access Solid_Map;
+               type Hit_List is array (Positive range <>) of Hit_Map_Access;
+               type Hit_List_Access is access Hit_List;
+               type Solid_List is array (Positive range <>) of Solid_Map_Access;
+               type Solid_List_Access is access Solid_List;
+               Hits       : array (Sets'Range) of Hit_List_Access;
+               Hit_Solids : array (Sets'Range) of Solid_List_Access;
                type Variants_Access is access Flow.Arm_Variant_Array;
                type Joints_Access is access Fit.Joint_Array;
                type Eyes_Access is access Flow.Rigid_Array;
@@ -1433,6 +1448,8 @@ begin
                         Ada.Numerics.Float_Random.Reset (Draws, Seed + K);
                         Pictures (K) := new Flow.Wrist_Picture_Array (1 .. Given + Extra);
                         Table_Masks (K) := new Mask_List (1 .. Given + Extra);
+                        Hits (K) := new Hit_List (1 .. Given + Extra);
+                        Hit_Solids (K) := new Solid_List (1 .. Given + Extra);
                         for J in 1 .. N loop
                            Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
                         end loop;
@@ -1501,15 +1518,28 @@ begin
                                     Flow.Pixel_Flags'Read (WIO.Stream (Wrists_File), Mask.all);
                                  end if;
                                  Table_Masks (K) (V) := new Flow.Pixel_Flags (1 .. C.Width * C.Height);
+                                 Hits (K) (V) := new Hit_Map (1 .. C.Width * C.Height);
+                                 Hit_Solids (K) (V) := new Solid_Map (1 .. C.Width * C.Height);
                                  for Y in 0 .. C.Height - 1 loop
                                     for X in 0 .. C.Width - 1 loop
                                        declare
                                           Solid : Natural;
                                           Along : Real;
+                                          Px    : constant Real := (Real (X) + 0.5 - C.Cx) / C.Fx;
+                                          Py    : constant Real := (Real (Y) + 0.5 - C.Cy) / C.Fy;
+                                          Dc    : constant Vec3 :=
+                                            Times (C.Pose.Rotation, Vec3'[Px, Py, 1.0]);
+                                          Dn    : constant Real := EF.Sqrt (Dc (1) ** 2 + Dc (2) ** 2 + Dc (3) ** 2);
                                        begin
                                           Fake_Render.Nearest (W, C, Real (X) + 0.5, Real (Y) + 0.5, Solid, Along);
                                           Table_Masks (K) (V) (Y * C.Width + X + 1) :=
                                             Solid > 0 and then To_String (W.Solids (Solid).Name) = "table";
+                                          Hit_Solids (K) (V) (Y * C.Width + X + 1) :=
+                                            (if Solid > 0 and then W.Solids (Solid).Link = 0 and then Along < Real'Last
+                                             then Solid else 0);
+                                          Hits (K) (V) (Y * C.Width + X + 1) :=
+                                            (if Hit_Solids (K) (V) (Y * C.Width + X + 1) > 0
+                                             then Plus (C.Pose.Translation, Scaled (Along / Dn, Dc)) else [0.0, 0.0, 0.0]);
                                        end;
                                     end loop;
                                  end loop;
@@ -1616,8 +1646,8 @@ begin
                      end loop;
                   end loop;
                end if;
-               --  FLOW_TRUE_ASPECT (a study): the refinement given the true eye's aspect (its two focal lengths'
-               --  ratio).
+               --  FLOW_TRUE_ASPECT (a study): the refinement started at the true eye's aspect (its two focal lengths'
+               --  ratio), which it fits with the other terms.
                if Ada.Environment_Variables.Exists ("FLOW_TRUE_ASPECT") then
                   Refined.Lens.Fy := Refined.Lens.Fx * Cam.Fy / Cam.Fx;
                end if;
@@ -1665,17 +1695,53 @@ begin
                      Centred : constant Boolean := Ada.Environment_Variables.Exists ("FLOW_STUDY_CENTRED");
                      Ray_U : constant Real := (if Centred then Fake_Render.Raw_Shift (1) else 0.0);
                      Ray_V : constant Real := (if Centred then Fake_Render.Raw_Shift (2) else 0.0);
+                     --  FLOW_STUDY_HIT (a study): every point the true one the wrist picture's ray meets (the table or a
+                     --  thing on it), a patch asked only where its pixel and its neighbours meet one solid, and only where
+                     --  the fixed eye sees that point (its own ray meets it first).
+                     Hit_Mode      : constant Boolean := Ada.Environment_Variables.Exists ("FLOW_STUDY_HIT");
+                     Current_Hits  : Hit_Map_Access;
+                     Current_Solid : Solid_Map_Access;
+                     Current_Width, Current_Height : Positive := 1;
+                     Centre_Solid  : Natural := 0;
                      function True_Place (X : Vec3; U, V : out Real) return Boolean is
                         C : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (X, Truth.Translation));
                      begin
                         U := Cam.Cx + Cam.Fx * C (1) / C (3) - Ray_U;
                         V := Cam.Cy + Cam.Fy * C (2) / C (3) - Ray_V;
-                        return C (3) > 0.0 and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height);
+                        if not (C (3) > 0.0 and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height)) then
+                           return False;
+                        elsif not Hit_Mode then
+                           return True;
+                        end if;
+                        declare
+                           Solid : Natural;
+                           Along : Real;
+                           Far   : constant Real := EF.Sqrt (C (1) ** 2 + C (2) ** 2 + C (3) ** 2);
+                        begin
+                           Fake_Render.Nearest (W, Cam, U + Ray_U, V + Ray_V, Solid, Along);
+                           --  Seen when nothing lies before it on the fixed eye's line of sight (a millimetre's give).
+                           return Along >= Far - 1.0E-3;
+                        end;
                      end True_Place;
                      function On_Table (Eye : Rigid; L : Fit.Lens; U, V : Real; X : out Vec3) return Boolean is
                         D     : constant Vec3 := Times (Eye.Rotation, Fit.Ray (L, U + Ray_U, V + Ray_V));
                         S_Hit : constant Real := (if D (3) /= 0.0 then (W.Table_Z - Eye.Translation (3)) / D (3) else -1.0);
                      begin
+                        if Hit_Mode then
+                           declare
+                              Px : constant Integer := Integer (Real'Floor (U));
+                              Py : constant Integer := Integer (Real'Floor (V));
+                           begin
+                              X := [0.0, 0.0, 0.0];
+                              if Current_Hits = null or else Px not in 0 .. Current_Width - 1
+                                or else Py not in 0 .. Current_Height - 1
+                              then
+                                 return False;
+                              end if;
+                              X := Current_Hits (Py * Current_Width + Px + 1);
+                              return Centre_Solid > 0 and then Current_Solid (Py * Current_Width + Px + 1) = Centre_Solid;
+                           end;
+                        end if;
                         X := Plus (Eye.Translation, Scaled (S_Hit, D));
                         return S_Hit > 0.0;
                      end On_Table;
@@ -1688,6 +1754,10 @@ begin
                            for P of Pictures (K).all loop
                               Picture_No := Picture_No + 1;
                               Local_No := Local_No + 1;
+                              Current_Hits := Hits (K) (Local_No);
+                              Current_Solid := Hit_Solids (K) (Local_No);
+                              Current_Width := P.Width;
+                              Current_Height := P.Height;
                               declare
                                  Pyr  : constant Driver.Alignment.Pyramid :=
                                    Driver.Alignment.Pyramid_Of (P.Width, P.Height, P.Luma.all);
@@ -1707,6 +1777,19 @@ begin
                                              Mx : constant Natural := Gu;
                                              My : constant Natural := Gv;
                                           begin
+                                             Centre_Solid := (if Hit_Mode then Current_Solid (My * P.Width + Mx + 1) else 0);
+                                             --  FLOW_STUDY_HIT=whole: the patch's every pixel on that one solid (no edge in it).
+                                             if Hit_Mode and then Ada.Environment_Variables.Value ("FLOW_STUDY_HIT") = "whole" then
+                                                for Dy in -Grid / 2 .. Grid / 2 loop
+                                                   for Dx in -Grid / 2 .. Grid / 2 loop
+                                                      if Gu + Dx not in 0 .. P.Width - 1 or else Gv + Dy not in 0 .. P.Height - 1
+                                                        or else Current_Solid ((Gv + Dy) * P.Width + Gu + Dx + 1) /= Centre_Solid
+                                                      then
+                                                         Centre_Solid := 0;
+                                                      end if;
+                                                   end loop;
+                                                end loop;
+                                             end if;
                                              if (P.World = null or else P.World (My * P.Width + Mx + 1))
                                                and then On_Table (P.Eye, Wl, U0, V0, X)
                                                and then On_Table (P.Eye, Wl, U0 + 1.0, V0, Xu)
@@ -2471,7 +2554,8 @@ begin
                      & Image (100.0 * (Refined.Lens.Fx / Cam.Fx - 1.0), 2)
                      & " %), principal point (" & Image (Refined.Lens.Cx, 1) & ", "
                      & Image (Refined.Lens.Cy, 1) & ") of ("
-                     & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & ")");
+                     & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & "), aspect "
+                     & Image (Refined.Lens.Fy / Refined.Lens.Fx, 5) & " of " & Image (Cam.Fy / Cam.Fx, 5));
                   --  The refined eye's terms against the truth over the covariance it states (the logarithm of the
                   --  focal length, the principal point, each arm's turn about the camera's own axes, its centre): the
                   --  chi square, about as many as the terms when the covariance is honest, and the focal length's and
@@ -2485,9 +2569,10 @@ begin
                      E (1) := EF.Log (Refined.Lens.Fx / Cam.Fx);
                      E (2) := Refined.Lens.Cx - Cam.Cx;
                      E (3) := Refined.Lens.Cy - Cam.Cy;
+                     E (4) := EF.Log ((Refined.Lens.Fy / Refined.Lens.Fx) / (Cam.Fy / Cam.Fx));
                      for K in Sets'Range loop
                         declare
-                           O    : constant Natural := 3 + 6 * (K - Sets'First);
+                           O    : constant Natural := Flow.Terms_For (K - Sets'First + 1) - 6;
                            P    : constant Rigid := Refined.Poses (K);
                            Turn : constant Vec3 :=
                              Driver.Numerics.Log (Times (Transposed (Truth.Rotation), P.Rotation));
@@ -2511,11 +2596,12 @@ begin
                                      & "chi square " & Image (Chi, 1) & " over" & G'Image & "; focal "
                                      & Image (E (1) / EF.Sqrt (Refined.Covariance (1, 1)), 2) & " sigmas, principal "
                                      & "point " & Image (E (2) / EF.Sqrt (Refined.Covariance (2, 2)), 2) & " "
-                                     & Image (E (3) / EF.Sqrt (Refined.Covariance (3, 3)), 2) & " sigmas");
+                                     & Image (E (3) / EF.Sqrt (Refined.Covariance (3, 3)), 2) & " sigmas, aspect "
+                                     & Image (E (4) / EF.Sqrt (Refined.Covariance (4, 4)), 2) & " sigmas");
                            --  The error along each axis of the covariance, over that axis's sigma, the three largest:
                            --  which combinations of the terms the covariance states too little of (each axis by its
                            --  sigma and its three largest terms: 1 the focal length's logarithm, 2 and 3 the principal
-                           --  point, then per arm 3 of turn and 3 of centre).
+                           --  point, 4 the aspect's logarithm, then per arm 3 of turn and 3 of centre).
                            declare
                               Values  : Real_Vector (1 .. G);
                               Vectors : Real_Matrix (1 .. G, 1 .. G);
@@ -2529,7 +2615,7 @@ begin
                               begin
                                  for K in Sets'Range loop
                                     declare
-                                       O  : constant Natural := 3 + 6 * (K - Sets'First);
+                                       O  : constant Natural := Flow.Terms_For (K - Sets'First + 1) - 6;
                                        P  : constant Rigid := Refined.Poses (K);
                                        Pm : constant Rigid :=
                                          (Rotation    =>
@@ -2559,7 +2645,8 @@ begin
                                                    Worst := Real'Max
                                                      (Worst, EF.Sqrt ((D (2) + Fm * C1 (1) / C1 (3)
                                                                             - Refined.Lens.Fx * C0 (1) / C0 (3)) ** 2
-                                                                      + (D (3) + Fm * C1 (2) / C1 (3)
+                                                                      + (D (3) + Fm * EF.Exp (D (4)) * Refined.Lens.Fy
+                                                                         / Refined.Lens.Fx * C1 (2) / C1 (3)
                                                                          - Refined.Lens.Fy * C0 (2) / C0 (3)) ** 2));
                                                 end if;
                                              end;

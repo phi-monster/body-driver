@@ -401,8 +401,11 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  The terms: the logarithm of the focal length, a turn about the camera's own axes on top of the base, the centre,
    --  and the principal point (pixels): a camera's optical axis meets its picture a few pixels off the middle (the
    --  fake's eyes up to three, a webcam's more), and held at the middle the offset turned the eye by its angle and
-   --  moved its centre by that angle times its distance (seed 22, 10-20: 1.6 degrees and 17 mm).
-   Terms : constant := 9;
+   --  moved its centre by that angle times its distance (seed 22, 10-20: 1.6 degrees and 17 mm); and the logarithm of
+   --  the pixels' aspect (the focal length down over across): held square, the fake's eyes (aspects 0.9960 to 1.0007)
+   --  left seed 25's arms' joints 1.69 px from the true eye's places against a spread of 1.62 and the eye's terms 237
+   --  chi squares over 15 off the truth, seed 22's 832 (10-21).
+   Terms : constant := 10;
    type Parameters is array (1 .. Terms) of Real;
 
    type Problem is record
@@ -410,8 +413,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Twists : Twist_Grid_Access;     --  per pose, per joint
       Width, Height : Positive := 1;
       Joints : Natural := 0;
-      Cx, Cy : Real := 0.0;           --  the lens's principal point, and its focal length down over across
-      Aspect : Real := 1.0;
+      Cx, Cy : Real := 0.0;           --  where the fit starts the principal point, and the focal length down over
+      Aspect : Real := 1.0;           --  across (the terms carry them)
       --  A rate's spread: Additive times the sigma its pictures state, and Relative times the rate (what the pictures
       --  share beyond their noise: an edge's place in the pixels, the turn's reach past the linear), in quadrature.
       Additive : Real := 1.0;
@@ -422,15 +425,15 @@ package body Driver.Robot.Kinematics.Flow_Eye is
 
    function Unit_Of (P : Problem; J : Positive) return Real is (if P.Unit = null then 1.0 else P.Unit (J));
 
-   --  A pixel's line of sight in the camera's frame (its third coordinate one) at the focal length F, and its gradient
-   --  carried to that frame: the change of the picture there per unit of a point's motion over its depth.
+   --  A pixel's line of sight in the camera's frame (its third coordinate one) at the focal lengths F across and Fy
+   --  down, and its gradient carried to that frame: the change of the picture there per unit of a point's motion over
+   --  its depth.
    type Sighting is record
       Xn, Yn : Real;
       Gn     : Vec3;
    end record;
 
-   function Sight (P : Problem; F, Cx, Cy : Real; View : Pose_View; I : Positive) return Sighting is
-      Fy : constant Real := F * P.Aspect;
+   function Sight (F, Fy, Cx, Cy : Real; View : Pose_View; I : Positive) return Sighting is
       Xn : constant Real := (View.U (I) - Cx) / F;
       Yn : constant Real := (View.V (I) - Cy) / Fy;
    begin
@@ -451,7 +454,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       View : Pose_View renames P.Poses (V).all;
       F    : constant Real := Exp (X (1));
       Pose : constant Rigid := Pose_Of (Base, X);
-      Here : constant Sighting := Sight (P, F, X (8), X (9), View, I);
+      Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);
       Ray  : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);
       K    : constant Natural := View.Link (I);
       A, B, E, S : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];
@@ -587,16 +590,17 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  (Base the camera's turn): the depth's inverse eliminated as a projection (variable projection, Golub and
    --  Pereyra). With y the rates' misfit before the depth and a the depth's column, both over their sigmas, r = y + rho
    --  a for rho = -a.y / a.a, and dr = dy + rho da - a (da.y + a.dy + 2 rho a.da) / a.a. A joint's turn in the camera's
-   --  frame turns with the terms' turn e as w x e, the camera's centre in it moves as the frame's rows, and the focal
-   --  length scales the gradient across and down and the line of sight inversely. Written out, not through the vector
-   --  operators: the secondary stack they take was most of a fit's time (10-20, the arm's fit).
+   --  frame turns with the terms' turn e as w x e, the camera's centre in it moves as the frame's rows, the focal
+   --  length scales the gradient across and down and the line of sight inversely, and the aspect the same down alone
+   --  (dG2 = G2, dyn = -yn). Written out, not through the vector operators: the secondary stack they take was most of
+   --  a fit's time (10-20, the arm's fit).
    procedure Pixel_Jacobian
      (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; D : out Real_Matrix;
       D_Unit : out Real_Matrix; Count : out Natural; Ok : out Boolean)
    is
       View : Pose_View renames P.Poses (V).all;
       F    : constant Real := Exp (X (1));
-      Fy   : constant Real := F * P.Aspect;
+      Fy   : constant Real := F * Exp (X (10));
       Du   : constant Real := View.U (I) - X (8);
       Dv   : constant Real := View.V (I) - X (9);
       Xn   : constant Real := Du / F;
@@ -635,6 +639,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                --  The principal point moves the gradient's third coordinate by the gradient (G3 = -g . (u - c)).
                DA (J, 8) := C * Gu * W3;
                DA (J, 9) := C * Gv * W3;
+               DA (J, 10) := C * G2 * W2;
             else
                declare
                   Q1 : constant Real := X (5) - T.P (1);
@@ -663,6 +668,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   DA (J, 9) := C * Gv * A3;
                   DB (J, 8) := C * (Gu * B3 + (G3 * W2 - G2 * W3) / F);
                   DB (J, 9) := C * (Gv * B3 + (G1 * W3 - G3 * W1) / Fy);
+                  --  The aspect: G2 and yn scale, w x dm = (w3 yn, 0, -w1 yn) for dm = (0, -yn, 0).
+                  DA (J, 10) := C * G2 * A2;
+                  DB (J, 10) := C * (G2 * B2 + Yn * (G1 * W3 - G3 * W1));
                   for E in 1 .. 3 loop
                      declare
                         --  dw = w x e, du = u x e.
@@ -924,7 +932,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Away : constant Real := (if Pixel_Spread > 0.0 then F * Arm_Spread / Pixel_Spread else Arm_Spread);
       Last : Real := Real'Last;
    begin
-      X := [Ln_F, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, P.Cx, P.Cy];
+      X := [Ln_F, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, P.Cx, P.Cy, Ada.Numerics.Long_Elementary_Functions.Log (P.Aspect)];
       declare
          Centre : constant Vec3 := Minus (Middle, Scaled (Away, Times (Base, Vec3'[0.0, 0.0, 1.0])));
       begin
@@ -954,7 +962,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   Rho := Real'Max (0.0, Rho);
                   if Ok then
                      declare
-                        Here : constant Sighting := Sight (P, F, X (8), X (9), View, I);
+                        Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), View, I);
                         Ray  : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);
                      begin
                         for J in 1 .. Count loop
@@ -1112,7 +1120,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Turn : constant Vec3 := Driver.Numerics.Log (Times (Transposed (Ra), Rb));
       D    : constant Real_Vector (1 .. Terms) :=
         [B.X (1) - A.X (1), Turn (1), Turn (2), Turn (3), B.X (5) - A.X (5), B.X (6) - A.X (6), B.X (7) - A.X (7),
-         B.X (8) - A.X (8), B.X (9) - A.X (9)];
+         B.X (8) - A.X (8), B.X (9) - A.X (9), B.X (10) - A.X (10)];
    begin
       if A.Score = Real'Last or else A.Score <= 0.0 then
          return Real'Last;
@@ -1483,9 +1491,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    ---------------------------------------------------------------------------
    --  The fit of every arm the eye watched, through its one lens
 
-   --  The fit's terms: the logarithm of the focal length and the principal point, the lens every arm is seen through,
-   --  then each arm's turn about the camera's own axes and centre. An arm's own nine (Parameters) are these, taken out.
-   Lens_Count : constant := 3;
+   --  The fit's terms: the logarithm of the focal length, the principal point and the logarithm of the aspect, the lens
+   --  every arm is seen through, then each arm's turn about the camera's own axes and centre. An arm's own ten
+   --  (Parameters) are these, taken out.
+   Lens_Count : constant := 4;
    Arm_Count_Terms : constant := 6;
 
    function Global_Count (Arms : Positive) return Positive is (Lens_Count + Arm_Count_Terms * Arms);
@@ -1495,7 +1504,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    function Local (X : Real_Array; A : Positive) return Parameters is
      ([X (X'First), X (X'First + Offset (A)), X (X'First + Offset (A) + 1), X (X'First + Offset (A) + 2),
        X (X'First + Offset (A) + 3), X (X'First + Offset (A) + 4), X (X'First + Offset (A) + 5),
-       X (X'First + 1), X (X'First + 2)]);
+       X (X'First + 1), X (X'First + 2), X (X'First + 3)]);
 
    --  The place in the fit's terms of an arm's own term T.
    function Global_Of (A : Positive; T : Positive) return Positive is
@@ -1503,6 +1512,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          when 1      => 1,
          when 8      => 2,
          when 9      => 3,
+         when 10     => 4,
          when others => Offset (A) + T - 1);
 
    type Arm_State is record
@@ -2085,6 +2095,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                X (1) := Own (1);
                X (2) := Own (8);
                X (3) := Own (9);
+               X (4) := Own (10);
             end if;
          end;
          Result.Additive := Real'Max (Result.Additive, S (A).P.Additive);
@@ -2155,7 +2166,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       end loop;
       Result.Used := Kept_All;
       Result.Scatter := Scatter;
-      Result.Lens := (Fx => Exp (X (1)), Fy => Exp (X (1)), Cx => X (2), Cy => X (3), K1 | K2 => 0.0);
+      Result.Lens := (Fx => Exp (X (1)), Fy => Exp (X (1) + X (4)), Cx => X (2), Cy => X (3), K1 | K2 => 0.0);
       for A in S'Range loop
          Result.Poses (A) := Pose_Of (S (A).Base, Local (X, A));
       end loop;
@@ -2256,6 +2267,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Theta (N_Out) (1) := X_V (1) - X (1);
                      Theta (N_Out) (2) := X_V (2) - X (2);
                      Theta (N_Out) (3) := X_V (3) - X (3);
+                     Theta (N_Out) (4) := X_V (4) - X (4);
                      for B in S'Range loop
                         declare
                            Turn : constant Vec3 :=
@@ -2322,7 +2334,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                            declare
                               Pose  : constant Rigid := Pose_Of (S (A).Base, XA);
                               F     : constant Real := Exp (XA (1));
-                              Here  : constant Sighting := Sight (S (A).P, F, XA (8), XA (9), View, I);
+                              Here  : constant Sighting := Sight (F, F * Exp (XA (10)), XA (8), XA (9), View, I);
                               Point : constant Vec3 :=
                                 Plus (Pose.Translation,
                                       Scaled (1.0 / Rho, Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0])));
@@ -2331,15 +2343,15 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                               for T in 1 .. Terms loop
                                  declare
                                     H : constant Real :=
-                                      (if T <= 4 then Eps3 else Eps3 * Real'Max (S (A).Spread_Of_Arm, abs XA (T)));
+                                      (if T <= 4 or else T = 10 then Eps3
+                                       else Eps3 * Real'Max (S (A).Spread_Of_Arm, abs XA (T)));
                                     function Project (Y : Parameters) return Vec3 is
                                        Pp : constant Rigid := Pose_Of (S (A).Base, Y);
                                        C  : constant Vec3 :=
                                          Transposed_Times (Pp.Rotation, Minus (Point, Pp.Translation));
                                        Fl : constant Real := Exp (Y (1));
                                     begin
-                                       return [Fl * C (1) / C (3) + Y (8), Fl * S (A).P.Aspect * C (2) / C (3) + Y (9),
-                                               0.0];
+                                       return [Fl * C (1) / C (3) + Y (8), Fl * Exp (Y (10)) * C (2) / C (3) + Y (9), 0.0];
                                     end Project;
                                     Up, Down : Parameters := XA;
                                  begin
@@ -2448,10 +2460,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          else Worlds (Worlds'First + A - 1).Pictures'Length);
 
       --  The terms are the fit's (Report.Covariance's order), as changes from the flow's: the focal length's logarithm,
-      --  the principal point, and each arm's turn about the camera's own axes and centre.
+      --  the principal point, the aspect's logarithm, and each arm's turn about the camera's own axes and centre.
       function Lens_Of (Z : Real_Vector) return Fit.Lens is
-        ((Fx => Lens0.Fx * Exp (Z (1)), Fy => Lens0.Fy * Exp (Z (1)), Cx => Lens0.Cx + Z (2), Cy => Lens0.Cy + Z (3),
-          K1 => Lens0.K1, K2 => Lens0.K2));
+        ((Fx => Lens0.Fx * Exp (Z (1)), Fy => Lens0.Fy * Exp (Z (1) + Z (4)), Cx => Lens0.Cx + Z (2),
+          Cy => Lens0.Cy + Z (3), K1 => Lens0.K1, K2 => Lens0.K2));
 
       function Pose_Of (Z : Real_Vector; A : Positive) return Rigid is
         ((Rotation    => Times (Poses0 (A).Rotation,
@@ -2553,7 +2565,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          P    : Problem := Flows (A);
          X    : constant Parameters :=
            [Ada.Numerics.Long_Elementary_Functions.Log (L.Fx), 0.0, 0.0, 0.0,
-            Pz.Translation (1), Pz.Translation (2), Pz.Translation (3), L.Cx, L.Cy];
+            Pz.Translation (1), Pz.Translation (2), Pz.Translation (3), L.Cx, L.Cy,
+            Ada.Numerics.Long_Elementary_Functions.Log (L.Fy / L.Fx)];
          Seen : Flag_Access := new Flag_Array (1 .. Layouts (A).Pixels_All);
       begin
          P.Cx := L.Cx;
@@ -4094,6 +4107,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                         end loop;
                         return "per arm" & To_String (Text) & " of" & Natural'Image (Cells_U * Cells_V);
                      end Per_Arm;
+                     --  The first arm's own terms' variances: its turn's (1 to 3) and its centre's (4 to 6).
+                     function Arm_1 (K : Positive) return Real is (Cov (Offset (1) + K, Offset (1) + K));
                   begin
                   Driver.Log.Line (Driver.Log.Robot, "flow eye: the world's points, round" & Rounds'Image & ":"
                                    & Sights'Length'Image & " asked," & Got'Image & " found," & Kept_All'Image
@@ -4113,11 +4128,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                       then "; sigmas: focal " & Driver.Log.Image (100.0 * Sqrt (Cov (1, 1)), 2)
                                            & " %, principal"
                                            & " point " & Driver.Log.Image (Sqrt (Cov (2, 2)), 2) & " "
-                                           & Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & " px, arm 1 centre "
-                                           & Driver.Log.Image (1000.0 * Sqrt (Cov (7, 7) + Cov (8, 8) + Cov (9, 9)), 1)
+                                           & Driver.Log.Image (Sqrt (Cov (3, 3)), 2) & " px, aspect "
+                                           & Driver.Log.Image (100.0 * Sqrt (Cov (4, 4)), 2) & " %, arm 1 centre "
+                                           & Driver.Log.Image (1000.0 * Sqrt (Arm_1 (4) + Arm_1 (5) + Arm_1 (6)), 1)
                                            & " mm, turn "
                                            & Driver.Log.Image (180.0 / Ada.Numerics.Pi
-                                                               * Sqrt (Cov (4, 4) + Cov (5, 5) + Cov (6, 6)), 2)
+                                                               * Sqrt (Arm_1 (1) + Arm_1 (2) + Arm_1 (3)), 2)
                                            & " deg"
                                       else ""));
                   end;
@@ -4208,7 +4224,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       declare
          X    : constant Parameters :=
            [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
-            Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy];
+            Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
+            Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fy / Lens.Fx)];
          Kept : constant Flag_Array (1 .. L.Pixels_All) := [others => True];
          R    : Real_Access := new Real_Array (1 .. L.Rows);
          Seen : Flag_Access := new Flag_Array (1 .. L.Pixels_All);
@@ -4307,7 +4324,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       declare
          X    : constant Parameters :=
            [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
-            Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy];
+            Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
+            Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fy / Lens.Fx)];
          Kept : constant Flag_Array (1 .. L.Pixels_All) := [others => True];
          R    : Real_Access := new Real_Array (1 .. L.Rows);
          Seen : Flag_Access := new Flag_Array (1 .. L.Pixels_All);
@@ -4337,7 +4355,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       L    : Layout_Access;
       X    : constant Parameters :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
-         Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy];
+         Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
+         Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fy / Lens.Fx)];
    begin
       P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
       for V in Poses'Range loop

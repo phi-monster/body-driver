@@ -85,8 +85,8 @@ package Driver.Robot.Kinematics.Flow_Eye is
    type Arm_Flow_Array is array (Positive range <>) of Arm_Flow;
    type Rigid_Array is array (Positive range <>) of Driver.Numerics.Rigid;
 
-   --  The fit's terms for so many arms: the lens's three and each arm's six.
-   function Terms_For (Arms : Positive) return Positive is (3 + 6 * Arms);
+   --  The fit's terms for so many arms: the lens's four and each arm's six.
+   function Terms_For (Arms : Positive) return Positive is (4 + 6 * Arms);
 
    type Report (Arms, Count : Positive) is record
       Determined : Boolean := False;
@@ -94,8 +94,8 @@ package Driver.Robot.Kinematics.Flow_Eye is
       Lens       : Fit.Lens;
       --  The camera's frame in each arm's reference frame.
       Poses      : Rigid_Array (1 .. Arms) := [others => Driver.Numerics.Identity];
-      --  Of the logarithm of the focal length and the principal point, then of each arm's turn about the camera's own
-      --  axes and centre, in that order.
+      --  Of the logarithm of the focal length, the principal point and the logarithm of the aspect (the focal length
+      --  down over across), then of each arm's turn about the camera's own axes and centre, in that order.
       Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count) := [others => [others => 0.0]];
       Scatter    : Real := 1.0;    --  the residuals' spread over the sigmas the pictures state, never below one
       Used       : Natural := 0;   --  the pixels kept
@@ -190,14 +190,14 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  What the model leaves at a given eye (a pinhole of that lens at that pose): the residuals' root mean square over
    --  their sigmas (every pixel's depth eliminated), and how many of the pixels that two joints or more move it puts in
    --  front of the eye. For a fit studied against the truth (tools/driver-robot-flow_bench). Joints: the arm's joints
-   --  along its chain from the base, as its fit has them (its reference frame and its unit). The lens is a pinhole: one
-   --  focal length, its principal point fitted from the picture's middle. The start is a race over the camera's turns
-   --  and focal lengths, run at counts of turns that double until it finds one optimum twice (Search); the optimum is
-   --  refined on every pixel, every pixel's depth eliminated at each step, the rates' spread found (a share of their
-   --  sigmas and of themselves), the pixels off by more than the gate left out until none is, and the covariance
-   --  widened by the eye's spread over the poses (the jackknife). Determined when the search found its optimum, the
-   --  covariance is positive definite and Z times Spread is less than the half patch the aligner follows
-   --  (Driver.Alignment.Half_Patch).
+   --  along its chain from the base, as its fit has them (its reference frame and its unit). The lens has no
+   --  distortion: its focal lengths across and down and its principal point, fitted from one focal length (square
+   --  pixels) and the picture's middle. The start is a race over the camera's turns and focal lengths, run at counts of
+   --  turns that double until it finds one optimum twice (Search); the optimum is refined on every pixel, every pixel's
+   --  depth eliminated at each step, the rates' spread found (a share of their sigmas and of themselves), the pixels
+   --  off by more than the gate left out until none is, and the covariance widened by the eye's spread over the poses
+   --  (the jackknife). Determined when the search found its optimum, the covariance is positive definite and Z times
+   --  Spread is less than the half patch the aligner follows (Driver.Alignment.Half_Patch).
 
    function Residuals_At
      (Poses         : Pose_Array;
