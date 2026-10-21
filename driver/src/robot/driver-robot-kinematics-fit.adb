@@ -5388,7 +5388,11 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                end Evaluate_Column;
 
-               procedure Solve is new Robust_Fit (Count, 2 * S, Driver.Conventions.Initial_Damping, Evaluate,
+               --  Undamped from the first step, as Refine_Tracks begins (a damping of the float's epsilon): every
+               --  order begins at the joints of the keyframes of one joint each, beside its own fit, with no valley
+               --  to cross; begun at a damping of one, the order search's fits took 21 normal equations each on the
+               --  bench's nine-joint humanoid s2_1 and 15 undamped (10-21: 1365 against 978 its first round).
+               procedure Solve is new Robust_Fit (Count, 2 * S, Real'Model_Epsilon, Evaluate,
                                                   At_Once => True, To_The_End => True,
                                                   Evaluate_Column => Evaluate_Column, Column_Aware => True);
                V0 : Real_Array (1 .. Count) := [others => 0.0];
@@ -5822,6 +5826,8 @@ package body Driver.Robot.Kinematics.Fit is
             Close      : Order_Table_Access := new Order_Table (1 .. Neighbours);
             Close_M    : Real_Access := new Real_Array (1 .. Neighbours);   --  each one's cheap score
             Close_Fit  : Fit_Table_Access := new Fit_Table (1 .. Neighbours);
+            --  Per order weighed: told from the order kept by the fit begun from, and so not fitted again.
+            Skipped    : array (1 .. Neighbours) of Boolean := [others => False];
             Closes     : Natural := 0;
             Passes     : Natural := 0;
             Adequate   : Boolean := True;
@@ -5946,6 +5952,31 @@ package body Driver.Robot.Kinematics.Fit is
                         Close_M (P + 1) := M;
                      end;
                   end loop;
+                  --  The orders one move away that the fit begun from told from this same order stay told while it is
+                  --  kept and explains the keyframes of several joints as it does those of one: only the untold among
+                  --  them are weighed again, with the cheap score's least. An arm of ten joints weighed its 82 orders
+                  --  one move away in their own fits every round, 34 to 92 s of each with 6 of them untold (the step 2
+                  --  bench's base s2_2, 10-21).
+                  Skipped := [others => False];
+                  if From.Valid and then From.N = N and then not From.Fixed and then Here.Order = From.Chain
+                    and then Adequate and then (From.Order_Told or else not From.Untold_Orders.Is_Empty)
+                  then
+                     for K in 1 .. Closes loop
+                        if Close (K) /= G then
+                           declare
+                              Untold : Boolean := False;
+                           begin
+                              for W in 0 .. Natural (From.Untold_Orders.Length) / N - 1 loop
+                                 Untold := Untold or else
+                                   (for all P in 1 .. N =>
+                                      From.Untold_Orders (From.Untold_Orders.First_Index + W * N + P - 1)
+                                      = Close (K) (P));
+                              end loop;
+                              Skipped (K) := not Untold;
+                           end;
+                        end if;
+                     end loop;
+                  end if;
                   Fitted_Now := 0;
                   --  An order's own fit is judged where the orders differ: the median residual of the sightings of the
                   --  keyframes of several joints (Cheap with its own joints, lens and depths). Every order explains
@@ -5968,7 +5999,11 @@ package body Driver.Robot.Kinematics.Fit is
                              (if First = 1 then Natural'Min (Closes, Driver.Workers.Size) else Closes);
                            procedure One (K : Positive) is
                            begin
-                              Quick_Fit (Close (K), Unordered, Close_Fit (K));
+                              if Skipped (K) then
+                                 Close_Fit (K).Report.All_Count := 0;
+                              else
+                                 Quick_Fit (Close (K), Unordered, Close_Fit (K));
+                              end if;
                            end One;
                            procedure Every_One is new Driver.Parallel_For (One);
                         begin
@@ -6137,79 +6172,82 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                end loop;
                for K in 1 .. Closes loop
-                  Predict (Close_Fit (K), Close (K), Cu.all, Cv.all);
-                  if not Told_Over (Hu.all, Hv.all, Cu.all, Cv.all) then
-                     --  Untold: the most telling move of the pairs it swaps, by the separation's size over the error
-                     --  of its median, among the moves the aligner follows; none that tells it by Z, the same arm.
-                     declare
-                        Pos       : array (1 .. N) of Natural := [others => 0];
-                        Best_Mv   : Move;
-                        Best_Pow  : Real := 0.0;
-                     begin
-                        for P in 1 .. N loop
-                           Pos (Close (K) (P)) := P;
-                        end loop;
-                        for Ia in 1 .. N loop
-                           for Ib in Ia + 1 .. N loop
-                              declare
-                                 X : constant Positive := Here.Order (Ia);
-                                 Y : constant Positive := Here.Order (Ib);
-                                 Share : Real := 1.0;
-                              begin
-                                 if Pos (Y) < Pos (X) then
-                                    loop
-                                       for Si of Real_Array'[1.0, -1.0] loop
-                                          for Sj of Real_Array'[1.0, -1.0] loop
-                                             declare
-                                                Mv : constant Move := (I => X, J => Y, Si => Si, Sj => Sj,
-                                                                       Share => Share);
-                                                D, Far : Real;
-                                                Cnt    : Natural;
-                                             begin
-                                                Separation (Close (K), Mv, D, Far, Cnt);
-                                                if Cnt > 0 and then Far <= Followable then
-                                                   declare
-                                                      Power : constant Real :=
-                                                        D / Driver.Stats.Median_Sigma (Scatter, Cnt);
-                                                   begin
-                                                      if Power > Best_Pow then
-                                                         Best_Pow := Power;
-                                                         Best_Mv := Mv;
-                                                      end if;
-                                                   end;
-                                                end if;
-                                             end;
-                                          end loop;
-                                       end loop;
-                                       Share := Share / 2.0;
-                                       exit when Visible (Visible'First + X - 1) <= 0.0
-                                         or else Visible (Visible'First + Y - 1) <= 0.0
-                                         or else Share * Reach (X) < Visible (Visible'First + X - 1)
-                                         or else Share * Reach (Y) < Visible (Visible'First + Y - 1);
-                                    end loop;
-                                 end if;
-                              end;
+                  --  An order the fit begun from told stays told (Skipped): not fitted again, nothing to weigh.
+                  if not Skipped (K) then
+                     Predict (Close_Fit (K), Close (K), Cu.all, Cv.all);
+                     if not Told_Over (Hu.all, Hv.all, Cu.all, Cv.all) then
+                        --  Untold: the most telling move of the pairs it swaps, by the separation's size over the error
+                        --  of its median, among the moves the aligner follows; none that tells it by Z, the same arm.
+                        declare
+                           Pos       : array (1 .. N) of Natural := [others => 0];
+                           Best_Mv   : Move;
+                           Best_Pow  : Real := 0.0;
+                        begin
+                           for P in 1 .. N loop
+                              Pos (Close (K) (P)) := P;
                            end loop;
-                        end loop;
-                        if Best_Pow > Driver.Conventions.Z then
-                           Untold_Of (K) := True;
-                           Untold_Here := Untold_Here + 1;
-                           Move_Of (K) := Best_Mv;
-                           Pow_Of (K) := Best_Pow;
-                           Telling_Of (K) := Judge (Hu.all, Hv.all, Cu.all, Cv.all, 0).Telling;
-                           Ada.Strings.Unbounded.Append
-                             (Said, " [" & Image (Close (K)) & ", not told on "
-                                    & Why_Not_Told (Hu.all, Hv.all, Cu.all, Cv.all)
-                                    & "; c" & Ada.Strings.Fixed.Trim (Best_Mv.I'Image,
-                                                                                           Ada.Strings.Left)
-                                    & " with c" & Ada.Strings.Fixed.Trim (Best_Mv.J'Image, Ada.Strings.Left)
-                                    & " tells it by " & Driver.Log.Image (Best_Pow, 1) & " of its error]");
-                        else
-                           Same_Arm := Same_Arm + 1;
-                           Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
-                                                         & " followed tells it by Z)");
-                        end if;
-                     end;
+                           for Ia in 1 .. N loop
+                              for Ib in Ia + 1 .. N loop
+                                 declare
+                                    X : constant Positive := Here.Order (Ia);
+                                    Y : constant Positive := Here.Order (Ib);
+                                    Share : Real := 1.0;
+                                 begin
+                                    if Pos (Y) < Pos (X) then
+                                       loop
+                                          for Si of Real_Array'[1.0, -1.0] loop
+                                             for Sj of Real_Array'[1.0, -1.0] loop
+                                                declare
+                                                   Mv : constant Move := (I => X, J => Y, Si => Si, Sj => Sj,
+                                                                          Share => Share);
+                                                   D, Far : Real;
+                                                   Cnt    : Natural;
+                                                begin
+                                                   Separation (Close (K), Mv, D, Far, Cnt);
+                                                   if Cnt > 0 and then Far <= Followable then
+                                                      declare
+                                                         Power : constant Real :=
+                                                           D / Driver.Stats.Median_Sigma (Scatter, Cnt);
+                                                      begin
+                                                         if Power > Best_Pow then
+                                                            Best_Pow := Power;
+                                                            Best_Mv := Mv;
+                                                         end if;
+                                                      end;
+                                                   end if;
+                                                end;
+                                             end loop;
+                                          end loop;
+                                          Share := Share / 2.0;
+                                          exit when Visible (Visible'First + X - 1) <= 0.0
+                                            or else Visible (Visible'First + Y - 1) <= 0.0
+                                            or else Share * Reach (X) < Visible (Visible'First + X - 1)
+                                            or else Share * Reach (Y) < Visible (Visible'First + Y - 1);
+                                       end loop;
+                                    end if;
+                                 end;
+                              end loop;
+                           end loop;
+                           if Best_Pow > Driver.Conventions.Z then
+                              Untold_Of (K) := True;
+                              Untold_Here := Untold_Here + 1;
+                              Move_Of (K) := Best_Mv;
+                              Pow_Of (K) := Best_Pow;
+                              Telling_Of (K) := Judge (Hu.all, Hv.all, Cu.all, Cv.all, 0).Telling;
+                              Ada.Strings.Unbounded.Append
+                                (Said, " [" & Image (Close (K)) & ", not told on "
+                                       & Why_Not_Told (Hu.all, Hv.all, Cu.all, Cv.all)
+                                       & "; c" & Ada.Strings.Fixed.Trim (Best_Mv.I'Image,
+                                                                                              Ada.Strings.Left)
+                                       & " with c" & Ada.Strings.Fixed.Trim (Best_Mv.J'Image, Ada.Strings.Left)
+                                       & " tells it by " & Driver.Log.Image (Best_Pow, 1) & " of its error]");
+                           else
+                              Same_Arm := Same_Arm + 1;
+                              Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
+                                                            & " followed tells it by Z)");
+                           end if;
+                        end;
+                     end if;
                   end if;
                end loop;
                --  Weighed again with every term refined in each order, its depths too (Refine_Tracks on every

@@ -2516,6 +2516,9 @@ package body Driver.Robot.Kinematics is
                         Start.Searched_Most := R.Result.Searched_Most;
                         Start.Profiled_Over := R.Result.Profiled_Over;
                         Start.Order_Told := R.Result.Order_Told;
+                        for P of R.Result.Untold_Orders loop
+                           Start.Untold_Orders.Append (P);
+                        end loop;
                         if Natural (R.Result.Slide_Turns.Length) = 3 * N then
                            for J in 1 .. N loop
                               for A in 1 .. 3 loop
@@ -2646,6 +2649,19 @@ package body Driver.Robot.Kinematics is
                                  Start_R.Whole := Start.Whole;
                                  Start_R.Profiled_Over := Start.Profiled_Over;
                                  Start_R.Order_Told := Start.Order_Told;
+                                 --  Each untold order as the reduced chain has it: its turned joints' places, in order.
+                                 for W in 0 .. Natural (Start.Untold_Orders.Length) / N - 1 loop
+                                    for J in 1 .. N loop
+                                       declare
+                                          C : constant Positive :=
+                                            Start.Untold_Orders (Start.Untold_Orders.First_Index + W * N + J - 1);
+                                       begin
+                                          if Into (C) > 0 then
+                                             Start_R.Untold_Orders.Append (Into (C));
+                                          end if;
+                                       end;
+                                    end loop;
+                                 end loop;
                               end if;
                               Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " holds"
                                                & Ada.Strings.Unbounded.To_String (Held) & " at the reference: no keyframe"

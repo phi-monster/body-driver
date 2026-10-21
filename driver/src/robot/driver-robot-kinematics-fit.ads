@@ -355,6 +355,9 @@ package Driver.Robot.Kinematics.Fit is
       Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
       Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
       Slide_Turns    : Vec3_Array (1 .. N) := [others => [0.0, 0.0, 0.0]];   --  per joint (Fit_Report)
+      Untold_Orders  : Joint_Lists.Vector;
+      --  The orders its search left untold beside its order (Fit_Report.Untold_Orders, each N joints long): an order
+      --  one move from that order and not among them was told from it, and stays told while it is kept.
       Fixed          : Boolean := False;
       --  Its order is kept as given (Chain, whether Valid or not: a first fit of a given order runs every stage but
       --  the search), searched for no other and not said to be told: the fit of one order of the joints, every term

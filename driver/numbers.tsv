@@ -2595,7 +2595,7 @@ driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (2, 2 * M, Dri
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (2, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	2	structure	two residuals a sighting, one along each image axis
 driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (4, 2 * M, Driver.Conventions.Initial_Damping, Evaluate);	4	structure	the four terms the refinement moves: two of the axis, the point's angle, the scale's logarithm
-driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (Count, 2 * S, Driver.Conventions.Initial_Damping, Evaluate,	2	structure	two residuals a sighting, across and down
+driver-robot-kinematics-fit.adb	procedure Solve is new Robust_Fit (Count, 2 * S, Real'Model_Epsilon, Evaluate,	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	return (Floor => 0.0, Gain => 1.0);	1.0	structure	no residuals to read: no floor, and what is stated taken as stated
 driver-robot-kinematics-fit.adb	return (Floor => Noise_Of (R), Gain => 1.0);	1.0	structure	nothing stated: the gain scales nothing, the floor is the noise shown
 driver-robot-kinematics-fit.adb	return (case Half is when 0 => "", when 1 => "",	1	structure	the keyframes by halves: every one (0), the odd (1), the even (2)

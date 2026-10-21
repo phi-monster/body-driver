@@ -627,6 +627,7 @@ procedure Driver.Robot.Step2_Bench is
                      Start.Searched_Most := Prev.Searched_Most;
                      Start.Profiled_Over := Prev.Profiled_Over;
                      Start.Order_Told := Prev.Order_Told;
+                     Start.Untold_Orders := Prev.Untold_Orders;
                      Start.Slide_Turns := Fit.Slide_Turns_Of (Prev, N);
                      Start.Whole := True;
                   end if;
@@ -809,6 +810,20 @@ procedure Driver.Robot.Step2_Bench is
                                & True_J (C).W (1)'Image & True_J (C).W (2)'Image & True_J (C).W (3)'Image & ", near"
                                & True_J (C).P (1)'Image & True_J (C).P (2)'Image & True_J (C).P (3)'Image & ", unit"
                                & True_J (C).C'Image);
+                  end loop;
+                  --  The fit's joints against the true ones, as far as the fit's free scale lets them be set beside
+                  --  each other: each axis's angle off the true one, and its unit over the true unit (by the sign of
+                  --  the axis's).
+                  for C in 1 .. N loop
+                     declare
+                        Fj : Fit.Joint renames Prev_Joints (C);
+                        Dw : constant Real :=
+                          Fj.W (1) * True_J (C).W (1) + Fj.W (2) * True_J (C).W (2) + Fj.W (3) * True_J (C).W (3);
+                     begin
+                        Put_Line ("    fit joint c" & C'Image & ": axis off"
+                                  & Real'Image (57.29577951308232 * EF.Arccos (Real'Min (1.0, abs Dw))) & " deg, unit"
+                                  & Real'Image ((if Dw < 0.0 then -Fj.C else Fj.C) / True_J (C).C) & " of the truth's");
+                     end;
                   end loop;
                   for Kp in Prev.Untold.First_Index .. Prev.Untold.Last_Index loop
                      declare
