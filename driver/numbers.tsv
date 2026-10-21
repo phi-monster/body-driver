@@ -2200,7 +2200,8 @@ driver-robot-kinematics-fit.adb	Entries : constant := 9;	9	structure	the entries
 driver-robot-kinematics-fit.adb	Equal (P) := (if Ar (P, P) > 0.0 then 1.0 / Sqrt (Ar (P, P)) else 0.0);	1.0	math	a term in units of the standard error it would have were the others known: the inverse root of its diagonal entry
 driver-robot-kinematics-fit.adb	Every : Real := 1.0;	1.0	math	the whole, before it is halved
 driver-robot-kinematics-fit.adb	Every_Frame (1, Frames);	1	structure	the keyframes from the first
-driver-robot-kinematics-fit.adb	Every_Piece (1, Pieces);	1	structure	the pieces from the first
+driver-robot-kinematics-fit.adb	Every_Joint (1, N);	1	structure	the joints from the first
+driver-robot-kinematics-fit.adb	Every_Piece (1, N * Pieces);	1	structure	every joint's pieces from the first
 driver-robot-kinematics-fit.adb	Eye_At (Jp (C (K) .. C (K)), [1], [Ch (Ch'First + C (K) - 1)]);	1	structure	one joint's own step: its slice's first and only place
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
@@ -2250,7 +2251,6 @@ driver-robot-kinematics-fit.adb	I, J : Positive := 1;	1	structure	a record's fir
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	1.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	2.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	5.0	math	the golden angle and the golden ratio
-driver-robot-kinematics-fit.adb	J : Positive := 1;	1	structure	indexes start at one
 driver-robot-kinematics-fit.adb	Jd (I) := (Rn (I) - R0 (I)) / (H * Real'Max (1.0, abs Depth (T)));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Jd : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));	6	structure	the positions of the parameters in the vector: the lens (6), then per joint its six

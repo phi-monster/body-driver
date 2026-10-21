@@ -4416,101 +4416,89 @@ package body Driver.Robot.Kinematics.Fit is
             Tried_Ln, Tried_Total, Tried_Error : Real_Lists.Vector;   --  every focal length tried (its logarithm), its score and the score's error
 
             procedure Search (F : Real; Best : out Best_Array) is
+               --  The axis of every joint: the direction about which the widest keyframes are each most nearly a turn
+               --  and a shift across it, their turns free; then its scale, and its side at that scale. The directions
+               --  in as many pieces a joint as the workers take at once, every joint's pieces walked at once on the
+               --  workers, each piece in order to its own first least, then each joint's first piece's of the least of
+               --  those: the walk's own result to the bit, whatever the pieces (a direction left without its median has
+               --  fewer than half its residuals below the best before it, and is never the first of the least). One
+               --  joint a task, each walking every direction, kept the workers idle two thirds of the search (table
+               --  seed 1 of the step 2 bench, 10-21: 7 of its first round's 10 s, six joints for ten workers); a task a
+               --  joint walking its pieces on the workers made the AddressSanitizer report a read of the task's frame in
+               --  Refine (38 self tests, 10-21). Then each joint's side and scale (Best_Phi) and its refinement on every
+               --  sighting (Refine), the joints at once.
+               Pieces   : constant Positive := Driver.Workers.Size;
+               Walked   : constant Positive := Directions / 2;
+               type Piece_Grid is array (1 .. N, 1 .. Pieces) of Best_Record;
+               type Piece_Grid_Access is access Piece_Grid;
+               procedure Free is new Ada.Unchecked_Deallocation (Piece_Grid, Piece_Grid_Access);
+               Of_Piece : Piece_Grid_Access := new Piece_Grid;
+               procedure Piece (Q : Positive) is
+                  J    : constant Positive := (Q - 1) / Pieces + 1;
+                  P    : constant Positive := (Q - 1) mod Pieces + 1;
+                  K    : constant Natural := Lines (J)'Length;
+                  Wp   : Real_Access := new Real_Array (1 .. K);
+                  Rp   : Real_Access := new Real_Array (1 .. K);
+                  Fp   : Real_Access := new Real_Array (1 .. K);
+                  Mine : Best_Record;
+               begin
+                  for I in (P - 1) * Walked / Pieces + 1 .. P * Walked / Pieces loop
+                     declare
+                        Sc, Sd : Real;
+                     begin
+                        Planar_About (J, F, Sphere (I), Wp.all, Rp.all, Fp.all, Mine.Score, Sc, Sd);
+                        if Sc /= 0.0 and then Sd < Mine.Score then
+                           Mine := (Score => Sd, W => Sphere (I), Phi => 0.0, Scale => Sc);
+                        end if;
+                     end;
+                  end loop;
+                  Of_Piece (J, P) := Mine;
+                  Free (Wp);
+                  Free (Rp);
+                  Free (Fp);
+               end Piece;
+               procedure Every_Piece is new Driver.Parallel_For (Piece);
+               procedure Settle (J : Positive) is
+                  K      : constant Natural := Lines (J)'Length;
+                  Ga     : Real_Access := new Real_Array (1 .. K);
+                  Gb     : Real_Access := new Real_Array (1 .. K);
+                  Wt     : Real_Access := new Real_Array (1 .. K);
+                  Rs     : Real_Access := new Real_Array (1 .. K);
+                  Result : Best_Record;
+               begin
+                  for P in 1 .. Pieces loop
+                     if Of_Piece (J, P).Scale /= 0.0 and then Of_Piece (J, P).Score < Result.Score then
+                        Result := Of_Piece (J, P);
+                     end if;
+                  end loop;
+                  if Result.Scale /= 0.0 then
+                     declare
+                        Ph, Md : Real;
+                     begin
+                        Best_Phi (J, F, Result.W, Result.Scale, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
+                        Result.Phi := Ph;
+                        Result.Score := Md;
+                     end;
+                  end if;
+                  --  The grid's best direction refined by least squares on every sighting (Refine).
+                  if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
+                     Refine (J, F, Result);
+                  end if;
+                  Free (Ga);
+                  Free (Gb);
+                  Free (Wt);
+                  Free (Rs);
+                  Best (J) := Result;
+               end Settle;
+               procedure Every_Joint is new Driver.Parallel_For (Settle);
             begin
                Searches := Searches + 1;
                F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));
                F_Most := Real'Max (F_Most, F);
                Prepare (F);
-               declare
-                  task type Scanner is
-                     entry Start (Joint : Positive);
-                  end Scanner;
-
-                  task body Scanner is
-                     J      : Positive := 1;
-                     Result : Best_Record;
-                  begin
-                     accept Start (Joint : Positive) do
-                        J := Joint;
-                     end Start;
-                     declare
-                        K  : constant Natural := Lines (J)'Length;
-                        Ga : Real_Access := new Real_Array (1 .. K);
-                        Gb : Real_Access := new Real_Array (1 .. K);
-                        Wt : Real_Access := new Real_Array (1 .. K);
-                        Rs : Real_Access := new Real_Array (1 .. K);
-                        Fs : Real_Access := new Real_Array (1 .. K);
-                     begin
-                        --  The axis: the direction about which the widest keyframes are each most nearly a turn and a
-                        --  shift across it, their turns free; then its scale, and its side at that scale.
-                        --  The directions in as many pieces as the workers take at once, each piece walked in order to
-                        --  its own first least, then the first piece's of the least of those: the walk's own result to
-                        --  the bit, whatever the pieces (a direction left without its median has fewer than half its
-                        --  residuals below the best before it, and is never the first of the least). One joint a task,
-                        --  each walking every direction, kept the workers idle two thirds of the search (table seed 1
-                        --  of the step 2 bench, 10-21: 7 of its first round's 10 s, six joints for ten workers).
-                        declare
-                           Pieces  : constant Positive := Driver.Workers.Size;
-                           Walked  : constant Positive := Directions / 2;
-                           Of_Piece : array (1 .. Pieces) of Best_Record;
-                           procedure Piece (P : Positive) is
-                              Wp   : Real_Access := new Real_Array (1 .. K);
-                              Rp   : Real_Access := new Real_Array (1 .. K);
-                              Fp   : Real_Access := new Real_Array (1 .. K);
-                              Mine : Best_Record;
-                           begin
-                              for I in (P - 1) * Walked / Pieces + 1 .. P * Walked / Pieces loop
-                                 declare
-                                    Sc, Sd : Real;
-                                 begin
-                                    Planar_About (J, F, Sphere (I), Wp.all, Rp.all, Fp.all, Mine.Score, Sc, Sd);
-                                    if Sc /= 0.0 and then Sd < Mine.Score then
-                                       Mine := (Score => Sd, W => Sphere (I), Phi => 0.0, Scale => Sc);
-                                    end if;
-                                 end;
-                              end loop;
-                              Of_Piece (P) := Mine;
-                              Free (Wp);
-                              Free (Rp);
-                              Free (Fp);
-                           end Piece;
-                           procedure Every_Piece is new Driver.Parallel_For (Piece);
-                        begin
-                           Every_Piece (1, Pieces);
-                           for P in 1 .. Pieces loop
-                              if Of_Piece (P).Scale /= 0.0 and then Of_Piece (P).Score < Result.Score then
-                                 Result := Of_Piece (P);
-                              end if;
-                           end loop;
-                        end;
-                        if Result.Scale /= 0.0 then
-                           declare
-                              Ph, Md : Real;
-                           begin
-                              Best_Phi (J, F, Result.W, Result.Scale, Ph, Md, Ga.all, Gb.all, Wt.all, Rs.all);
-                              Result.Phi := Ph;
-                              Result.Score := Md;
-                           end;
-                        end if;
-                        --  The grid's best direction refined by least squares on every sighting (Refine).
-                        if Result.Scale /= 0.0 and then Every (J)'Length > 4 then
-                           Refine (J, F, Result);
-                        end if;
-                        Free (Ga);
-                        Free (Gb);
-                        Free (Wt);
-                        Free (Rs);
-                        Free (Fs);
-                     end;
-                     Best (J) := Result;
-                  end Scanner;
-
-                  Scanners : array (1 .. N) of Scanner;
-               begin
-                  for J in 1 .. N loop
-                     Scanners (J).Start (J);
-                  end loop;
-               end;
+               Every_Piece (1, N * Pieces);
+               Every_Joint (1, N);
+               Free (Of_Piece);
                --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
                --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
                --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
