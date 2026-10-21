@@ -8763,6 +8763,9 @@ package body Driver.Robot.Tests is
       Pictures : array (1 .. Arms) of Pictures_Access;
       Worlds   : Flow.Arm_World_Array (1 .. Arms);
       In_Arms  : Flow.Arm_Flow_Array (1 .. Arms);
+      --  Every picture's readings, and where the wrist eye stands at the reference.
+      Readings_At : array (1 .. Arms, 1 .. 2 * Poses) of Real_Array (1 .. 3);
+      Rest_At     : array (1 .. Arms) of Rigid;
       Fixed    : Flow.Luma_Access;
       procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Flow.Luma_Access);
       --  How far an eye of those terms puts the table's points (a grid 4 cm apart the true eye sees) from the true
@@ -8820,6 +8823,8 @@ package body Driver.Robot.Tests is
                   Pose  : constant Rigid :=
                     Moved * Rigid'(Rotation => Wrist_Turn, Translation => Plus (Bases (A), [0.0, 0.45, 0.12]));
                begin
+                  Readings_At (A, P) := Readings;
+                  Rest_At (A) := (Rotation => Wrist_Turn, Translation => Plus (Bases (A), [0.0, 0.45, 0.12]));
                   Pictures (A) (P) := (Luma => Picture_Of (Pose, Wrist_Lens, Wrist_W, Wrist_H), Width => Wrist_W,
                                        Height => Wrist_H, Eye => Pose, World => null);
                end;
@@ -8886,7 +8891,8 @@ package body Driver.Robot.Tests is
                         Table    => (Centre => [0.0, 0.25, Table_Z], Normal => [0.0, 0.0, 1.0],
                                      Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
                                      Offset_Sigma => 1.0E-4, Tilt_11 => 1.0E-8, Tilt_12 => 0.0, Tilt_22 => 1.0E-8,
-                                     Points => 1000, Scatter => 1.0));
+                                     Points => 1000, Scatter => 1.0),
+                        Variants => null);
       end loop;
       Fixed := Picture_Of (Truth, (Fx | Fy => Focal, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
                                    K1 | K2 => 0.0), Width, Height);
@@ -8925,6 +8931,131 @@ package body Driver.Robot.Tests is
             end;
          end loop;
       end if;
+      --  The same scene placed by the arms' joints off the truth as a fit would hand them (each axis tilted along a
+      --  direction across it, its point moved along the other and its unit scaled, the sense turning joint by joint),
+      --  the wrist eyes' places by those joints, and their sigmas handed over as each arm's variants
+      --  (Arm_World.Variants, every term of every joint a sigma either way): the eye's spread grows with them, and
+      --  holds the arms' joints where the true eye sees them.
+      declare
+         Off_Tilt : constant Real := 0.004;   --  radians
+         Off_Move : constant Real := 0.002;   --  metres
+         Off_Unit : constant Real := 0.005;   --  of the unit
+         type Variants_Access is access Flow.Arm_Variant_Array;
+         type Rigids_Access is access Flow.Rigid_Array;
+         Off      : array (1 .. Arms) of Joints_Access;
+         Shown    : array (1 .. Arms) of Pictures_Access;
+         Variants : array (1 .. Arms) of Variants_Access;
+         Arms_Off : Flow.Arm_Flow_Array (1 .. Arms);
+         Worlds_Off : Flow.Arm_World_Array (1 .. Arms);
+         Placed   : Flow.Report (Arms => Arms, Count => Flow.Terms_For (Arms));
+         --  Joints J moved by By along term T of joint K (KFit.Joint_Term's: a tilt or a move along a direction across
+         --  its axis, or its unit).
+         procedure Move (J : in out KFit.Joint_Array; K : Positive; T : KFit.Joint_Term; By : Real) is
+            E1, E2 : Vec3;
+         begin
+            KFit.Across (J (K).W, E1, E2);
+            case T is
+               when KFit.Tilt_1  => J (K).W := Unit (Plus (J (K).W, Scaled (By, E1)));
+               when KFit.Tilt_2  => J (K).W := Unit (Plus (J (K).W, Scaled (By, E2)));
+               when KFit.Point_1 => J (K).P := Plus (J (K).P, Scaled (By, E1));
+               when KFit.Point_2 => J (K).P := Plus (J (K).P, Scaled (By, E2));
+               when KFit.Scale   => J (K).C := J (K).C * (1.0 + By);
+            end case;
+         end Move;
+         function Sigma_Of (T : KFit.Joint_Term) return Real is
+           (case T is when KFit.Tilt_1 | KFit.Tilt_2 => Off_Tilt, when KFit.Point_1 | KFit.Point_2 => Off_Move,
+                      when KFit.Scale => Off_Unit);
+         --  The wrist eye's places by joints J, every picture's.
+         function Eyes_By (A : Positive; J : KFit.Joint_Array) return Rigids_Access is
+            E : constant Rigids_Access := new Flow.Rigid_Array (1 .. 2 * Poses);
+         begin
+            for P in E'Range loop
+               E (P) := KFit.Eye_At (J, [1, 2, 3], Readings_At (A, P)) * Rest_At (A);
+            end loop;
+            return E;
+         end Eyes_By;
+         --  How far the eye of R puts the arms' joints as given (at every flow pose) from where the true eye sees the
+         --  true joints, at most.
+         function Joints_Off (R : Flow.Report) return Real is
+            Worst : Real := 0.0;
+         begin
+            for A in 1 .. Arms loop
+               for P in 1 .. Poses loop
+                  for K in 1 .. 3 loop
+                     declare
+                        Given : constant Vec3 :=
+                          KFit.Eye_At (Off (A) (1 .. K - 1), [for I in 1 .. K - 1 => I],
+                                       Readings_At (A, P) (1 .. K - 1))
+                          * Off (A) (K).P;
+                        True_X : constant Vec3 :=
+                          KFit.Eye_At (Joints (A) (1 .. K - 1), [for I in 1 .. K - 1 => I],
+                                       Readings_At (A, P) (1 .. K - 1)) * Joints (A) (K).P;
+                        Ct : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (True_X, Truth.Translation));
+                        Cf : constant Vec3 :=
+                          Transposed_Times (R.Poses (A).Rotation, Minus (Given, R.Poses (A).Translation));
+                     begin
+                        if Ct (3) > 0.0 and then Cf (3) > 0.0 then
+                           Worst := Real'Max
+                             (Worst, Sqrt ((R.Lens.Cx + R.Lens.Fx * Cf (1) / Cf (3)
+                                            - (Focal * Ct (1) / Ct (3) + Real (Width) / 2.0)) ** 2
+                                           + (R.Lens.Cy + R.Lens.Fy * Cf (2) / Cf (3)
+                                              - (Focal * Ct (2) / Ct (3) + Real (Height) / 2.0)) ** 2));
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            return Worst;
+         end Joints_Off;
+      begin
+         for A in 1 .. Arms loop
+            Off (A) := new KFit.Joint_Array'(Joints (A).all);
+            for K in 1 .. 3 loop
+               declare
+                  Sense : constant Real := (if K mod 2 = 0 then -1.0 else 1.0);
+               begin
+                  Move (Off (A).all, K, KFit.Tilt_1, Sense * Off_Tilt);
+                  Move (Off (A).all, K, KFit.Point_2, Sense * Off_Move);
+                  Move (Off (A).all, K, KFit.Scale, Sense * Off_Unit);
+               end;
+            end loop;
+            Shown (A) := new Flow.Wrist_Picture_Array'(Pictures (A).all);
+            declare
+               E : constant Rigids_Access := Eyes_By (A, Off (A).all);
+            begin
+               for P in Shown (A)'Range loop
+                  Shown (A) (P).Eye := E (P);
+               end loop;
+            end;
+            Variants (A) := new Flow.Arm_Variant_Array (1 .. 2 * KFit.Joint_Terms * 3);
+            for K in 1 .. 3 loop
+               for T in KFit.Joint_Term loop
+                  for E in 1 .. 2 loop
+                     declare
+                        J : constant Joints_Access := new KFit.Joint_Array'(Off (A).all);
+                     begin
+                        Move (J.all, K, T, (if E = 1 then -1.0 else 1.0) * Sigma_Of (T));
+                        Variants (A) (2 * (KFit.Joint_Terms * (K - 1) + KFit.Joint_Term'Pos (T)) + E) :=
+                          (Joints => J.all'Unchecked_Access, Eyes => Eyes_By (A, J.all).all'Unchecked_Access,
+                           Lens => Wrist_Lens, Table => Worlds (A).Table);
+                     end;
+                  end loop;
+               end loop;
+            end loop;
+            Arms_Off (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Off (A).all'Unchecked_Access,
+                             Unit_Sigma => null);
+            Worlds_Off (A) := (Pictures => Shown (A).all'Unchecked_Access, Lens => Wrist_Lens,
+                               Table => Worlds (A).Table, Variants => Variants (A).all'Unchecked_Access);
+         end loop;
+         Flow.Fit_Eye (Arms_Off, Width, Height, Placed);
+         Flow.Refine_By_Scene (Arms_Off, Worlds_Off, Fixed.all, Width, Height, Placed);
+         Check (Placed.Spread > Result.Spread, "the arms' fits' variants leave the eye's spread no wider:"
+                & Real'Image (Placed.Spread) & " px against" & Real'Image (Result.Spread));
+         Check (Placed.Spread < Real'Last
+                and then Joints_Off (Placed) <= Driver.Conventions.Z * Placed.Spread,
+                "the arms' joints off the truth leave them farther from the true eye's places than Z spreads:"
+                & Real'Image (Joints_Off (Placed)) & " px against a spread of" & Real'Image (Placed.Spread));
+      end;
       for A in 1 .. Arms loop
          for P of Pictures (A).all loop
             declare
@@ -8943,7 +9074,9 @@ package body Driver.Robot.Tests is
                              & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.flow.scene", "a fixed eye placed again by the table two arms' own eyes see is "
                              & "not told, comes back off its own sigmas, or puts the table's points no nearer their "
-                             & "places than the flows' eye", Scene_Places_A_Fixed_Eye'Access);
+                             & "places than the flows' eye; placed by the arms' joints off the truth and their sigmas, "
+                             & "its spread is no wider or leaves the arms' joints farther than Z spreads from the true "
+                             & "eye's places", Scene_Places_A_Fixed_Eye'Access);
       Driver.Tests.Register ("robot.kinematics.scales", "the floor and gain of the scales residuals are judged at are "
                              & "read beside what their sightings state, whatever part of it the residuals bear out, so "
                              & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);

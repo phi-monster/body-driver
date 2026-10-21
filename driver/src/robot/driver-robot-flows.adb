@@ -2,6 +2,8 @@ with Ada.Containers.Vectors;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
+with Driver.Geometry;
+with Driver.Numerics.Dense;
 with Driver.Beats;
 with Driver.Commands;
 with Driver.Conventions;
@@ -68,6 +70,9 @@ package body Driver.Robot.Flows is
       Eye     : Eye_Id'Base := 0;
       Fitting : Natural := 0;
       Wrists  : Wrist_Vectors.Vector;
+      --  The arm's readings at each of those pictures, by channel, picture after picture: where the eye stood by any
+      --  fit of the arm (Variants_Of).
+      Wrist_Readings : Real_Vectors.Vector;
    end record;
 
    package Arm_Info_Vectors is new Ada.Containers.Vectors (Positive, Arm_Info);
@@ -103,6 +108,162 @@ package body Driver.Robot.Flows is
    end Prime;
 
    type Arm_Id_Array is array (Positive range <>) of Arm_Id;
+
+   --  An arm's fit's variants for placing a fixed eye (Flow_Eye.Arm_Variant), with the arrays they point at.
+   type Rigid_Array_Access is access Flow.Rigid_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Flow.Rigid_Array, Rigid_Array_Access);
+   type Joint_Access_Array is array (Positive range <>) of Joint_Array_Access;
+   type Rigid_Access_Array is array (Positive range <>) of Rigid_Array_Access;
+   type Variant_Array_Access is access Flow.Arm_Variant_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Flow.Arm_Variant_Array, Variant_Array_Access);
+   type Variant_Set (Count : Natural) is record
+      Variants : Variant_Array_Access;
+      Joints   : Joint_Access_Array (1 .. Count);
+      Eyes     : Rigid_Access_Array (1 .. Count);
+   end record;
+   type Variant_Set_Access is access Variant_Set;
+   procedure Free_Set is new Ada.Unchecked_Deallocation (Variant_Set, Variant_Set_Access);
+
+   procedure Free (S : in out Variant_Set_Access) is
+   begin
+      if S /= null then
+         for J of S.Joints loop
+            Free (J);
+         end loop;
+         for E of S.Eyes loop
+            Free (E);
+         end loop;
+         Free (S.Variants);
+         Free_Set (S);
+      end if;
+   end Free;
+
+   --  The arm's fit moved along its covariance (Flow_Eye.Arm_Variant): per axis of the covariance of its terms (its
+   --  eye's lens and its joints, in Kinematics.Fit's order) a standard deviation either way, the lesser end first: its
+   --  joints and its lens moved by it (Fit.Move_Term), its table as the terms move it (Arm_Fit.Table_Response), and its
+   --  eye's frame at each picture the eye took at the arm's poses placed by the moved joints; then per axis of what
+   --  the table's points leave its plane uncertain by alone (Arm_Fit.Table_Own), the table alone moved so. None when
+   --  the fit states no covariance of its terms or its table no response to them.
+   function Variants_Of (R : Arm_Fit; Info : Arm_Info) return Variant_Set_Access is
+      use Driver.Numerics.Arrays;
+      N        : constant Natural := Natural (R.Joints.Length);
+      Terms    : constant Natural := KFit.Terms (N);
+      Pictures : constant Natural := Natural (Info.Wrists.Length);
+   begin
+      if N = 0 or else N /= Info.N or else Natural (R.Chain.Length) /= N or else Natural (R.Reference.Length) /= N
+        or else Natural (R.Covariance.Length) /= Terms ** 2 or else Natural (R.Table_Response.Length) /= 3 * Terms
+        or else not Driver.Geometry.Known (R.Table) or else Natural (Info.Wrist_Readings.Length) /= N * Pictures
+      then
+         return null;
+      end if;
+      declare
+         Cov         : Real_Matrix (1 .. Terms, 1 .. Terms);
+         Values      : Real_Vector (1 .. Terms);
+         Vectors     : Real_Matrix (1 .. Terms, 1 .. Terms);
+         Own_Values  : Real_Vector (1 .. 3);
+         Own_Vectors : Real_Matrix (1 .. 3, 1 .. 3);
+         Chain       : constant KFit.Chain_Order :=
+           [for K in 1 .. N => Positive (R.Chain (R.Chain.First_Index + K - 1))];
+         Joints0     : constant KFit.Joint_Array :=
+           [for J in 1 .. N =>
+              (W => R.Joints (R.Joints.First_Index + J - 1).W, P => R.Joints (R.Joints.First_Index + J - 1).P,
+               C => R.Joints (R.Joints.First_Index + J - 1).C, Slide => R.Joints (R.Joints.First_Index + J - 1).Slide)];
+         Lens0       : constant KFit.Lens :=
+           (Fx => R.Lens.Fx, Fy => R.Lens.Fy, Cx => R.Lens.Cx, Cy => R.Lens.Cy, K1 => R.Lens.K1, K2 => R.Lens.K2);
+         --  The table as its eye sees it (Fit.Sight_Plane: the points X with A * X = 1).
+         A0          : constant Vec3 :=
+           (1.0 / Driver.Numerics.Dot (R.Table.Normal, R.Table.Centre)) * R.Table.Normal;
+         Count       : Natural := 0;
+         Set         : Variant_Set_Access;
+         K           : Natural := 0;
+
+         --  The variant of these joints (by their readings' places), lens and table.
+         procedure Add (Joints : KFit.Joint_Array; Lens : KFit.Lens; A : Vec3) is
+            Along : constant Joint_Array_Access := new KFit.Joint_Array (1 .. N);
+            Eyes  : constant Rigid_Array_Access := new Flow.Rigid_Array (1 .. Pictures);
+         begin
+            for J in 1 .. N loop
+               Along (J) := Joints (Chain (J));
+            end loop;
+            for P in 1 .. Pictures loop
+               declare
+                  Change : Real_Array (1 .. N);
+               begin
+                  for J in 1 .. N loop
+                     Change (J) := Info.Wrist_Readings (Info.Wrist_Readings.First_Index + N * (P - 1) + J - 1)
+                       - R.Reference (R.Reference.First_Index + J - 1);
+                  end loop;
+                  Eyes (P) := KFit.Eye_At (Joints, Chain, Change);
+               end;
+            end loop;
+            K := K + 1;
+            Set.Joints (K) := Along;
+            Set.Eyes (K) := Eyes;
+            Set.Variants (K) :=
+              (Joints => Along.all'Unchecked_Access, Eyes => Eyes.all'Unchecked_Access, Lens => Lens,
+               Table  => KFit.Plane_Estimate_Of ((Found => True, A => A, Covariance => R.Table_Own,
+                                                  Points => R.Table.Points, Scatter => R.Table.Scatter),
+                                                 R.Table_Own));
+         end Add;
+      begin
+         for P in 1 .. Terms loop
+            for Q in 1 .. Terms loop
+               Cov (P, Q) := R.Covariance (R.Covariance.First_Index + (P - 1) * Terms + Q - 1);
+            end loop;
+         end loop;
+         Driver.Numerics.Dense.Small_Eigensystem (Cov, Values, Vectors);
+         Driver.Numerics.Dense.Small_Eigensystem (R.Table_Own, Own_Values, Own_Vectors);
+         for V of Values loop
+            Count := Count + Boolean'Pos (V > 0.0);
+         end loop;
+         for V of Own_Values loop
+            Count := Count + Boolean'Pos (V > 0.0);
+         end loop;
+         Set := new Variant_Set (2 * Count);
+         Set.Variants := new Flow.Arm_Variant_Array (1 .. 2 * Count);
+         for I in 1 .. Terms loop
+            if Values (I) > 0.0 then
+               for E in 1 .. 2 loop
+                  declare
+                     By     : constant Real := (if E = 1 then -1.0 else 1.0)
+                       * Ada.Numerics.Long_Elementary_Functions.Sqrt (Values (I));
+                     Joints : KFit.Joint_Array := Joints0;
+                     Lens   : KFit.Lens := Lens0;
+                     A      : Vec3 := A0;
+                  begin
+                     for T in 1 .. Terms loop
+                        if Vectors (T, I) /= 0.0 then
+                           KFit.Move_Term (Joints, Lens, T, By * Vectors (T, I));
+                        end if;
+                        for D in 1 .. 3 loop
+                           A (D) := A (D) + By * Vectors (T, I)
+                             * R.Table_Response (R.Table_Response.First_Index + (D - 1) * Terms + T - 1);
+                        end loop;
+                     end loop;
+                     Add (Joints, Lens, A);
+                  end;
+               end loop;
+            end if;
+         end loop;
+         for I in 1 .. 3 loop
+            if Own_Values (I) > 0.0 then
+               for E in 1 .. 2 loop
+                  declare
+                     By : constant Real := (if E = 1 then -1.0 else 1.0)
+                       * Ada.Numerics.Long_Elementary_Functions.Sqrt (Own_Values (I));
+                     A  : Vec3 := A0;
+                  begin
+                     for D in 1 .. 3 loop
+                        A (D) := A (D) + By * Own_Vectors (D, I);
+                     end loop;
+                     Add (Joints0, Lens0, A);
+                  end;
+               end loop;
+            end if;
+         end loop;
+         return Set;
+      end;
+   end Variants_Of;
 
    --  The flow's fit stored as the fixed eye's place (Fixed_Fit): its lens (one focal length both ways, the principal
    --  point, no distortion), its camera in the frame of every arm it saw (Arms, in the fit's order), and the covariance
@@ -465,6 +626,9 @@ package body Driver.Robot.Flows is
                                                Eye    =>
                                                  Driver.Robot.Kinematics.Eye_In_Reference (M, Info.Arm, Absolute),
                                                World  => Mask));
+                        for C in 1 .. N loop
+                           Info.Wrist_Readings.Append (Absolute (C));
+                        end loop;
                      end;
                   end;
                end if;
@@ -639,6 +803,7 @@ package body Driver.Robot.Flows is
                                 (Flow.Wrist_Picture_Array, Pictures_Access);
                               Pictures : array (1 .. Used) of Pictures_Access;
                               Worlds   : Flow.Arm_World_Array (1 .. Used);
+                              Variants : array (1 .. Used) of Variant_Set_Access;
                            begin
                               for U in 1 .. Used loop
                                  declare
@@ -649,17 +814,22 @@ package body Driver.Robot.Flows is
                                     for P in Pictures (U)'Range loop
                                        Pictures (U) (P) := Info.Wrists (P);
                                     end loop;
+                                    Variants (U) := Variants_Of (R, Info);
                                     Worlds (U) :=
                                       (Pictures => Pictures (U).all'Unchecked_Access,
                                        Lens     => (Fx => R.Lens.Fx, Fy => R.Lens.Fy, Cx => R.Lens.Cx, Cy => R.Lens.Cy,
                                                     K1 => R.Lens.K1, K2 => R.Lens.K2),
-                                       Table    => R.Table);
+                                       Table    => R.Table,
+                                       Variants =>
+                                         (if Variants (U) = null then null
+                                          else Variants (U).Variants.all'Unchecked_Access));
                                  end;
                               end loop;
                               Flow.Refine_By_Scene
                                 (In_Arms, Worlds, Captures (E, Which (1)) (1).Still.all, Width, Height, Result);
                               for U in 1 .. Used loop
                                  Free (Pictures (U));
+                                 Free (Variants (U));
                               end loop;
                            end;
                            Driver.Log.Line (Driver.Log.Robot, "flows: fixed eye" & Natural'Image (Eyes (E - 1))

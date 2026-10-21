@@ -58,6 +58,25 @@ procedure Driver.Robot.Flow_Bench is
       return EF.Sqrt (-2.0 * EF.Log (U1)) * EF.Cos (2.0 * Ada.Numerics.Pi * U2);
    end Gaussian;
 
+   --  FLOW_ARM_ERROR's three numbers (a study, below): the tilt in radians (given in degrees), the move in metres, the
+   --  unit's share; nought without it.
+   function Arm_Error (Which : Positive) return Real is
+   begin
+      if not Ada.Environment_Variables.Exists ("FLOW_ARM_ERROR") then
+         return 0.0;
+      end if;
+      declare
+         Text : constant String := Ada.Environment_Variables.Value ("FLOW_ARM_ERROR");
+         C1   : constant Natural := Ada.Strings.Fixed.Index (Text, ",");
+         C2   : constant Natural := Ada.Strings.Fixed.Index (Text (C1 + 1 .. Text'Last), ",");
+      begin
+         return (case Which is
+                    when 1 => Real'Value (Text (Text'First .. C1 - 1)) / 57.29577951308232,
+                    when 2 => Real'Value (Text (C1 + 1 .. C2 - 1)),
+                    when others => Real'Value (Text (C2 + 1 .. Text'Last)));
+      end;
+   end Arm_Error;
+
    function Image (X : Real; Aft : Natural := 2) return String is (Driver.Log.Image (X, Aft));
    function Trim (N : Integer) return String is (Ada.Strings.Fixed.Trim (N'Image, Ada.Strings.Left));
 
@@ -447,6 +466,48 @@ begin
       Gather (Arm, Cache_Of ("FLOW_CACHE"), Sets (1), Cache_Of ("FLOW_RICHARDSON"));
       if Both then
          Gather (3 - Arm, Cache_Of ("FLOW_CACHE2"), Sets (2), Cache_Of ("FLOW_RICHARDSON2"));
+      end if;
+      --  FLOW_ARM_ERROR = "T,M,U" (a study): every arm's joints as a fit off the truth would hand them, each axis
+      --  tilted along the two directions across it and its point moved along them by Gaussian draws of T degrees and
+      --  M metres, its unit times 1 + a draw of U (a generator of their own, the seed's: the pictures' noise as without
+      --  them); the flows fitted with them, the wrist eyes' pictures placed by them (the eye at rest where it truly is,
+      --  as an arm's reference frame is its eye's), and the refinement handed those sigmas as every arm's variants
+      --  (Arm_World.Variants): what step 2's errors leave the fixed eye, and whether its spread says so.
+      if Ada.Environment_Variables.Exists ("FLOW_ARM_ERROR") then
+         declare
+            Tilt   : constant Real := Arm_Error (1);
+            Move   : constant Real := Arm_Error (2);
+            Gain   : constant Real := Arm_Error (3);
+            Errors : Ada.Numerics.Float_Random.Generator;
+            function Draw return Real is
+               U1 : constant Real := Real'Max (Real (Ada.Numerics.Float_Random.Random (Errors)), 1.0E-12);
+               U2 : constant Real := Real (Ada.Numerics.Float_Random.Random (Errors));
+            begin
+               return EF.Sqrt (-2.0 * EF.Log (U1)) * EF.Cos (2.0 * Ada.Numerics.Pi * U2);
+            end Draw;
+         begin
+            Ada.Numerics.Float_Random.Reset (Errors, Seed);
+            for S of Sets loop
+               for J in S.Joints'Range loop
+                  declare
+                     A      : Fit.Joint renames S.Joints (J);
+                     E1, E2 : Vec3;
+                     T1     : constant Real := Tilt * Draw;
+                     T2     : constant Real := Tilt * Draw;
+                     M1     : constant Real := Move * Draw;
+                     M2     : constant Real := Move * Draw;
+                     U      : constant Real := Gain * Draw;
+                  begin
+                     Fit.Across (A.W, E1, E2);
+                     A.P := Plus (A.P, Plus (Scaled (M1, E1), Scaled (M2, E2)));
+                     A.W := Unit (Plus (A.W, Plus (Scaled (T1, E1), Scaled (T2, E2))));
+                     A.C := A.C * (1.0 + U);
+                  end;
+               end loop;
+            end loop;
+            Put_Line ("the arms' joints off the truth: tilted" & Image (Tilt * 57.29577951308232, 2) & " deg, moved"
+                      & Image (1000.0 * Move, 1) & " mm, units times 1 + " & Image (Gain, 4));
+         end;
       end if;
       --  The model at the truth (the first arm): the residuals the true eye leaves, with the joints as given and with
       --  every joint's sense the other way (a convention of the fake's turns against the fit's).
@@ -1315,6 +1376,9 @@ begin
                Fixed  : Flow.Luma_Access := Picture;
                type Pictures_Access is access Flow.Wrist_Picture_Array;
                Pictures : array (Sets'Range) of Pictures_Access;
+               type Variants_Access is access Flow.Arm_Variant_Array;
+               type Joints_Access is access Fit.Joint_Array;
+               type Eyes_Access is access Flow.Rigid_Array;
                Worlds   : Flow.Arm_World_Array (Sets'Range);
                Joints_True : Real_Vectors.Vector;   --  every set's joints at its poses, u and v by turns, in the truth
                Refined  : Flow.Report := Result;
@@ -1355,24 +1419,33 @@ begin
                         Rest  : Real_Array (1 .. N);
                         Draws : Ada.Numerics.Float_Random.Generator;
                         Given : constant Natural := Sets (K).Views'Length;
+                        --  the readings of each picture from the rest, and where the wrist eye stands at rest
+                        Change    : Real_Array (1 .. N);
+                        Rest_Pose : Rigid;
+                        Changes   : array (1 .. Given + Extra) of Real_Array (1 .. N);
+                        Variants  : Variants_Access;
                      begin
                         Ada.Numerics.Float_Random.Reset (Draws, Seed + K);
                         Pictures (K) := new Flow.Wrist_Picture_Array (1 .. Given + Extra);
                         for J in 1 .. N loop
                            Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
                         end loop;
+                        FW.Forward (W);
+                        Rest_Pose := W.Cameras (Wrist).Pose;
                         for V in 1 .. Given + Extra loop
                            for J in 1 .. N loop
                               declare
                                  L : FW.Link renames W.Links (Links (Links.First_Index + J - 1));
                               begin
-                                 L.Q := Rest (J)
-                                   + (if V <= Given
-                                      then Sets (K).Views (Sets (K).Views'First + V - 1).Readings (J)
-                                      else (2.0 * Real (Ada.Numerics.Float_Random.Random (Draws)) - 1.0)
-                                             * Swing / L.Unit);
+                                 Change (J) :=
+                                   (if V <= Given
+                                    then Sets (K).Views (Sets (K).Views'First + V - 1).Readings (J)
+                                    else (2.0 * Real (Ada.Numerics.Float_Random.Random (Draws)) - 1.0)
+                                           * Swing / L.Unit);
+                                 L.Q := Rest (J) + Change (J);
                               end;
                            end loop;
+                           Changes (V) := Change;
                            FW.Forward (W);
                            if V <= Given then
                               for J in 1 .. N loop
@@ -1390,6 +1463,11 @@ begin
                            end if;
                            declare
                               C    : aliased constant FW.Camera := W.Cameras (Wrist);
+                              --  where the arm's joints as given put the eye (FLOW_ARM_ERROR), else where it is
+                              Placed : constant Rigid :=
+                                (if Ada.Environment_Variables.Exists ("FLOW_ARM_ERROR")
+                                 then Fit.Eye_At (Sets (K).Joints.all, [for I in 1 .. N => I], Change) * Rest_Pose
+                                 else C.Pose);
                               Rgb  : Rgb_Access := new Real_Array (1 .. 3 * C.Width * C.Height);
                               Luma : constant Flow.Luma_Access := new Real_Array (1 .. C.Width * C.Height);
                            begin
@@ -1434,7 +1512,7 @@ begin
                                     end if;
                                  end if;
                                  Pictures (K) (V) :=
-                                   (Luma => Luma, Width => C.Width, Height => C.Height, Eye => C.Pose, World => Mask);
+                                   (Luma => Luma, Width => C.Width, Height => C.Height, Eye => Placed, World => Mask);
                               end;
                            end;
                         end loop;
@@ -1442,13 +1520,59 @@ begin
                            W.Links (Links (Links.First_Index + J - 1)).Q := Rest (J);
                         end loop;
                         FW.Forward (W);
+                        --  FLOW_ARM_ERROR: the joints' sigmas as the arm's variants, every term of every joint one
+                        --  sigma either way (Arm_World.Variants), each with the pictures' eyes placed by its joints.
+                        if Ada.Environment_Variables.Exists ("FLOW_ARM_ERROR") then
+                           Variants := new Flow.Arm_Variant_Array (1 .. 2 * Fit.Joint_Terms * N);
+                           declare
+                              Tilt_E : constant Real := Arm_Error (1);
+                              Move_E : constant Real := Arm_Error (2);
+                              Gain_E : constant Real := Arm_Error (3);
+                              Along  : constant Fit.Chain_Order := [for I in 1 .. N => I];
+                           begin
+                              for J in 1 .. N loop
+                                 for T in Fit.Joint_Term loop
+                                    for E in 1 .. 2 loop
+                                       declare
+                                          Js     : constant Joints_Access := new Fit.Joint_Array'(Sets (K).Joints.all);
+                                          A      : Fit.Joint renames Js (Js'First + J - 1);
+                                          Eyes   : constant Eyes_Access := new Flow.Rigid_Array (1 .. Given + Extra);
+                                          Sign   : constant Real := (if E = 1 then -1.0 else 1.0);
+                                          E1, E2 : Vec3;
+                                       begin
+                                          Fit.Across (A.W, E1, E2);
+                                          case T is
+                                             when Fit.Tilt_1  => A.W := Unit (Plus (A.W, Scaled (Sign * Tilt_E, E1)));
+                                             when Fit.Tilt_2  => A.W := Unit (Plus (A.W, Scaled (Sign * Tilt_E, E2)));
+                                             when Fit.Point_1 => A.P := Plus (A.P, Scaled (Sign * Move_E, E1));
+                                             when Fit.Point_2 => A.P := Plus (A.P, Scaled (Sign * Move_E, E2));
+                                             when Fit.Scale   => A.C := A.C * (1.0 + Sign * Gain_E);
+                                          end case;
+                                          for V in Eyes'Range loop
+                                             Eyes (V) := Fit.Eye_At (Js.all, Along, Changes (V)) * Rest_Pose;
+                                          end loop;
+                                          Variants (2 * (Fit.Joint_Terms * (J - 1) + Fit.Joint_Term'Pos (T)) + E) :=
+                                            (Joints => Js.all'Unchecked_Access, Eyes => Eyes.all'Unchecked_Access,
+                                             Lens   => (Fx => W.Cameras (Wrist).Fx, Fy => W.Cameras (Wrist).Fy,
+                                                        Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy,
+                                                        K1 | K2 => 0.0),
+                                             Table  => (Centre => [0.0, 0.0, W.Table_Z], Normal => [0.0, 0.0, 1.0],
+                                                        Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+                                                        Offset_Sigma => 0.0, others => <>));
+                                       end;
+                                    end loop;
+                                 end loop;
+                              end loop;
+                           end;
+                        end if;
                         Worlds (K) :=
                           (Pictures => Pictures (K).all'Unchecked_Access,
                            Lens     => (Fx => W.Cameras (Wrist).Fx, Fy => W.Cameras (Wrist).Fy,
                                         Cx => W.Cameras (Wrist).Cx, Cy => W.Cameras (Wrist).Cy, K1 | K2 => 0.0),
                            Table    => (Centre => [0.0, 0.0, W.Table_Z], Normal => [0.0, 0.0, 1.0],
                                         Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
-                                        Offset_Sigma => 0.0, others => <>));
+                                        Offset_Sigma => 0.0, others => <>),
+                           Variants => (if Variants = null then null else Variants.all'Unchecked_Access));
                      end;
                   end;
                end loop;
@@ -1545,6 +1669,107 @@ begin
                      & " %), principal point (" & Image (Refined.Lens.Cx, 1) & ", "
                      & Image (Refined.Lens.Cy, 1) & ") of ("
                      & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & ")");
+                  --  The refined eye's terms against the truth over the covariance it states (the logarithm of the
+                  --  focal length, the principal point, each arm's turn about the camera's own axes, its centre): the
+                  --  chi square, about as many as the terms when the covariance is honest, and the focal length's and
+                  --  the principal point's own sigmas.
+                  declare
+                     G      : constant Positive := Refined.Count;
+                     E      : Real_Vector (1 .. G) := [others => 0.0];
+                     Lower  : Real_Matrix (1 .. G, 1 .. G);
+                     Pd     : Boolean;
+                  begin
+                     E (1) := EF.Log (Refined.Lens.Fx / Cam.Fx);
+                     E (2) := Refined.Lens.Cx - Cam.Cx;
+                     E (3) := Refined.Lens.Cy - Cam.Cy;
+                     for K in Sets'Range loop
+                        declare
+                           O    : constant Natural := 3 + 6 * (K - Sets'First);
+                           P    : constant Rigid := Refined.Poses (K);
+                           Turn : constant Vec3 :=
+                             Driver.Numerics.Log (Times (Transposed (Truth.Rotation), P.Rotation));
+                        begin
+                           for X in 1 .. 3 loop
+                              E (O + X) := Turn (X);
+                              E (O + 3 + X) := P.Translation (X) - Truth.Translation (X);
+                           end loop;
+                        end;
+                     end loop;
+                     Driver.Numerics.Dense.Cholesky (Refined.Covariance, Lower, Pd);
+                     if Pd then
+                        declare
+                           Y   : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lower, E);
+                           Chi : Real := 0.0;
+                        begin
+                           for X in 1 .. G loop
+                              Chi := Chi + E (X) * Y (X);
+                           end loop;
+                           Put_Line ("refined seed" & Seed'Image & ": the eye's terms against its own covariance: "
+                                     & "chi square " & Image (Chi, 1) & " over" & G'Image & "; focal "
+                                     & Image (E (1) / EF.Sqrt (Refined.Covariance (1, 1)), 2) & " sigmas, principal "
+                                     & "point " & Image (E (2) / EF.Sqrt (Refined.Covariance (2, 2)), 2) & " "
+                                     & Image (E (3) / EF.Sqrt (Refined.Covariance (3, 3)), 2) & " sigmas");
+                           --  The error along each axis of the covariance, over that axis's sigma, the three largest:
+                           --  which combinations of the terms the covariance states too little of (each axis by its
+                           --  sigma and its three largest terms: 1 the focal length's logarithm, 2 and 3 the principal
+                           --  point, then per arm 3 of turn and 3 of centre).
+                           declare
+                              Values  : Real_Vector (1 .. G);
+                              Vectors : Real_Matrix (1 .. G, 1 .. G);
+                              Z       : Real_Vector (1 .. G);
+                              Done    : array (1 .. G) of Boolean := [others => False];
+                           begin
+                              Driver.Numerics.Dense.Small_Eigensystem (Refined.Covariance, Values, Vectors);
+                              for I in 1 .. G loop
+                                 Z (I) := 0.0;
+                                 for X in 1 .. G loop
+                                    Z (I) := Z (I) + Vectors (X, I) * E (X);
+                                 end loop;
+                                 Z (I) := (if Values (I) > 0.0 then Z (I) / EF.Sqrt (Values (I)) else Real'Last);
+                              end loop;
+                              for Rank in 1 .. 3 loop
+                                 declare
+                                    Best : Natural := 0;
+                                 begin
+                                    for I in 1 .. G loop
+                                       if not Done (I) and then (Best = 0 or else abs Z (I) > abs Z (Best)) then
+                                          Best := I;
+                                       end if;
+                                    end loop;
+                                    Done (Best) := True;
+                                    declare
+                                       Line : Unbounded_String := To_Unbounded_String
+                                         ("refined seed" & Seed'Image & ": axis" & Rank'Image & ": "
+                                          & Image (Z (Best), 2) & " sigmas, its sigma "
+                                          & Real'Image (EF.Sqrt (Real'Max (0.0, Values (Best)))) & ", terms");
+                                       Used : array (1 .. G) of Boolean := [others => False];
+                                    begin
+                                       for Term in 1 .. 3 loop
+                                          declare
+                                             Top : Natural := 0;
+                                          begin
+                                             for X in 1 .. G loop
+                                                if not Used (X)
+                                                  and then (Top = 0
+                                                            or else abs Vectors (X, Best) > abs Vectors (Top, Best))
+                                                then
+                                                   Top := X;
+                                                end if;
+                                             end loop;
+                                             Used (Top) := True;
+                                             Append (Line, Top'Image & " (" & Image (Vectors (Top, Best), 2) & ")");
+                                          end;
+                                       end loop;
+                                       Put_Line (To_String (Line));
+                                    end;
+                                 end;
+                              end loop;
+                           end;
+                        end;
+                     else
+                        Put_Line ("refined seed" & Seed'Image & ": the covariance it states is not definite");
+                     end if;
+                  end;
                   --  The table as each arm's refined eye sees it against the true eye: its normal's angle and its
                   --  distance from the eye (a plane's points tell these; they leave what is along the table and about
                   --  its normal).

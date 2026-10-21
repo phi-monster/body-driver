@@ -748,6 +748,13 @@ private
       Table_A      : Vec3 := [0.0, 0.0, 0.0];                 --  the same plane as its eye sees it (Fit.Sight_Plane)
       Table_Covariance : Mat3 := [others => [others => 0.0]];  --  of Table_A, its lens's lines of sight held
       Table_On     : Flag_Vectors.Vector;                      --  per track: it lies on the table
+      --  How Table_A moves with each of the fit's terms, as the table takes the fit's uncertainty (three rows of as
+      --  many as Covariance has terms, row by row: every depth together and the lens's lines of sight,
+      --  Kinematics.Table_Estimate), and what its points' scatter about it leaves it uncertain by alone: the arm's fit
+      --  moved along its covariance moves its table so (the arm's variants a fixed eye is placed with,
+      --  Flow_Eye.Arm_Variant).
+      Table_Response : Real_Vectors.Vector;
+      Table_Own      : Mat3 := [others => [others => 0.0]];
       --  Every track's point in its reference frame, three numbers each,
       --  where Track_Known holds (its depth is a depth: Fit.Depth_Known), at
       --  the depth the fit refined, its logarithm uncertain by Track_Sigmas.

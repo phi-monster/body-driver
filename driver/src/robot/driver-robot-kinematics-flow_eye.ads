@@ -131,10 +131,28 @@ package Driver.Robot.Kinematics.Flow_Eye is
    end record;
    type Wrist_Picture_Array is array (Positive range <>) of Wrist_Picture;
 
+   --  A fit of an arm that its own fit leaves as likely as itself: the fit's terms (its eye's lens, its joints, and the
+   --  table that moves with every depth they move) moved by a standard deviation along one axis of their covariance.
+   --  Its joints along the chain from the base (as Arm_Flow's), its eye's frame at each of its pictures (as
+   --  Arm_World's, in their order), its eye's lens and its table. The scatter of the places and of the flows tells
+   --  nothing of how far the arm's own fit is off: joints 0.2 degrees, 2 mm and half a per cent off left the fake's
+   --  seed 22's arms' joints 2.06 px from the true eye's places against a spread of 0.98, its seed 24's units alone
+   --  2.20 against 0.67 (10-21).
+   type Arm_Variant is record
+      Joints : access constant Fit.Joint_Array;
+      Eyes   : access constant Rigid_Array;
+      Lens   : Fit.Lens;
+      Table  : Driver.Geometry.Plane_Estimate;
+   end record;
+   type Arm_Variant_Array is array (Positive range <>) of Arm_Variant;
+
    type Arm_World is record
       Pictures : access constant Wrist_Picture_Array := null;
       Lens     : Fit.Lens;
       Table    : Driver.Geometry.Plane_Estimate;
+      --  The arm's fit's uncertainty: per axis of its covariance the fit moved along it either way, the lesser end
+      --  first (2 K - 1, then 2 K); none, the fit taken as exact.
+      Variants : access constant Arm_Variant_Array := null;
    end record;
    type Arm_World_Array is array (Positive range <>) of Arm_World;
 
@@ -153,9 +171,13 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  from the flow's estimate, round after round until a round after the first moves the arms' joints in the picture
    --  by no more than the eye's spread there leaves them, or neither the places' scatter nor that move falls. A table
    --  of texture tells the eye's lens and pose to a fraction of a pixel where the arms' outlines told it to several
-   --  (the fake's seeds 20, 22 and 23, 10-21: the arms' joints 0.65 to 2.48 px from the true eye's places, against
-   --  3.7 to 16 px). No point of the world found (a table with no texture): Result as Fit_Eye left it. Determined as
-   --  Fit_Eye's: settled, the covariance definite and Z times Spread under the half patch.
+   --  (the fake's seeds 20, 22 and 23, 10-21: the arms' joints 0.65 to 2.48 px from the true eye's places, against 3.7
+   --  to 16 px). No point of the world found (a table with no texture): Result as Fit_Eye left it. What the arms' own
+   --  fits leave uncertain (Arm_World.Variants) is carried into the covariance and the spread: each variant's places
+   --  and flows taken again at the eye as it stands, the eye moved as the round's own steps would move it for them (the
+   --  places' Gauss-Newton step, the flows' along their directions), and the arms' joints in the picture moved by that
+   --  and by their own move in the variant. Determined as Fit_Eye's: settled, the covariance definite and Z times
+   --  Spread under the half patch.
 
    procedure Judge_At
      (Poses         : Pose_Array;

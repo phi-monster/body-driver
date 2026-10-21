@@ -308,7 +308,8 @@ package body Driver.Robot.Body_File is
                  & ", ""tangent"": " & Three (F.Table.Tangent_1) & ", ""offset_sigma"": " & Num (F.Table.Offset_Sigma)
                  & ", ""tilt"": [" & Num (F.Table.Tilt_11) & ", " & Num (F.Table.Tilt_12) & ", "
                  & Num (F.Table.Tilt_22) & "], ""points"": " & Int (F.Table.Points)
-                 & ", ""scatter"": " & Num (F.Table.Scatter) & "}"
+                 & ", ""scatter"": " & Num (F.Table.Scatter) & ", ""response"": " & Reals (F.Table_Response)
+                 & ", ""own"": " & Nine (F.Table_Own) & "}"
                  & ", ""placed"": " & Flag (F.Placed)
                  & ", ""placement"": {""rotation"": " & Nine (F.Placement.Rotation)
                  & ", ""centre"": " & Three (F.Placement.Translation)
@@ -804,6 +805,15 @@ package body Driver.Robot.Body_File is
                         R.Result.Table.Tilt_22 := Value (Item (Tilt, 3));
                         R.Result.Table.Points := Natural'Max (0, Whole (T, "points"));
                         R.Result.Table.Scatter := Value (Field (T, "scatter"));
+                        R.Result.Table_Response := Reals_Of (Field (T, "response"));
+                        declare
+                           Own : constant Real_Vectors.Vector := Reals_Of (Field (T, "own"));
+                        begin
+                           if Natural (Own.Length) = 9 then
+                              R.Result.Table_Own :=
+                                [for I in 1 .. 3 => [for J in 1 .. 3 => Own (Own.First_Index + 3 * (I - 1) + J - 1)]];
+                           end if;
+                        end;
                         R.Result.Placed := Truth (X, "placed");
                         R.Result.Placement := (Rotation    => Nine_Of (Field (P, "rotation")),
                                                Translation => Three_Of (Field (P, "centre")));

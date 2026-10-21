@@ -2314,7 +2314,9 @@ package body Driver.Robot.Kinematics is
    --  term through every depth together (Fit.Plane_Response), and each lens
    --  term through the lines of sight as well, the depths held (the plane
    --  refitted on the same points with the term moved by its standard
-   --  deviation either way). Unknown without the fit's covariance.
+   --  deviation either way), and that response (Response: three rows of as
+   --  many as the covariance has terms, row by row). Unknown, and no
+   --  response, without the fit's covariance.
    procedure Table_Estimate
      (U, V       : Real_Vectors.Vector;
       F          : Arm_Fit;
@@ -2323,7 +2325,8 @@ package body Driver.Robot.Kinematics is
       Plane      : Fit.Sight_Plane;
       Gains      : Fit.Real_Lists.Vector;
       Covariance : Fit.Real_Lists.Vector;
-      Estimate   : out Driver.Geometry.Plane_Estimate)
+      Estimate   : out Driver.Geometry.Plane_Estimate;
+      Response   : out Real_Vectors.Vector)
    is
       use Driver.Numerics.Arrays;
       Q     : constant Natural := Natural (U.Length);
@@ -2334,6 +2337,7 @@ package body Driver.Robot.Kinematics is
    begin
       if not Plane.Found or else Terms < Fit.Lens_Terms or else Terms * Terms /= Natural (Covariance.Length) then
          Estimate := (others => <>);
+         Response.Clear;
          return;
       end if;
       declare
@@ -2382,6 +2386,12 @@ package body Driver.Robot.Kinematics is
             Free (On);
             Free (S);
             Estimate := Fit.Plane_Estimate_Of (Plane, Total);
+            Response.Clear;
+            for D in T'Range (1) loop
+               for K in T'Range (2) loop
+                  Response.Append (T (D, K));
+               end loop;
+            end loop;
          end;
       end;
    end Table_Estimate;
@@ -2803,11 +2813,13 @@ package body Driver.Robot.Kinematics is
                            --  The table: the plane most of them lie on, with its
                            --  whole uncertainty (Table_In_Arm).
                            Fit.Dominant_Plane (Sights.all, Plane, On.all);
+                           Result.Table_Own := Plane.Covariance;
                            for B of On.all loop
                               Result.Table_On.Append (B);
                            end loop;
                            Table_Estimate (R.Query_U, R.Query_V, Result, Lens, Sights.all, Plane,
-                                           Report.Depth_Gains, Report.Covariance, Result.Table);
+                                           Report.Depth_Gains, Report.Covariance, Result.Table,
+                                           Result.Table_Response);
                            --  For the arm's placement: the plane as its eye sees it, with its points' scatter and
                            --  what the fit moves every depth by together.
                            Plane.Covariance :=
