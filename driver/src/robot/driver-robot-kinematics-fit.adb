@@ -5956,12 +5956,16 @@ package body Driver.Robot.Kinematics.Fit is
                   --  order: the first that leaves less is the one a fit at a time would have taken. One at a time, a
                   --  nine-joint arm's rounds took 10 to 20 s each of the bench's two minutes (s02 of the humanoid,
                   --  10-20: 10 to 28 fits a round).
+                  --  The first batch as many, the rest all at once: an order that leaves less than the one kept is
+                  --  likeliest among the cheap score's least, and the rest's batches each waited on its slowest fit,
+                  --  the threads a third of their time (the bench's nine-joint humanoid s2_1, 10-21).
                   declare
                      First : Positive := 1;
                   begin
                      while First <= Closes and then Best = 0 loop
                         declare
-                           Last : constant Positive := Natural'Min (Closes, First + Driver.Workers.Size - 1);
+                           Last : constant Positive :=
+                             (if First = 1 then Natural'Min (Closes, Driver.Workers.Size) else Closes);
                            procedure One (K : Positive) is
                            begin
                               Quick_Fit (Close (K), Unordered, Close_Fit (K));

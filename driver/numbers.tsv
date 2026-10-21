@@ -2048,6 +2048,7 @@ driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns 
 driver-robot-kinematics-fit.adb	([Across_Columns (3 * I - 2, C), Across_Columns (3 * I - 1, C), Across_Columns (3 * I, C)]);	3	structure	the three components of a sighting's equation, stored on three rows
 driver-robot-kinematics-fit.adb	(if Base (Base'First + J - 1).Slide then Zero3 else Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2);	2	structure	stage 2's terms a joint: its tilt (two), its side's angle (the third), the logarithm of its scale (the fourth)
 driver-robot-kinematics-fit.adb	(if Base (Base'First + J - 1).Slide then Zero3 else Cos (X (O + 2)) * F1 + Sin (X (O + 2)) * F2);	2	structure	stage 2's terms a joint: its tilt (two), its side's angle (the third), the logarithm of its scale (the fourth)
+driver-robot-kinematics-fit.adb	(if First = 1 then Natural'Min (Closes, Driver.Workers.Size) else Closes);	1	structure	the first batch: indices start at one
 driver-robot-kinematics-fit.adb	(if P <= 6 then	6	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	(if P.Found then (-1.0 / Sqrt (P.A * P.A)) * P.A else [0.0, 0.0, -1.0]);	1.0	math	a plane's unit normal towards the eye is minus its inverse-depth vector over its length; facing the eye before it is found
 driver-robot-kinematics-fit.adb	(if P.Found then -1.0 / Sqrt (P.A * P.A) else 0.0);	1.0	math	a plane's offset is minus one over the length of its inverse-depth vector
@@ -3666,6 +3667,7 @@ driver-wire.adb	when 0 | 1 | 2 =>	1	format	WebSocket framing and handshake (RFC 
 driver-wire.adb	when 0 | 1 | 2 =>	2	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 8 =>	8	format	WebSocket framing and handshake (RFC 6455)
 driver-wire.adb	when 9 =>	9	format	WebSocket framing and handshake (RFC 6455)
+driver-workers.adb	Next : Positive := 1;	1	structure	before Start: the first index there can be (Start sets it)
 driver-workers.adb	Stack : Worker_Stack (1 .. Natural'Max (1, Count));	1	structure	a pool of at least one worker
 driver-world-cameras.adb	Beside : constant Ray_Estimate := C.Ray ((U => Px.U + 1.0, V => Px.V));	1.0	structure	the next pixel along the row
 driver-world-estimates.adb	(O.Images (Into), True, Box, [1 => (At_Pixel => Prompt, On => True)]);	1	structure	a prompt of one point

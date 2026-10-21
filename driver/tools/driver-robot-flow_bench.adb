@@ -635,7 +635,8 @@ begin
                                              Edge := Edge or else Link_At (V.U (I) + D, V.V (I)) /= L
                                                or else Link_At (V.U (I), V.V (I) + D) /= L;
                                           end loop;
-                                          Classes (K) (Q) := (if L /= 0 and then Carries (L) then (if Edge then 2 else 1)
+                                          Classes (K) (Q) :=
+                                            (if L /= 0 and then Carries (L) then (if Edge then 2 else 1)
                                                               else 3);
                                        end;
                                     end if;
@@ -692,7 +693,8 @@ begin
                                          & ")");
                               end loop;
                               Put_Line ("profile: focal " & Image (100.0 * E, 1) & " %: table points move at most "
-                                        & Image (Worst, 3) & " px; flow scatter" & To_String (Line) & ", sum of squares "
+                                        & Image (Worst, 3) & " px; flow scatter" & To_String (Line)
+                                        & ", sum of squares "
                                         & Image (Total, 2));
                               declare
                                  Sums  : Real_Array (1 .. 3) := [others => 0.0];
@@ -1321,7 +1323,8 @@ begin
                --  written when it does not (the renders were most of a refinement's run, minutes a seed).
                package WIO renames Ada.Streams.Stream_IO;
                Wrists_Name : constant String :=
-                 (if Ada.Environment_Variables.Exists ("FLOW_WRISTS") then Ada.Environment_Variables.Value ("FLOW_WRISTS")
+                 (if Ada.Environment_Variables.Exists ("FLOW_WRISTS")
+                  then Ada.Environment_Variables.Value ("FLOW_WRISTS")
                   else "");
                Wrists_Read : constant Boolean := Wrists_Name /= "" and then Ada.Directories.Exists (Wrists_Name);
                Wrists_File : WIO.File_Type;
@@ -1452,8 +1455,8 @@ begin
                if Wrists_Name /= "" then
                   WIO.Close (Wrists_File);
                end if;
-               --  FLOW_REFINE_FROM_TRUTH (a study): the refinement started at the true eye; FLOW_REFINE_NO_PRIOR: the flow's
-               --  covariance made a million times its terms' units, its estimate no evidence.
+               --  FLOW_REFINE_FROM_TRUTH (a study): the refinement started at the true eye; FLOW_REFINE_NO_PRIOR: the
+               --  flow's covariance made a million times its terms' units, its estimate no evidence.
                if Ada.Environment_Variables.Exists ("FLOW_REFINE_FROM_TRUTH") then
                   Refined.Lens := (Fx => Cam.Fx, Fy => Cam.Fy, Cx => Cam.Cx, Cy => Cam.Cy, K1 | K2 => 0.0);
                   for K in Sets'Range loop
@@ -1467,11 +1470,13 @@ begin
                      end loop;
                   end loop;
                end if;
-               --  FLOW_TRUE_ASPECT (a study): the refinement given the true eye's aspect (its two focal lengths' ratio).
+               --  FLOW_TRUE_ASPECT (a study): the refinement given the true eye's aspect (its two focal lengths'
+               --  ratio).
                if Ada.Environment_Variables.Exists ("FLOW_TRUE_ASPECT") then
                   Refined.Lens.Fy := Refined.Lens.Fx * Cam.Fy / Cam.Fx;
                end if;
                Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Refined);
+               Put_Line ("the aligner's work in the refinement: " & Driver.Alignment.Work_Report);
                declare
                   Worst : Real := 0.0;
                   I     : Natural := Joints_True.First_Index;
@@ -1541,8 +1546,8 @@ begin
                      & Image (Refined.Lens.Cy, 1) & ") of ("
                      & Image (Cam.Cx, 1) & ", " & Image (Cam.Cy, 1) & ")");
                   --  The table as each arm's refined eye sees it against the true eye: its normal's angle and its
-                  --  distance from the eye (a plane's points tell these; they leave what is along the table and about its
-                  --  normal).
+                  --  distance from the eye (a plane's points tell these; they leave what is along the table and about
+                  --  its normal).
                   for K in Sets'Range loop
                      declare
                         N_W  : constant Vec3 := [0.0, 0.0, 1.0];
@@ -1564,8 +1569,9 @@ begin
                                   & " table " & Image (1000.0 * Along, 1) & " mm");
                      end;
                   end loop;
-                  --  Points over the table at heights of nought, 5, 10 and 30 cm (a grid 2 cm apart over the part of the
-                  --  table the true eye sees): how far each arm's refined eye puts them from the true eye's places, at most.
+                  --  Points over the table at heights of nought, 5, 10 and 30 cm (a grid 2 cm apart over the part of
+                  --  the table the true eye sees): how far each arm's refined eye puts them from the true eye's places,
+                  --  at most.
                   for K in Sets'Range loop
                      declare
                         P      : constant Rigid := Refined.Poses (K);
@@ -1601,10 +1607,12 @@ begin
                                     end;
                                  end loop;
                               end loop;
-                              Append (Line_H, " at" & Natural'Image (Natural (100.0 * H)) & " cm " & Image (Worst, 2) & " px");
+                              Append (Line_H, " at" & Natural'Image (Natural (100.0 * H)) & " cm "
+                                      & Image (Worst, 2) & " px");
                            end;
                         end loop;
-                        Put_Line ("refined arm" & Sets (K).Number'Image & ": the table's points at most" & To_String (Line_H));
+                        Put_Line ("refined arm" & Sets (K).Number'Image & ": the table's points at most"
+                                  & To_String (Line_H));
                      end;
                   end loop;
                   for K in Sets'Range loop
@@ -1814,8 +1822,8 @@ begin
                      Found : Match_Vectors.Vector;
                      Asked : Natural := 0;
                   begin
-                     --  Every point aligned at once (Driver.Parallel_For: each writes its own slot), from plain copies of the points
-                     --  and the pictures.
+                     --  Every point aligned at once (Driver.Parallel_For: each writes its own slot), from plain copies
+                     --  of the points and the pictures.
                      declare
                         Count : constant Natural := Natural (Sights.Length);
                         type Sight_Array is array (Positive range <>) of Sight;
@@ -2221,7 +2229,8 @@ begin
                                            2) & " deg");
                      end;
                   end;
-                  --  Converged: the eye this round moved the arms' joints in the picture by no more than its own spread there.
+                  --  Converged: the eye this round moved the arms' joints in the picture by no more than its own spread
+                  --  there.
                   declare
                      Moved        : Real := 0.0;
                      Now_U, Now_V : Real_Vectors.Vector;
@@ -2229,20 +2238,19 @@ begin
                      for X of Joints_At loop
                         declare
                            U, V : Real;
-                           Seen : constant Boolean := Project (Lens, Pose, X, U, V);
+                           --  a joint out of the picture moves in it all the same
+                           Seen : constant Boolean := Project (Lens, Pose, X, U, V) with Unreferenced;
                         begin
                            Now_U.Append (U);
                            Now_V.Append (V);
-                           if not Seen then
-                              null;   --  a joint out of the picture moves in it all the same
-                           end if;
                         end;
                      end loop;
                      if Prev_U.Is_Empty then
                         Moved := Real'Last;
                      else
                         for K in Now_U.First_Index .. Now_U.Last_Index loop
-                           Moved := Real'Max (Moved, EF.Sqrt ((Now_U (K) - Prev_U (K)) ** 2 + (Now_V (K) - Prev_V (K)) ** 2));
+                           Moved := Real'Max
+                             (Moved, EF.Sqrt ((Now_U (K) - Prev_U (K)) ** 2 + (Now_V (K) - Prev_V (K)) ** 2));
                         end loop;
                      end if;
                      Prev_U := Now_U;
