@@ -8913,6 +8913,11 @@ package body Driver.Robot.Tests is
       begin
          Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Result);
          Check (Result.Determined, "the eye placed again is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
+         --  A table's picture is a homography, eight terms of the eye's ten, every further arm's six told by its own
+         --  places and the one plane: the focal length against the distance and the principal point against the tilt
+         --  are left, and the places tell every other direction of the flows' terms (Report.Places_Told).
+         Check (Result.Places_Told = Flow.Terms_For (Arms) - 2, "the places tell" & Result.Places_Told'Image
+                & " of the flows' terms' directions, not all but the plane's two");
          Check (Table_Off (Result) < Flows_Off, "the table's points lie no nearer the true eye's places than the flows' "
                 & "eye put them:" & Real'Image (Table_Off (Result)) & " px against" & Real'Image (Flows_Off));
       end;

@@ -65,6 +65,9 @@ package body Driver.Robot.Flows is
       Unit_Sigma : Real_Access;
       Steps  : Real_Access;
       Taken  : Natural := 0;
+      --  How many of its poses (the first ones) the arm's own eye has a picture of: the scene's stills run ahead of
+      --  the flow poses along the same poses, and a pose stilled is not pictured again when the flows reach it.
+      Stilled : Natural := 0;
       --  The arm's own eye, its fit's place among the model's, and that eye's pictures at the arm's poses with where
       --  it stood in the arm's reference frame (Flow_Eye.Refine_By_Scene: the world it saw places the fixed eyes).
       Eye     : Eye_Id'Base := 0;
@@ -450,12 +453,18 @@ package body Driver.Robot.Flows is
          Last_Why    : array (1 .. Count_E) of Ada.Strings.Unbounded.Unbounded_String;
          Told        : array (1 .. Count_E) of Boolean := [others => False];   --  the flow told the eye's place
          Settled     : Boolean := False;   --  every eye placed or a doubling of the poses left none surer
+         --  Per eye, the directions the world's places told at its last fit with these flow poses (Report.Places_Told),
+         --  and whether some eye's grew with the last doubling of the stills: none is judged before a doubling of the
+         --  stills leaves the places telling no more, so that the flows tell only what the places cannot.
+         Last_Places : array (1 .. Count_E) of Natural := [others => 0];
+         Grown       : Boolean := False;
 
          function Eye_Of (K : Positive) return Eye_Id is (Eye_Id (Eyes (K - 1)));
 
          --  Up to Up_To poses of arm A, the arm turning one joint at a time either way at each, every eye that sees
-         --  it taking still views.
-         procedure Capture_Arm (A : Positive; Up_To : Positive) is
+         --  it taking still views; then the arm's own eye's stills of the scene at the poses after them, up to
+         --  Stills_To (the arm still at each: one move, no turns).
+         procedure Capture_Arm (A : Positive; Up_To : Positive; Stills_To : Natural) is
             Info : Arm_Info renames Arms (A);
             N    : constant Positive := Info.N;
 
@@ -588,6 +597,40 @@ package body Driver.Robot.Flows is
                Go_To (Pose);
             end Find_Steps;
 
+            --  The arm's own eye's picture as the arm stands, and where that eye stands in the arm's reference frame.
+            procedure Wrist_Here is
+            begin
+               declare
+                  V        : constant Driver.Pixels.View := M.Eyes (Info.Eye).Settled;
+                  Last     : constant Natural := M.Beats - 1;
+                  Absolute : Real_Array (1 .. N);
+               begin
+                  for C in 1 .. N loop
+                     Absolute (C) := Driver.Robot.Channels.Reading (M, Info.Group, Last, C);
+                  end loop;
+                  declare
+                     W    : constant Positive := Driver.Pixels.Width (V);
+                     H    : constant Positive := Driver.Pixels.Height (V);
+                     Mask : constant Flow.Pixel_Flags_Access := new Flow.Pixel_Flags (1 .. W * H);
+                  begin
+                     for Y in 0 .. H - 1 loop
+                        for X in 0 .. W - 1 loop
+                           Mask (Y * W + X + 1) :=
+                             Driver.Robot.Kinematics.Sees_World (M, Info.Arm, Real (X) + 0.5, Real (Y) + 0.5);
+                        end loop;
+                     end loop;
+                     Info.Wrists.Append
+                       (Flow.Wrist_Picture'(Luma   => Means_Of (V), Width => W, Height => H,
+                                            Eye    =>
+                                              Driver.Robot.Kinematics.Eye_In_Reference (M, Info.Arm, Absolute),
+                                            World  => Mask));
+                     for C in 1 .. N loop
+                        Info.Wrist_Readings.Append (Absolute (C));
+                     end loop;
+                  end;
+               end;
+            end Wrist_Here;
+
             procedure Capture (K : Positive) is
                Pose     : constant Real_Array := Pose_Targets (K);
                Still    : View_Vectors.Vector;
@@ -606,37 +649,10 @@ package body Driver.Robot.Flows is
                   Take (Still);
                end if;
                Readings := Readings_Now;
-               --  The arm's own eye's picture at the pose, and where that eye stands in the arm's reference frame.
-               if Info.Eye > 0 then
-                  declare
-                     V        : constant Driver.Pixels.View := M.Eyes (Info.Eye).Settled;
-                     Last     : constant Natural := M.Beats - 1;
-                     Absolute : Real_Array (1 .. N);
-                  begin
-                     for C in 1 .. N loop
-                        Absolute (C) := Driver.Robot.Channels.Reading (M, Info.Group, Last, C);
-                     end loop;
-                     declare
-                        W    : constant Positive := Driver.Pixels.Width (V);
-                        H    : constant Positive := Driver.Pixels.Height (V);
-                        Mask : constant Flow.Pixel_Flags_Access := new Flow.Pixel_Flags (1 .. W * H);
-                     begin
-                        for Y in 0 .. H - 1 loop
-                           for X in 0 .. W - 1 loop
-                              Mask (Y * W + X + 1) :=
-                                Driver.Robot.Kinematics.Sees_World (M, Info.Arm, Real (X) + 0.5, Real (Y) + 0.5);
-                           end loop;
-                        end loop;
-                        Info.Wrists.Append
-                          (Flow.Wrist_Picture'(Luma   => Means_Of (V), Width => W, Height => H,
-                                               Eye    =>
-                                                 Driver.Robot.Kinematics.Eye_In_Reference (M, Info.Arm, Absolute),
-                                               World  => Mask));
-                        for C in 1 .. N loop
-                           Info.Wrist_Readings.Append (Absolute (C));
-                        end loop;
-                     end;
-                  end;
+               --  The arm's own eye's picture at the pose, unless a still of the scene took it there before.
+               if Info.Eye > 0 and then K > Info.Stilled then
+                  Wrist_Here;
+                  Info.Stilled := K;
                end if;
                for J in 1 .. N loop
                   declare
@@ -727,12 +743,27 @@ package body Driver.Robot.Flows is
                Info.Taken := Info.Taken + 1;
                Capture (Info.Taken);
             end loop;
+            if Info.Eye > 0 then
+               for K in Natural'Max (Info.Stilled, Info.Taken) + 1 .. Stills_To loop
+                  Go_To (Pose_Targets (K));
+                  exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                  declare
+                     Views : View_Vectors.Vector;
+                  begin
+                     Take (Views);
+                  end;
+                  Wrist_Here;
+                  Info.Stilled := K;
+               end loop;
+            end if;
             Go_To (Pose_Targets (1));
          end Capture_Arm;
 
          --  Every eye not yet placed fitted to every arm it saw two poses of or more, through its one lens: stored when
          --  it is told (in the frame of the first such arm); not when a doubling of the poses left it no surer.
-         procedure Fit_All is
+         --  May_Grow: the stills may double yet, and an eye whose places told more than at the stills before waits for
+         --  them.
+         procedure Fit_All (May_Grow : Boolean) is
             More : Boolean := False;
          begin
             for E in 1 .. Count_E loop
@@ -843,9 +874,15 @@ package body Driver.Robot.Flows is
                                             & (if Result.Determined then "told" else "untold") & ", focal "
                                             & Driver.Log.Image (Result.Lens.Fx, 1) & ", spread "
                                             & Driver.Log.Image (Result.Spread, 2) & " px"
+                                            & ", the places tell" & Natural'Image (Result.Places_Told) & " directions"
+                                            & (if May_Grow and then Result.Places_Told > Last_Places (E)
+                                               then " (more than the stills before: more stills first)" else "")
                                             & (if Result.Determined then ""
                                                else ": " & Ada.Strings.Unbounded.To_String (Result.Why)));
-                           if Result.Determined then
+                           if May_Grow and then Result.Places_Told > Last_Places (E) then
+                              Grown := True;
+                              Last_Why (E) := Result.Why;
+                           elsif Result.Determined then
                               Store (M, Eye_Of (E), [for U in 1 .. Used => Arms (Which (U)).Arm], Result);
                               Told (E) := True;
                            else
@@ -855,6 +892,7 @@ package body Driver.Robot.Flows is
                                  Last_Spread (E) := Result.Spread;
                               end if;
                            end if;
+                           Last_Places (E) := Result.Places_Told;
                            for U in 1 .. Used loop
                               for V in Views (U)'Range loop
                                  Free (Views (U) (V));
@@ -874,21 +912,41 @@ package body Driver.Robot.Flows is
                Sees_It (E, A) := Driver.Robot.Kinematics.Sees (M, Eye_Of (E), Arms (A).Group);
             end loop;
          end loop;
-         --  The poses double, from two, until every eye is told or a doubling leaves none surer.
+         --  The poses double, from two, until every eye is told or a doubling leaves none surer; with each, the arms'
+         --  own eyes' stills of the scene, from as many, double until a doubling leaves the places telling no more or
+         --  the stills would outnumber the flows' own pictures (a still and two a joint at every pose, of the arm with
+         --  the fewest joints): the places check the flows with no more pictures than the flows take.
          declare
             Wanted : Positive := 2;
+            Stills : Positive := 2;
          begin
             loop
                for A in 1 .. Count_A loop
                   if (for some E in 1 .. Count_E => Sees_It (E, A)
                                                       and then not Told (E))
                   then
-                     Capture_Arm (A, Wanted);
+                     Capture_Arm (A, Wanted, Stills);
                   end if;
                end loop;
-               Fit_All;
-               exit when Settled;
-               Wanted := 2 * Wanted;
+               declare
+                  Pictures : Positive := Positive'Last;   --  the flows' own, of the arm with the fewest
+               begin
+                  for A in 1 .. Count_A loop
+                     if (for some E in 1 .. Count_E => Sees_It (E, A) and then not Told (E)) then
+                        Pictures := Positive'Min (Pictures, Wanted * (2 * Arms (A).N + 1));
+                     end if;
+                  end loop;
+                  Grown := False;
+                  Fit_All (May_Grow => 2 * Stills <= Pictures);
+               end;
+               exit when Settled and then not Grown;
+               if Grown then
+                  Stills := 2 * Stills;
+               else
+                  Wanted := 2 * Wanted;
+                  Stills := Positive'Max (Stills, Wanted);
+                  Last_Places := [others => 0];
+               end if;
             end loop;
          end;
          for E in 1 .. Count_E loop

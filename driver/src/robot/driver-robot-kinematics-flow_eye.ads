@@ -107,6 +107,9 @@ package Driver.Robot.Kinematics.Flow_Eye is
       --  the poses)
       Additive, Relative : Real := 0.0;
       --  the rates' spread the fit found: times their stated sigmas, and a share of the rate itself
+      Places_Told : Natural := 0;
+      --  of the flows' terms' directions, those the world's places tell better than the flows (Refine_By_Scene's last
+      --  split; none from the flows alone)
    end record;
 
    procedure Fit_Eye

@@ -2609,9 +2609,6 @@ package body Driver.Robot.Kinematics.Flow_Eye is
         (if K = 1 then Lens0.K1 + Z (G_F + 1) else Lens0.K2 + Z (G_F + 2));
       function Bend_Cost (Z : Real_Vector) return Real is
         (Bend_Prior (1) * Bend_Of (Z, 1) ** 2 + Bend_Prior (2) * Bend_Of (Z, 2) ** 2);
-      --  How much less the flows' information is taken than their covariance states: their estimate's misfit against
-      --  the places', where those tell a direction better (Weigh_Flows); one until it says more.
-      Flows_Scale  : Real := 1.0;
       --  Some direction of the flows' has no least of their misfit (Line_Search): the eye is not told.
       Flows_Untold : Boolean := False;
       Began        : constant Duration := Driver.Clock.Seconds;   --  for the log: how long the rounds take
@@ -3224,6 +3221,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          Was_Seen     : Flag_Array (Joints'Range) := [others => False];
          Rounds   : Natural := 0;
          Kept_All : Natural := 0;
+         Places_Told : Natural := 0;   --  the last split's directions of the flows' terms the places tell (Report)
          Widened  : Real := 1.0;   --  the most the pictures' jackknife widened the covariance in any direction
          No_World : Boolean := False;   --  the first round found no point to place by
       begin
@@ -3280,8 +3278,14 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                           Driver.Alignment.Align_At_Scale (Pyramids (S.Picture), Fixed_Pyramid, Query, Bend => Bend);
                         use type Driver.Alignment.Verdict;
                      begin
+                        --  A place counts where the aligner tells it narrower than the window it was looked for in: one
+                        --  stated as wide or wider tells no more than the prediction did, and such places held the eye
+                        --  where the flows had put it (the fake's seed 26 at four poses, 10-22: 174 of 707 kept, stated 5
+                        --  to 12 px across a window of 2, the eye told 123 mm off within the arms' reach; without them 388
+                        --  places at 0.08 px, the eye told 7 mm off, its terms' chi square 15.5 over 16).
                         if Answer.Verdict = Driver.Alignment.Found and then Answer.Narrow
                           and then Answer.Cov.UU > 0.0 and then Answer.Cov.VV > 0.0
+                          and then Answer.Cov.UU < Window ** 2 and then Answer.Cov.VV < Window ** 2
                         then
                            Slots (I) := (Got => True, U => Answer.To.U, V => Answer.To.V,
                                          Su => Sqrt (Answer.Cov.UU), Sv => Sqrt (Answer.Cov.VV),
@@ -3430,62 +3434,6 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      end loop;
                      Free (Jac);
                   end Normal_At;
-
-                  --  How far the flows' estimate (the terms at nought) lies from the eye the fit leaves, in the
-                  --  directions the places tell better than the flows (Split, Lambda one or more), against what the two
-                  --  leave each uncertain (the flows' sigma, one in Dirs' units, and the places', one over Lambda,
-                  --  their misfit per freedom taken). Where the misfit says the flows' covariance states too little,
-                  --  their information is taken at the factor that makes the two agree (Flows_Scale, Honest_Lower
-                  --  widened: M the misfit's squares, L the places' share, N the directions, the factor (M - L) / N)
-                  --  and the directions split again (Rescaled). The flows' estimate of the fake's seed 21 lay 4 % off
-                  --  in its focal length against a sigma of 0.64 % and an arm's centre 18 mm off against 9, and the
-                  --  directions it was left with put that arm's table points 1.66 px off (10-21).
-                  procedure Weigh_Flows (Rescaled : out Boolean) is
-                     R0     : constant Real_Array := Residuals (Y);
-                     Per_Freedom : constant Real :=
-                       Real'Max (1.0, Cost_Of (R0) / Real (Natural'Max (1, R0'Length - G)));
-                     Ata    : Real_Matrix (1 .. G, 1 .. G);
-                     Atb    : Real_Vector (1 .. G);
-                     Dirs   : Real_Matrix (1 .. G, 1 .. G);
-                     Lambda : Real_Vector (1 .. G);
-                     Hy     : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Honest_Lower, Y (1 .. G_F));
-                     Misfit, Places_Share : Real := 0.0;
-                     Directions : Natural := 0;
-                  begin
-                     Rescaled := False;
-                     Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
-                     Split (Ata, Dirs, Lambda);
-                     for I in 1 .. G_F loop   --  the bend's own two are no flows' estimate
-                        if Lambda (I) >= 1.0 then
-                           declare
-                              Along : Real := 0.0;   --  the eye's place along the direction, in the flows' sigmas
-                           begin
-                              for P in 1 .. G_F loop
-                                 Along := Along + Dirs (P, I) * Hy (P);
-                              end loop;
-                              Misfit := Misfit + Along ** 2;
-                              Places_Share := Places_Share + 1.0 / Lambda (I);
-                              Directions := Directions + 1;
-                           end;
-                        end if;
-                     end loop;
-                     if Directions > 0
-                       and then (Misfit - Places_Share) / Real (Directions)
-                                  > 1.0 + Driver.Conventions.Unchanged_Fraction
-                     then
-                        declare
-                           Factor : constant Real := (Misfit - Places_Share) / Real (Directions);
-                        begin
-                           Flows_Scale := Flows_Scale * Factor;
-                           for P in 1 .. G_F loop
-                              for Q in 1 .. G_F loop
-                                 Honest_Lower (P, Q) := Honest_Lower (P, Q) * Sqrt (Factor);
-                              end loop;
-                           end loop;
-                        end;
-                        Rescaled := True;
-                     end if;
-                  end Weigh_Flows;
 
                   --  How the round's estimate answers a change of its evidence, to first order, as its own steps take
                   --  it: the places' Gauss-Newton step in their directions (Split's with Lambda one or more,
@@ -3794,8 +3742,6 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      end;
                   end Respond;
 
-                  Rescaled : Boolean := False;
-
                   Dropped : Natural;
                   Moved   : Real := 0.0;
                   Scatter : Real := Real'Last;   --  of the kept places from the terms, pixels
@@ -3936,19 +3882,28 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                               Free (R);
                            end;
                         end loop;
-                        if Dropped = 0 and then Kept_Count > 0 then
-                           Weigh_Flows (Rescaled);
-                        end if;
-                        exit when (Dropped = 0 and then not Rescaled) or else Kept_Count = 0;
+                        exit when Dropped = 0 or else Kept_Count = 0;
                      end loop;
                   end if;
                   Kept_All := Kept_Count;
                   Fitted_At := Driver.Clock.Seconds - Began;
                   --  The covariance: in the places' directions the inverse of their normal matrix over their misfit
                   --  per freedom (never below one); in the flows', what the flows' jackknife over their poses leaves
-                  --  (each pose of each arm left out, its shift along the direction weighed by the pixels it holds),
-                  --  times how much less their information is taken (Flows_Scale: what their estimate misses by
-                  --  where the places tell, they are taken to miss by along their own directions too).
+                  --  (each pose of each arm left out, its shift along the direction weighed by the pixels it holds).
+                  --  Each jackknife's variance is taken at its freedoms: one over G groups states it to G - 1 of them,
+                  --  and an error over a sigma so known follows Student's t, whose variance is that many freedoms over
+                  --  two fewer (Driver.Uncertain's rule for a sigma from few samples, here as a variance). Taken at the
+                  --  jackknife's word alone, two poses of the boot's (four groups) told five of the fake's nine bent
+                  --  seeds with their arms' reach 1 to 2 cm off and the eye's terms six times their stated variance
+                  --  (10-22). The flows' information is taken as their jackknife states it: weighed once by their
+                  --  estimate's misfit against the places where those tell a direction better (34c4c788), it was taken
+                  --  at 1/2.7 to 1/17 - that misfit is their estimate's alone, several per cent off in the focal
+                  --  length, where the refinement uses them only along their own directions with the places' terms
+                  --  held - and once the places tell every direction a plane can (the boot's scene stills, Flows), the
+                  --  flows' errors along the two it cannot were 0.5 to 1.15 of their jackknife's sigma; the weighing
+                  --  left seven of seventeen eyes told that were 2 to 4 mm off, and without it, the stills doubled as the
+                  --  boot doubles them, all nine of the fake's bent seeds were told 3.5 to 9.3 mm off within each arm's
+                  --  reach, their terms' chi square 151.9 over 144 (10-22).
                   declare
                      R0    : constant Real_Array := Residuals (Y);
                      Per_Freedom : constant Real :=
@@ -3961,6 +3916,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
                      Split (Ata, Dirs, Lambda);
                      Definite := (for all I in 1 .. G => Lambda (I) > 0.0) and then not Flows_Untold;
+                     Places_Told := 0;
+                     for I in 1 .. G_F loop   --  the bend's own two are the places' always
+                        if Lambda (I) >= 1.0 then
+                           Places_Told := Places_Told + 1;
+                        end if;
+                     end loop;
                      Cov := [others => [others => 0.0]];
                      Cov_F := [others => [others => 0.0]];
                      for I in 1 .. G loop
@@ -4043,8 +4004,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                        end loop;
                                     end loop;
                                  end;
-                                 if Groups >= 2 then
-                                    Var := Flows_Scale * Sum / Real (Groups);
+                                 if Groups > 3 then
+                                    Var := Sum / Real (Groups) * Real (Groups - 1) / Real (Groups - 3);
                                  else
                                     Definite := False;
                                  end if;
@@ -4109,12 +4070,14 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                  end if;
                               end;
                            end loop;
-                           if Groups >= 2 then
+                           if Groups > 3 then
                               for A in 1 .. G loop
                                  for B in 1 .. G loop
-                                    Spread_M (A, B) := Spread_M (A, B) / Real (Groups);
+                                    Spread_M (A, B) := Spread_M (A, B) / Real (Groups) * Real (Groups - 1) / Real (Groups - 3);
                                  end loop;
                               end loop;
+                           elsif Groups >= 2 then
+                              Definite := False;
                            end if;
                            Widen_Covariance (Cov, Spread_M, Widened);
                            declare
@@ -4261,12 +4224,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                    & " px from the eye, aligned at " & Driver.Log.Image (Real (Aligned_At), 1)
                                    & " s, fitted at " & Driver.Log.Image (Real (Fitted_At), 1) & ", done at "
                                    & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ", widened "
-                                   & Driver.Log.Image (Widened, 1) & ", the flows' information taken at 1/"
-                                   & Driver.Log.Image (Flows_Scale, 2) & "; the arms' joints "
+                                   & Driver.Log.Image (Widened, 1) & "; the arms' joints "
                                    & "moved " & Driver.Log.Image (Moved, 2) & " px, spread "
                                    & Driver.Log.Image (Spread, 2) & " px (the flows' directions "
                                    & Driver.Log.Image (Spread_F, 2) & ", with the arms' fits "
-                                   & Driver.Log.Image (Spread_T, 2) & "), focal "
+                                   & Driver.Log.Image (Spread_T, 2) & "), the places telling" & Places_Told'Image
+                                   & " of the flows' terms' directions, focal "
                                    & Driver.Log.Image (Lens_Of (Y).Fx, 1)
                                    & (if Definite
                                       then "; sigmas: focal " & Driver.Log.Image (100.0 * Sqrt (Cov (1, 1)), 2)
@@ -4329,6 +4292,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
             end loop;
          end if;
          Result.Spread := Spread_T;
+         Result.Places_Told := Places_Told;
          Result.Determined := False;
          if not Settled then
             Result.Why := To_Unbounded_String
