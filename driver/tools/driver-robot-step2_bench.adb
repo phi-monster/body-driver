@@ -39,6 +39,8 @@ procedure Driver.Robot.Step2_Bench is
    Near_Low   : constant Real := Setting ("BENCH_NEAR_LOW", 1.5);     --  px, a near miss's size, least
    Near_High  : constant Real := Setting ("BENCH_NEAR_HIGH", 4.0);    --  and most
    Rounds     : constant Natural := Natural (Setting ("BENCH_ROUNDS", 8.0));
+   --  BENCH_DRAW (a study): another draw of the noise and the near misses for the same arm (nought: the arm's own).
+   Draw       : constant Natural := Natural (Setting ("BENCH_DRAW", 0.0));
    Grid       : constant Positive := Positive (Setting ("BENCH_GRID", 16.0));   --  px between the points' rays
    Keep_Share : constant Real := Setting ("BENCH_KEEP", 0.5);         --  of the reference's points, a keyframe keeps
    Levels     : constant Real_Array := [8.0, 16.0, 32.0, 64.0];   --  the sweep's turns, by the px they move the view
@@ -491,7 +493,7 @@ procedure Driver.Robot.Step2_Bench is
          end Motion_At;
 
       begin
-         Ada.Numerics.Float_Random.Reset (Rng, Seed * 31 + Cam);
+         Ada.Numerics.Float_Random.Reset (Rng, Seed * 31 + Cam + 7919 * Draw);
          Draw_Of (Group_Of (W, Path (Path'First)), N, Order_D, Factor);
          for C in 1 .. N loop
             Of_Fake (Order_D (C)) := C;
@@ -812,6 +814,12 @@ procedure Driver.Robot.Step2_Bench is
                                & True_J (C).P (1)'Image & True_J (C).P (2)'Image & True_J (C).P (3)'Image & ", unit"
                                & True_J (C).C'Image);
                   end loop;
+                  --  The fit's lens against the eye's own: its focal lengths, its aspect, its distortion, and whether it
+                  --  was fitted as a pinhole with square pixels (its aspect held at one, the distortion at nought).
+                  Put_Line ("    fit lens: focal" & Prev_L.Fx'Image & Prev_L.Fy'Image & " for" & W.Cameras (Cam).Fx'Image
+                            & W.Cameras (Cam).Fy'Image & ", aspect" & Real'Image (Prev_L.Fy / Prev_L.Fx) & " for"
+                            & Real'Image (W.Cameras (Cam).Fy / W.Cameras (Cam).Fx) & ", distortion" & Prev_L.K1'Image
+                            & Prev_L.K2'Image & (if Prev.Pinhole then ", a pinhole" else ", the extras fitted"));
                   --  The fit's joints against the true ones, as far as the fit's free scale lets them be set beside
                   --  each other: each axis's angle off the true one, and its unit over the true unit (by the sign of
                   --  the axis's).
@@ -836,12 +844,14 @@ procedure Driver.Robot.Step2_Bench is
                         function V (P, Q : Positive) return Real is
                           (Prev.Covariance (Prev.Covariance.First_Index + (P - 1) * M + Q - 1));
                         Index : array (1 .. 3 * N) of Positive := [others => 1];
+                        Names : array (1 .. 3 * N) of Unbounded_String;
                         E     : Real_Vector (1 .. 3 * N) := [others => 0.0];
                         K     : Natural := 0;
-                        procedure Add (Term : Positive; Error : Real) is
+                        procedure Add (Term : Positive; Error : Real; Name : String) is
                         begin
                            K := K + 1;
                            Index (K) := Term;
+                           Names (K) := To_Unbounded_String (Name);
                            E (K) := Error;
                         end Add;
                      begin
@@ -859,11 +869,11 @@ procedure Driver.Robot.Step2_Bench is
                               T2 := Fit.Term_Of (C, Fit.Tilt_2);
                               Tc := Fit.Term_Of (C, Fit.Scale);
                               Add (T1, Sign * (True_J (C).W (1) * E1 (1) + True_J (C).W (2) * E1 (2)
-                                               + True_J (C).W (3) * E1 (3)));
+                                               + True_J (C).W (3) * E1 (3)), C'Image & "t1");
                               Add (T2, Sign * (True_J (C).W (1) * E2 (1) + True_J (C).W (2) * E2 (2)
-                                               + True_J (C).W (3) * E2 (3)));
+                                               + True_J (C).W (3) * E2 (3)), C'Image & "t2");
                               if not Fj.Slide then
-                                 Add (Tc, Sign * True_J (C).C - Fj.C);
+                                 Add (Tc, Sign * True_J (C).C - Fj.C, C'Image & "u");
                               end if;
                               Put_Line ("    fit joint c" & C'Image & " against its covariance: tilts"
                                         & Real'Image (E (K - (if Fj.Slide then 1 else 2))
@@ -898,6 +908,58 @@ procedure Driver.Robot.Step2_Bench is
                                  end loop;
                                  Put_Line ("    fit joints against their covariance: chi square" & Real'Image (Chi)
                                            & " over" & K'Image & " tilts and units");
+                                 --  The error along each axis of that covariance over the axis's sigma, the three largest: which
+                                 --  combination of the tilts and units the fit states too little of (its three largest terms:
+                                 --  joint, then t1 or t2 for a tilt, u for a unit).
+                                 declare
+                                    Values  : Real_Vector (1 .. K);
+                                    Vectors : Real_Matrix (1 .. K, 1 .. K);
+                                    Z       : Real_Vector (1 .. K);
+                                    Done    : array (1 .. K) of Boolean := [others => False];
+                                    function Name (P : Positive) return String is (To_String (Names (P)));
+                                 begin
+                                    Driver.Numerics.Dense.Small_Eigensystem (Sub, Values, Vectors);
+                                    for A in 1 .. K loop
+                                       Z (A) := 0.0;
+                                       for P in 1 .. K loop
+                                          Z (A) := Z (A) + Vectors (P, A) * E (P);
+                                       end loop;
+                                       Z (A) := (if Values (A) > 0.0 then Z (A) / EF.Sqrt (Values (A)) else 0.0);
+                                    end loop;
+                                    for Rank in 1 .. 3 loop
+                                       declare
+                                          Best : Natural := 0;
+                                       begin
+                                          for A in 1 .. K loop
+                                             if not Done (A) and then (Best = 0 or else abs Z (A) > abs Z (Best)) then
+                                                Best := A;
+                                             end if;
+                                          end loop;
+                                          Done (Best) := True;
+                                          declare
+                                             Line : Unbounded_String :=
+                                               To_Unbounded_String ("    fit joints' axis" & Rank'Image & ":" & Real'Image (Z (Best))
+                                                                    & " sigmas, its sigma" & Real'Image (EF.Sqrt (Values (Best))) & ",");
+                                             Used : array (1 .. K) of Boolean := [others => False];
+                                          begin
+                                             for Top in 1 .. 3 loop
+                                                declare
+                                                   Big : Natural := 0;
+                                                begin
+                                                   for P in 1 .. K loop
+                                                      if not Used (P) and then (Big = 0 or else abs Vectors (P, Best) > abs Vectors (Big, Best)) then
+                                                         Big := P;
+                                                      end if;
+                                                   end loop;
+                                                   Used (Big) := True;
+                                                   Append (Line, " " & Name (Big) & " (" & Real'Image (Vectors (Big, Best)) & ")");
+                                                end;
+                                             end loop;
+                                             Put_Line (To_String (Line));
+                                          end;
+                                       end;
+                                    end loop;
+                                 end;
                               end;
                            else
                               Put_Line ("    fit joints against their covariance: not positive definite");

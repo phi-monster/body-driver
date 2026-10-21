@@ -1376,6 +1376,11 @@ begin
                Fixed  : Flow.Luma_Access := Picture;
                type Pictures_Access is access Flow.Wrist_Picture_Array;
                Pictures : array (Sets'Range) of Pictures_Access;
+               --  Per picture, the pixels whose ray meets the table first (the study's: a place on a thing on the table
+               --  is not where the table's plane puts it).
+               type Mask_List is array (Positive range <>) of Flow.Pixel_Flags_Access;
+               type Mask_List_Access is access Mask_List;
+               Table_Masks : array (Sets'Range) of Mask_List_Access;
                type Variants_Access is access Flow.Arm_Variant_Array;
                type Joints_Access is access Fit.Joint_Array;
                type Eyes_Access is access Flow.Rigid_Array;
@@ -1427,6 +1432,7 @@ begin
                      begin
                         Ada.Numerics.Float_Random.Reset (Draws, Seed + K);
                         Pictures (K) := new Flow.Wrist_Picture_Array (1 .. Given + Extra);
+                        Table_Masks (K) := new Mask_List (1 .. Given + Extra);
                         for J in 1 .. N loop
                            Rest (J) := W.Links (Links (Links.First_Index + J - 1)).Q;
                         end loop;
@@ -1493,7 +1499,8 @@ begin
                               begin
                                  if Wrists_Read then
                                     Flow.Pixel_Flags'Read (WIO.Stream (Wrists_File), Mask.all);
-                                 else
+                                 end if;
+                                 Table_Masks (K) (V) := new Flow.Pixel_Flags (1 .. C.Width * C.Height);
                                  for Y in 0 .. C.Height - 1 loop
                                     for X in 0 .. C.Width - 1 loop
                                        declare
@@ -1501,15 +1508,30 @@ begin
                                           Along : Real;
                                        begin
                                           Fake_Render.Nearest (W, C, Real (X) + 0.5, Real (Y) + 0.5, Solid, Along);
-                                          Mask (Y * C.Width + X + 1) := Solid > 0 and then W.Solids (Solid).Link = 0
-                                            and then (not Ada.Environment_Variables.Exists ("FLOW_TABLE_ONLY")
-                                                      or else To_String (W.Solids (Solid).Name) = "table");
+                                          Table_Masks (K) (V) (Y * C.Width + X + 1) :=
+                                            Solid > 0 and then To_String (W.Solids (Solid).Name) = "table";
+                                       end;
+                                    end loop;
+                                 end loop;
+                                 if not Wrists_Read then
+                                 for Y in 0 .. C.Height - 1 loop
+                                    for X in 0 .. C.Width - 1 loop
+                                       declare
+                                          Solid : Natural;
+                                          Along : Real;
+                                       begin
+                                          Fake_Render.Nearest (W, C, Real (X) + 0.5, Real (Y) + 0.5, Solid, Along);
+                                          Mask (Y * C.Width + X + 1) := Solid > 0 and then W.Solids (Solid).Link = 0;
                                        end;
                                     end loop;
                                  end loop;
                                     if Wrists_Name /= "" then
                                        Flow.Pixel_Flags'Write (WIO.Stream (Wrists_File), Mask.all);
                                     end if;
+                                 end if;
+                                 --  FLOW_TABLE_ONLY (a study): the world's pixels the table's alone, not the things on it.
+                                 if Ada.Environment_Variables.Exists ("FLOW_TABLE_ONLY") then
+                                    Mask.all := Table_Masks (K) (V).all;
                                  end if;
                                  Pictures (K) (V) :=
                                    (Luma => Luma, Width => C.Width, Height => C.Height, Eye => Placed, World => Mask);
@@ -1598,6 +1620,787 @@ begin
                --  ratio).
                if Ada.Environment_Variables.Exists ("FLOW_TRUE_ASPECT") then
                   Refined.Lens.Fy := Refined.Lens.Fx * Cam.Fy / Cam.Fx;
+               end if;
+               --  FLOW_PLACE_STUDY (a study): the aligner's own errors where the refinement asks it, the true eye's
+               --  prediction given: every arm's picture's table points on the refinement's grid, predicted into the
+               --  fixed picture by the true eye (and their neighbours, its warp), aligned as Refine_By_Scene aligns
+               --  them, against where the true eye sees them. How far off, against what is stated, and how the errors
+               --  share: their mean over all, over each sixth of the picture (a field), within one cell a patch wide
+               --  of the fixed picture across pictures, and within one wrist picture.
+               if Ada.Environment_Variables.Exists ("FLOW_PLACE_STUDY") then
+                  declare
+                     use type Flow.Pixel_Flags_Access;
+                     Fixed_P : constant Driver.Alignment.Pyramid :=
+                       Driver.Alignment.Pyramid_Of (Width, Height, Fixed.all);
+                     Window  : constant Real :=
+                       Driver.Alignment.Sigma_Of_Window (Driver.Alignment.Finest_Radius (Width, Height));
+                     Side    : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (Width, Height));
+                     Cells_U : constant Positive := (Width + Side - 1) / Side;
+                     Cells_V : constant Positive := (Height + Side - 1) / Side;
+                     type Found_Place is record
+                        Eu, Ev, Su, Sv : Real;
+                        Cell, Picture  : Positive;
+                        Sixth          : Positive;
+                        Scale          : Real;   --  the prediction's warp's scale (the geometric mean of its stretches)
+                        --  what the warp's curvature over the wrist patch would move the patch's middle by (half the
+                        --  second differences a half patch either way, both directions, over three: the mean square of
+                        --  a place in the patch against its half width squared)
+                        Bu, Bv         : Real;
+                        Arm            : Positive;   --  of the arms in order (Sets)
+                        X              : Vec3;       --  the table's point
+                        Cuv            : Real;       --  the stated covariance across and down
+                        --  the place found again with the prediction a pixel off across (Uu, Vu) and down (Uv, Vv),
+                        --  less the place found: when both were found (Pulled)
+                        Pulled         : Boolean;
+                        Pull_Uu, Pull_Vu, Pull_Uv, Pull_Vv : Real;
+                        On_Table       : Boolean;   --  the wrist picture's ray there meets the table first
+                     end record;
+                     package Found_Vectors is new Ada.Containers.Vectors (Positive, Found_Place);
+                     Found   : Found_Vectors.Vector;
+                     Asked   : Natural := 0;
+                     Picture_No : Natural := 0;
+                     --  FLOW_STUDY_CENTRED (a study of the caches rendered before 10-21): a pixel's content the light about
+                     --  its rays' mean place (Fake_Render.Raw_Shift off its centre): the places the truth gives moved by
+                     --  it, in the wrist pictures and the fixed one alike.
+                     Centred : constant Boolean := Ada.Environment_Variables.Exists ("FLOW_STUDY_CENTRED");
+                     Ray_U : constant Real := (if Centred then Fake_Render.Raw_Shift (1) else 0.0);
+                     Ray_V : constant Real := (if Centred then Fake_Render.Raw_Shift (2) else 0.0);
+                     function True_Place (X : Vec3; U, V : out Real) return Boolean is
+                        C : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (X, Truth.Translation));
+                     begin
+                        U := Cam.Cx + Cam.Fx * C (1) / C (3) - Ray_U;
+                        V := Cam.Cy + Cam.Fy * C (2) / C (3) - Ray_V;
+                        return C (3) > 0.0 and then U in 0.0 .. Real (Width) and then V in 0.0 .. Real (Height);
+                     end True_Place;
+                     function On_Table (Eye : Rigid; L : Fit.Lens; U, V : Real; X : out Vec3) return Boolean is
+                        D     : constant Vec3 := Times (Eye.Rotation, Fit.Ray (L, U + Ray_U, V + Ray_V));
+                        S_Hit : constant Real := (if D (3) /= 0.0 then (W.Table_Z - Eye.Translation (3)) / D (3) else -1.0);
+                     begin
+                        X := Plus (Eye.Translation, Scaled (S_Hit, D));
+                        return S_Hit > 0.0;
+                     end On_Table;
+                  begin
+                     for K in Sets'Range loop
+                        declare
+                           Wl : constant Fit.Lens := Worlds (K).Lens;
+                           Local_No : Natural := 0;   --  the picture's place among its arm's
+                        begin
+                           for P of Pictures (K).all loop
+                              Picture_No := Picture_No + 1;
+                              Local_No := Local_No + 1;
+                              declare
+                                 Pyr  : constant Driver.Alignment.Pyramid :=
+                                   Driver.Alignment.Pyramid_Of (P.Width, P.Height, P.Luma.all);
+                                 Grid : constant Positive := 2 * Positive'Max (1, Driver.Alignment.Half_Patch (P.Width, P.Height));
+                                 Gu   : Natural := Grid / 2;
+                              begin
+                                 while Gu < P.Width - Grid / 2 loop
+                                    declare
+                                       Gv : Natural := Grid / 2;
+                                    begin
+                                       while Gv < P.Height - Grid / 2 loop
+                                          declare
+                                             U0 : constant Real := Real (Gu) + 0.5;
+                                             V0 : constant Real := Real (Gv) + 0.5;
+                                             X, Xu, Xv : Vec3;
+                                             Tu, Tv, Uu, Uv, Vu, Vv : Real;
+                                             Mx : constant Natural := Gu;
+                                             My : constant Natural := Gv;
+                                          begin
+                                             if (P.World = null or else P.World (My * P.Width + Mx + 1))
+                                               and then On_Table (P.Eye, Wl, U0, V0, X)
+                                               and then On_Table (P.Eye, Wl, U0 + 1.0, V0, Xu)
+                                               and then On_Table (P.Eye, Wl, U0, V0 + 1.0, Xv)
+                                               and then True_Place (X, Tu, Tv) and then True_Place (Xu, Uu, Uv)
+                                               and then True_Place (Xv, Vu, Vv)
+                                             then
+                                                Asked := Asked + 1;
+                                                declare
+                                                   Query : constant Driver.Alignment.Prediction :=
+                                                     (From   => (U => U0, V => V0),
+                                                      To     => (U => Tu, V => Tv),
+                                                      Linear => (UU => Uu - Tu, UV => Vu - Tu, VU => Uv - Tv, VV => Vv - Tv),
+                                                      Cov    => (UU => Window ** 2, UV => 0.0, VV => Window ** 2),
+                                                      Linear_Sigma => Real'Last);
+                                                   --  FLOW_PLACE_STUDY=bend: the true warp to second order (its linear
+                                                   --  part by central differences, its bend), as the refinement asks.
+                                                   Bent : constant Boolean :=
+                                                     Ada.Environment_Variables.Value ("FLOW_PLACE_STUDY") = "bend";
+                                                   Pu, Pv : array (-1 .. 1, -1 .. 1) of Real := [others => [others => 0.0]];
+                                                   All_In : Boolean := True;
+                                                   function Bent_Query return Driver.Alignment.Prediction is
+                                                     ((From => Query.From, To => Query.To,
+                                                       Linear => (UU => (Pu (1, 0) - Pu (-1, 0)) / 2.0,
+                                                                  UV => (Pu (0, 1) - Pu (0, -1)) / 2.0,
+                                                                  VU => (Pv (1, 0) - Pv (-1, 0)) / 2.0,
+                                                                  VV => (Pv (0, 1) - Pv (0, -1)) / 2.0),
+                                                       Cov => Query.Cov, Linear_Sigma => Real'Last));
+                                                   function The_Bend return Driver.Alignment.Bend_Part is
+                                                     ((U_II => (Pu (1, 0) + Pu (-1, 0) - 2.0 * Pu (0, 0)) / 2.0,
+                                                       U_IJ => (Pu (1, 1) - Pu (1, -1) - Pu (-1, 1) + Pu (-1, -1)) / 4.0,
+                                                       U_JJ => (Pu (0, 1) + Pu (0, -1) - 2.0 * Pu (0, 0)) / 2.0,
+                                                       V_II => (Pv (1, 0) + Pv (-1, 0) - 2.0 * Pv (0, 0)) / 2.0,
+                                                       V_IJ => (Pv (1, 1) - Pv (1, -1) - Pv (-1, 1) + Pv (-1, -1)) / 4.0,
+                                                       V_JJ => (Pv (0, 1) + Pv (0, -1) - 2.0 * Pv (0, 0)) / 2.0));
+                                                   function Answer_Of return Driver.Alignment.Answer is
+                                                   begin
+                                                      for I in -1 .. 1 loop
+                                                         for J in -1 .. 1 loop
+                                                            declare
+                                                               Xn : Vec3;
+                                                            begin
+                                                               All_In := All_In
+                                                                 and then On_Table (P.Eye, Wl, U0 + Real (I), V0 + Real (J), Xn)
+                                                                 and then True_Place (Xn, Pu (I, J), Pv (I, J));
+                                                            end;
+                                                         end loop;
+                                                      end loop;
+                                                      return (if Bent and then All_In
+                                                              then Driver.Alignment.Align_At_Scale
+                                                                     (Pyr, Fixed_P, Bent_Query, Bend => The_Bend)
+                                                              else Driver.Alignment.Align_At_Scale (Pyr, Fixed_P, Query));
+                                                   end Answer_Of;
+                                                   A : constant Driver.Alignment.Answer := Answer_Of;
+                                                   --  The same asked with the prediction off by Du across and Dv down.
+                                                   function Shifted (Du, Dv : Real) return Driver.Alignment.Answer is
+                                                      Q : Driver.Alignment.Prediction := (if Bent and then All_In then Bent_Query else Query);
+                                                   begin
+                                                      Q.To := (U => Q.To.U + Du, V => Q.To.V + Dv);
+                                                      return (if Bent and then All_In
+                                                              then Driver.Alignment.Align_At_Scale (Pyr, Fixed_P, Q, Bend => The_Bend)
+                                                              else Driver.Alignment.Align_At_Scale (Pyr, Fixed_P, Q));
+                                                   end Shifted;
+                                                   Hw : constant Real := Real (Grid / 2);
+                                                   Curv_U, Curv_V : Real := 0.0;
+                                                   use type Driver.Alignment.Verdict;
+                                                begin
+                                                   if A.Verdict = Driver.Alignment.Found and then A.Narrow
+                                                     and then A.Cov.UU > 0.0 and then A.Cov.VV > 0.0
+                                                   then
+                                                      declare
+                                                         Xa, Xb, Xc, Xd : Vec3;
+                                                         Au, Av, Bu1, Bv1, Cu1, Cv1, Du1, Dv1 : Real;
+                                                      begin
+                                                         if On_Table (P.Eye, Wl, U0 + Hw, V0, Xa) and then On_Table (P.Eye, Wl, U0 - Hw, V0, Xb)
+                                                           and then On_Table (P.Eye, Wl, U0, V0 + Hw, Xc)
+                                                           and then On_Table (P.Eye, Wl, U0, V0 - Hw, Xd)
+                                                           and then True_Place (Xa, Au, Av) and then True_Place (Xb, Bu1, Bv1)
+                                                           and then True_Place (Xc, Cu1, Cv1) and then True_Place (Xd, Du1, Dv1)
+                                                         then
+                                                            Curv_U := ((Au + Bu1 - 2.0 * Tu) + (Cu1 + Du1 - 2.0 * Tu)) / 2.0 / 3.0;
+                                                            Curv_V := ((Av + Bv1 - 2.0 * Tv) + (Cv1 + Dv1 - 2.0 * Tv)) / 2.0 / 3.0;
+                                                         end if;
+                                                      end;
+                                                      declare
+                                                         Ans_U  : constant Driver.Alignment.Answer := Shifted (1.0, 0.0);
+                                                         Ans_V  : constant Driver.Alignment.Answer := Shifted (0.0, 1.0);
+                                                         Pulled : constant Boolean :=
+                                                           Ans_U.Verdict = Driver.Alignment.Found and then Ans_V.Verdict = Driver.Alignment.Found;
+                                                      begin
+                                                         Found.Append
+                                                           (Found_Place'(Eu => A.To.U - Tu, Ev => A.To.V - Tv,
+                                                             Su => EF.Sqrt (A.Cov.UU), Sv => EF.Sqrt (A.Cov.VV),
+                                                             Cell => Natural'Min (Cells_V - 1, Natural (Real'Floor (Tv)) / Side) * Cells_U
+                                                                     + Natural'Min (Cells_U - 1, Natural (Real'Floor (Tu)) / Side) + 1,
+                                                             Picture => Picture_No,
+                                                             Scale => EF.Sqrt (abs ((Uu - Tu) * (Vv - Tv) - (Vu - Tu) * (Uv - Tv))),
+                                                             Bu => Curv_U, Bv => Curv_V,
+                                                             Arm => K - Sets'First + 1, X => X, Cuv => A.Cov.UV,
+                                                             Sixth => Natural'Min (1, Natural (Real'Floor (2.0 * Tv / Real (Height)))) * 3
+                                                                      + Natural'Min (2, Natural (Real'Floor (3.0 * Tu / Real (Width)))) + 1,
+                                                             On_Table => Table_Masks (K) (Local_No) (My * P.Width + Mx + 1),
+                                                             Pulled => Pulled,
+                                                             Pull_Uu => (if Pulled then Ans_U.To.U - A.To.U else 0.0),
+                                                             Pull_Vu => (if Pulled then Ans_U.To.V - A.To.V else 0.0),
+                                                             Pull_Uv => (if Pulled then Ans_V.To.U - A.To.U else 0.0),
+                                                             Pull_Vv => (if Pulled then Ans_V.To.V - A.To.V else 0.0)));
+                                                      end;
+                                                   end if;
+                                                end;
+                                             end if;
+                                          end;
+                                          Gv := Gv + Grid;
+                                       end loop;
+                                    end;
+                                    Gu := Gu + Grid;
+                                 end loop;
+                              end;
+                           end loop;
+                        end;
+                     end loop;
+                     declare
+                        N : constant Natural := Natural (Found.Length);
+                        Su_All, Mu, Mv, Ssq : Real := 0.0;
+                        Stated : Real_Array (1 .. Natural'Max (1, N));
+                        Err    : Real_Array (1 .. Natural'Max (1, 2 * N));
+                     begin
+                        for I in 1 .. N loop
+                           Mu := Mu + Found (I).Eu;
+                           Mv := Mv + Found (I).Ev;
+                           Ssq := Ssq + Found (I).Eu ** 2 + Found (I).Ev ** 2;
+                           Su_All := Su_All + Found (I).Su ** 2 + Found (I).Sv ** 2;
+                           Stated (I) := EF.Sqrt ((Found (I).Su ** 2 + Found (I).Sv ** 2) / 2.0);
+                           Err (2 * I - 1) := Found (I).Eu;
+                           Err (2 * I) := Found (I).Ev;
+                        end loop;
+                        Put_Line ("place study: the truth's places moved by the rays' mean place, (" & Image (-Ray_U, 4) & ", "
+                                  & Image (-Ray_V, 4) & ") px");
+                        if N > 0 then
+                           Put_Line ("place study: " & N'Image & " of" & Asked'Image & " found; errors rms "
+                                     & Image (EF.Sqrt (Ssq / Real (2 * N)), 3) & " px (robust "
+                                     & Image (Driver.Stats.Robust_Sigma (Err (1 .. 2 * N)), 3) & "), mean ("
+                                     & Image (Mu / Real (N), 4) & ", " & Image (Mv / Real (N), 4) & ") px, stated rms "
+                                     & Image (EF.Sqrt (Su_All / Real (2 * N)), 3) & " px, stated median "
+                                     & Image (Driver.Stats.Median (Stated (1 .. N)), 3) & " px");
+                           --  The errors by what is stated: the quarters of the stated sigmas.
+                           declare
+                              Q2 : constant Real := Driver.Stats.Median (Stated (1 .. N));
+                              Lower, Upper : Real_Array (1 .. N);
+                              Nl, Nu : Natural := 0;
+                              Q1, Q3 : Real;
+                           begin
+                              for I in 1 .. N loop
+                                 if Stated (I) < Q2 then
+                                    Nl := Nl + 1;
+                                    Lower (Nl) := Stated (I);
+                                 else
+                                    Nu := Nu + 1;
+                                    Upper (Nu) := Stated (I);
+                                 end if;
+                              end loop;
+                              Q1 := (if Nl > 0 then Driver.Stats.Median (Lower (1 .. Nl)) else Q2);
+                              Q3 := (if Nu > 0 then Driver.Stats.Median (Upper (1 .. Nu)) else Q2);
+                              for B in 1 .. 4 loop
+                                 declare
+                                    Sum : Real := 0.0;
+                                    C   : Natural := 0;
+                                    Lo  : constant Real := (case B is when 1 => 0.0, when 2 => Q1, when 3 => Q2, when others => Q3);
+                                    Hi  : constant Real := (case B is when 1 => Q1, when 2 => Q2, when 3 => Q3, when others => Real'Last);
+                                 begin
+                                    for I in 1 .. N loop
+                                       if Stated (I) >= Lo and then Stated (I) < Hi then
+                                          Sum := Sum + Found (I).Eu ** 2 + Found (I).Ev ** 2;
+                                          C := C + 1;
+                                       end if;
+                                    end loop;
+                                    if C > 0 then
+                                       Put_Line ("place study: stated " & Image (Lo, 3) & " to " & Image (Hi, 3) & " px: errors rms "
+                                                 & Image (EF.Sqrt (Sum / Real (2 * C)), 3) & " px over" & C'Image);
+                                    end if;
+                                 end;
+                              end loop;
+                           end;
+                           --  By the warp's scale (the fixed picture's pixels per wrist picture's), its quarters: the
+                           --  mean error and the robust spread.
+                           declare
+                              Sc : Real_Array (1 .. N);
+                           begin
+                              for I in 1 .. N loop
+                                 Sc (I) := Found (I).Scale;
+                              end loop;
+                              declare
+                                 M2 : constant Real := Driver.Stats.Median (Sc);
+                                 Lo_S, Hi_S : Real_Array (1 .. N);
+                                 Nl, Nh : Natural := 0;
+                              begin
+                                 for I in 1 .. N loop
+                                    if Sc (I) < M2 then
+                                       Nl := Nl + 1;
+                                       Lo_S (Nl) := Sc (I);
+                                    else
+                                       Nh := Nh + 1;
+                                       Hi_S (Nh) := Sc (I);
+                                    end if;
+                                 end loop;
+                                 declare
+                                    M1 : constant Real := (if Nl > 0 then Driver.Stats.Median (Lo_S (1 .. Nl)) else M2);
+                                    M3 : constant Real := (if Nh > 0 then Driver.Stats.Median (Hi_S (1 .. Nh)) else M2);
+                                    Edges : constant array (1 .. 5) of Real := [0.0, M1, M2, M3, Real'Last];
+                                 begin
+                                    for B in 1 .. 4 loop
+                                       declare
+                                          Su_B, Sv_B : Real := 0.0;
+                                          E : Real_Array (1 .. 2 * N);
+                                          C : Natural := 0;
+                                       begin
+                                          for I in 1 .. N loop
+                                             if Sc (I) >= Edges (B) and then Sc (I) < Edges (B + 1) then
+                                                C := C + 1;
+                                                Su_B := Su_B + Found (I).Eu;
+                                                Sv_B := Sv_B + Found (I).Ev;
+                                                E (2 * C - 1) := Found (I).Eu;
+                                                E (2 * C) := Found (I).Ev;
+                                             end if;
+                                          end loop;
+                                          if C > 0 then
+                                             Put_Line ("place study: warp scale " & Image (Edges (B), 3) & " to "
+                                                       & Image (Real'Min (Edges (B + 1), 99.0), 3) & ": mean ("
+                                                       & Image (Su_B / Real (C), 4) & ", " & Image (Sv_B / Real (C), 4)
+                                                       & ") px, robust " & Image (Driver.Stats.Robust_Sigma (E (1 .. 2 * C)), 3)
+                                                       & " px over" & C'Image);
+                                          end if;
+                                       end;
+                                    end loop;
+                                 end;
+                              end;
+                           end;
+                           --  The errors against what the warp's curvature would move the patch's middle by: the
+                           --  slope through the origin and the correlation, both coordinates together.
+                           declare
+                              Sxy, Sxx, Syy : Real := 0.0;
+                           begin
+                              for I in 1 .. N loop
+                                 if abs Found (I).Eu < 1.0 and then abs Found (I).Ev < 1.0 then
+                                    Sxy := Sxy + Found (I).Bu * Found (I).Eu + Found (I).Bv * Found (I).Ev;
+                                    Sxx := Sxx + Found (I).Bu ** 2 + Found (I).Bv ** 2;
+                                    Syy := Syy + Found (I).Eu ** 2 + Found (I).Ev ** 2;
+                                 end if;
+                              end loop;
+                              if Sxx > 0.0 and then Syy > 0.0 then
+                                 Put_Line ("place study: the errors (under a pixel) against the warp's curvature: slope "
+                                           & Image (Sxy / Sxx, 3) & ", correlation " & Image (Sxy / EF.Sqrt (Sxx * Syy), 3)
+                                           & ", the curvature's rms " & Image (EF.Sqrt (Sxx / Real (2 * N)), 4) & " px");
+                              end if;
+                           end;
+                           --  The places on the table and those on the things on it (their points are not where the
+                           --  table's plane puts them): how many, their errors' mean, rms and robust spread.
+                           for On in Boolean loop
+                              declare
+                                 E : Real_Array (1 .. 2 * N);
+                                 C : Natural := 0;
+                                 Su_O, Sv_O, Sq : Real := 0.0;
+                              begin
+                                 for I in 1 .. N loop
+                                    if Found (I).On_Table = On then
+                                       C := C + 1;
+                                       E (2 * C - 1) := Found (I).Eu;
+                                       E (2 * C) := Found (I).Ev;
+                                       Su_O := Su_O + Found (I).Eu;
+                                       Sv_O := Sv_O + Found (I).Ev;
+                                       Sq := Sq + Found (I).Eu ** 2 + Found (I).Ev ** 2;
+                                    end if;
+                                 end loop;
+                                 if C > 0 then
+                                    Put_Line ("place study: " & (if On then "on the table" else "on a thing") & ":" & C'Image
+                                              & " places, mean (" & Image (Su_O / Real (C), 4) & ", " & Image (Sv_O / Real (C), 4)
+                                              & ") px, rms " & Image (EF.Sqrt (Sq / Real (2 * C)), 3) & ", robust "
+                                              & Image (Driver.Stats.Robust_Sigma (E (1 .. 2 * C)), 3) & " px");
+                                 end if;
+                              end;
+                           end loop;
+                           --  The field: the mean error over each sixth of the fixed picture.
+                           for Sx in 1 .. 6 loop
+                              declare
+                                 Su_S, Sv_S : Real := 0.0;
+                                 C : Natural := 0;
+                              begin
+                                 for I in 1 .. N loop
+                                    if Found (I).Sixth = Sx then
+                                       Su_S := Su_S + Found (I).Eu;
+                                       Sv_S := Sv_S + Found (I).Ev;
+                                       C := C + 1;
+                                    end if;
+                                 end loop;
+                                 if C > 0 then
+                                    Put_Line ("place study: sixth" & Sx'Image & ": mean (" & Image (Su_S / Real (C), 4) & ", "
+                                              & Image (Sv_S / Real (C), 4) & ") px over" & C'Image);
+                                 end if;
+                              end;
+                           end loop;
+                           --  What errors share: the correlation of two places' errors in the same cell (other
+                           --  pictures), in the same wrist picture (other cells), and in neither.
+                           declare
+                              Same_Cell, Same_Pic, Neither : Real := 0.0;
+                              N_Cell, N_Pic, N_Neither : Natural := 0;
+                              Var : constant Real := Ssq / Real (2 * N);
+                           begin
+                              for I in 1 .. N loop
+                                 for J in I + 1 .. N loop
+                                    declare
+                                       Prod : constant Real := (Found (I).Eu * Found (J).Eu + Found (I).Ev * Found (J).Ev) / 2.0;
+                                    begin
+                                       if Found (I).Cell = Found (J).Cell and then Found (I).Picture /= Found (J).Picture then
+                                          Same_Cell := Same_Cell + Prod;
+                                          N_Cell := N_Cell + 1;
+                                       elsif Found (I).Picture = Found (J).Picture and then Found (I).Cell /= Found (J).Cell then
+                                          Same_Pic := Same_Pic + Prod;
+                                          N_Pic := N_Pic + 1;
+                                       elsif Found (I).Cell /= Found (J).Cell then
+                                          Neither := Neither + Prod;
+                                          N_Neither := N_Neither + 1;
+                                       end if;
+                                    end;
+                                 end loop;
+                              end loop;
+                              Put_Line ("place study: the errors' correlation in the same cell "
+                                        & Image ((if N_Cell > 0 then Same_Cell / Real (N_Cell) else 0.0) / Var, 3) & " ("
+                                        & N_Cell'Image & " pairs), in the same picture "
+                                        & Image ((if N_Pic > 0 then Same_Pic / Real (N_Pic) else 0.0) / Var, 3) & " ("
+                                        & N_Pic'Image & "), in neither "
+                                        & Image ((if N_Neither > 0 then Neither / Real (N_Neither) else 0.0) / Var, 3) & " ("
+                                        & N_Neither'Image & ")");
+                           end;
+                           --  What the places' errors do to the eye: its terms (the refinement's: its focal length's
+                           --  logarithm, its principal point, and per arm a turn of the eye about its own axes and a
+                           --  shift of its centre in the arm's frame) fitted to the places found, linearly about the
+                           --  truth, each place whitened by the covariance it states (whole, or its diagonal alone, or
+                           --  whole with a floor of FLOOR squared on both axes), the places off by more than Z robust
+                           --  sigmas left out until none is; in the directions the places tell more than the flows (the
+                           --  refinement's Split against the flows' covariance, Refined's), the eye's shift's chi square
+                           --  against what the places state, and each group's share of its length in sigmas against the
+                           --  share's sigma were the errors as stated. The floor: what makes the kept places' whitened
+                           --  errors one sigma on the whole.
+                           declare
+                              type Flag_Set is array (Positive range <>) of Boolean;
+                              Arms_N : constant Positive := Sets'Length;
+                              G_N    : constant Positive := 3 + 6 * Arms_N;
+                              Groups : constant Positive := Arms_N + 4 + 6 + 4 + 2;
+                              function Quarter (X, Q1, Q2, Q3 : Real) return Positive is
+                                (if X < Q1 then 1 elsif X < Q2 then 2 elsif X < Q3 then 3 else 4);
+                              procedure Quartiles (X : Real_Array; Q1, Q2, Q3 : out Real) is
+                                 M      : constant Real := Driver.Stats.Median (X);
+                                 Lo, Hi : Real_Array (1 .. X'Length);
+                                 Nl, Nh : Natural := 0;
+                              begin
+                                 for V of X loop
+                                    if V < M then
+                                       Nl := Nl + 1;
+                                       Lo (Nl) := V;
+                                    else
+                                       Nh := Nh + 1;
+                                       Hi (Nh) := V;
+                                    end if;
+                                 end loop;
+                                 Q2 := M;
+                                 Q1 := (if Nl > 0 then Driver.Stats.Median (Lo (1 .. Nl)) else M);
+                                 Q3 := (if Nh > 0 then Driver.Stats.Median (Hi (1 .. Nh)) else M);
+                              end Quartiles;
+                              Sc_All : Real_Array (1 .. N);
+                              S1, S2, S3, T1, T2, T3 : Real;
+                              Flows_L  : Real_Matrix (1 .. G_N, 1 .. G_N);
+                              Flows_Ok : Boolean;
+                              --  A place's whitening: the Cholesky factor of what it states, the floor added.
+                              procedure Whiten (F : Found_Place; Whole : Boolean; Floor : Real; A_S, B_S, C_S : out Real;
+                                                Ok : out Boolean) is
+                                 Cuu : constant Real := F.Su ** 2 + Floor;
+                                 Cvv : constant Real := F.Sv ** 2 + Floor;
+                                 Cuv : constant Real := (if Whole then F.Cuv else 0.0);
+                              begin
+                                 Ok := Cuu > 0.0 and then Cuu * Cvv > Cuv ** 2;
+                                 A_S := EF.Sqrt (Real'Max (Cuu, 0.0));
+                                 B_S := (if Ok then Cuv / A_S else 0.0);
+                                 C_S := (if Ok then EF.Sqrt (Cvv - B_S ** 2) else 1.0);
+                              end Whiten;
+                              --  The places off by more than Z robust sigmas, whitened so, left out until none is.
+                              procedure Trim (Whole : Boolean; Floor : Real; Keep : out Flag_Set; Kept_N : out Natural) is
+                                 Wu, Wv : Real_Array (1 .. N) := [others => 0.0];
+                              begin
+                                 Kept_N := 0;
+                                 for I in 1 .. N loop
+                                    declare
+                                       A_S, B_S, C_S : Real;
+                                       Ok : Boolean;
+                                    begin
+                                       Whiten (Found (I), Whole, Floor, A_S, B_S, C_S, Ok);
+                                       Keep (I) := Ok;
+                                       if Ok then
+                                          Wu (I) := Found (I).Eu / A_S;
+                                          Wv (I) := (Found (I).Ev - B_S * Wu (I)) / C_S;
+                                          Kept_N := Kept_N + 1;
+                                       end if;
+                                    end;
+                                 end loop;
+                                 loop
+                                    declare
+                                       R       : Real_Array (1 .. 2 * Natural'Max (1, Kept_N)) := [others => 0.0];
+                                       M       : Natural := 0;
+                                       Dropped : Natural := 0;
+                                    begin
+                                       for I in 1 .. N loop
+                                          if Keep (I) then
+                                             R (M + 1) := Wu (I);
+                                             R (M + 2) := Wv (I);
+                                             M := M + 2;
+                                          end if;
+                                       end loop;
+                                       declare
+                                          Sigma : constant Real := Driver.Stats.Robust_Sigma (R (1 .. Natural'Max (1, M)));
+                                       begin
+                                          for I in 1 .. N loop
+                                             if Keep (I) and then EF.Sqrt (Wu (I) ** 2 + Wv (I) ** 2)
+                                               > Driver.Conventions.Z * Sigma * EF.Sqrt (2.0)
+                                             then
+                                                Keep (I) := False;
+                                                Dropped := Dropped + 1;
+                                             end if;
+                                          end loop;
+                                       end;
+                                       Kept_N := Kept_N - Dropped;
+                                       exit when Dropped = 0 or else Kept_N = 0;
+                                    end;
+                                 end loop;
+                              end Trim;
+                              --  The floor: the kept places' whitened errors' mean square two (both axes) with it,
+                              --  by bisection (none when they are within it already).
+                              function Floor_Of return Real is
+                                 Keep   : Flag_Set (1 .. N);
+                                 Kept_N : Natural;
+                                 function Mean_Square (Floor : Real) return Real is
+                                    Sum : Real := 0.0;
+                                 begin
+                                    for I in 1 .. N loop
+                                       if Keep (I) then
+                                          declare
+                                             A_S, B_S, C_S : Real;
+                                             Ok : Boolean;
+                                          begin
+                                             Whiten (Found (I), True, Floor, A_S, B_S, C_S, Ok);
+                                             declare
+                                                Wu : constant Real := Found (I).Eu / A_S;
+                                                Wv : constant Real := (Found (I).Ev - B_S * Wu) / C_S;
+                                             begin
+                                                Sum := Sum + Wu ** 2 + Wv ** 2;
+                                             end;
+                                          end;
+                                       end if;
+                                    end loop;
+                                    return Sum / Real (Natural'Max (1, Kept_N));
+                                 end Mean_Square;
+                                 Lo, Hi : Real := 0.0;
+                              begin
+                                 Trim (True, 0.0, Keep, Kept_N);
+                                 if Kept_N = 0 or else Mean_Square (0.0) <= 2.0 then
+                                    return 0.0;
+                                 end if;
+                                 for I in 1 .. N loop
+                                    if Keep (I) then
+                                       Hi := Real'Max (Hi, Found (I).Eu ** 2 + Found (I).Ev ** 2);
+                                    end if;
+                                 end loop;
+                                 for Step in 1 .. Real'Machine_Mantissa loop
+                                    declare
+                                       Mid : constant Real := (Lo + Hi) / 2.0;
+                                    begin
+                                       if Mean_Square (Mid) > 2.0 then
+                                          Lo := Mid;
+                                       else
+                                          Hi := Mid;
+                                       end if;
+                                    end;
+                                 end loop;
+                                 return (Lo + Hi) / 2.0;
+                              end Floor_Of;
+                              procedure Influence (Whole : Boolean; Floor : Real) is
+                                 Jw       : Real_Matrix (1 .. 2 * N, 1 .. G_N) := [others => [others => 0.0]];
+                                 Ew       : Real_Vector (1 .. 2 * N) := [others => 0.0];
+                                 Keep     : Flag_Set (1 .. N);
+                                 Of_Group : array (1 .. N, 1 .. 5) of Positive := [others => [others => 1]];
+                                 Kept_N   : Natural;
+                              begin
+                                 Trim (Whole, Floor, Keep, Kept_N);
+                                 for I in 1 .. N loop
+                                    declare
+                                       F     : constant Found_Place := Found (I);
+                                       C     : constant Vec3 :=
+                                         Transposed_Times (Truth.Rotation, Minus (F.X, Truth.Translation));
+                                       Xc    : constant Real := C (1) / C (3);
+                                       Yc    : constant Real := C (2) / C (3);
+                                       --  The place's derivatives in the point in the eye's frame.
+                                       Du    : constant Vec3 := [Cam.Fx / C (3), 0.0, -Cam.Fx * Xc / C (3)];
+                                       Dv    : constant Vec3 := [0.0, Cam.Fy / C (3), -Cam.Fy * Yc / C (3)];
+                                       --  The point's derivatives in the eye's turn (the point across each axis).
+                                       Turns : constant array (1 .. 3) of Vec3 :=
+                                         [[0.0, C (3), -C (2)], [-C (3), 0.0, C (1)], [C (2), -C (1), 0.0]];
+                                       Base  : constant Natural := 3 + 6 * (F.Arm - 1);
+                                       A_S, B_S, C_S : Real;
+                                       Ok    : Boolean;
+                                       Ju, Jv : Real_Vector (1 .. G_N) := [others => 0.0];
+                                    begin
+                                       Whiten (F, Whole, Floor, A_S, B_S, C_S, Ok);
+                                       Ju (1) := Cam.Fx * Xc;
+                                       Jv (1) := Cam.Fy * Yc;
+                                       Ju (2) := 1.0;
+                                       Jv (3) := 1.0;
+                                       for J in 1 .. 3 loop
+                                          Ju (Base + J) :=
+                                            Du (1) * Turns (J) (1) + Du (2) * Turns (J) (2) + Du (3) * Turns (J) (3);
+                                          Jv (Base + J) :=
+                                            Dv (1) * Turns (J) (1) + Dv (2) * Turns (J) (2) + Dv (3) * Turns (J) (3);
+                                          --  The centre's shift along the arm's axis J moves the point the other way
+                                          --  in the eye's frame (row J of the eye's turn).
+                                          Ju (Base + 3 + J) := -(Du (1) * Truth.Rotation (J, 1) + Du (2) * Truth.Rotation (J, 2)
+                                                                 + Du (3) * Truth.Rotation (J, 3));
+                                          Jv (Base + 3 + J) := -(Dv (1) * Truth.Rotation (J, 1) + Dv (2) * Truth.Rotation (J, 2)
+                                                                 + Dv (3) * Truth.Rotation (J, 3));
+                                       end loop;
+                                       if Keep (I) then
+                                          for T in 1 .. G_N loop
+                                             Jw (2 * I - 1, T) := Ju (T) / A_S;
+                                             Jw (2 * I, T) := (Jv (T) - B_S * Ju (T) / A_S) / C_S;
+                                          end loop;
+                                          Ew (2 * I - 1) := F.Eu / A_S;
+                                          Ew (2 * I) := (F.Ev - B_S * F.Eu / A_S) / C_S;
+                                       end if;
+                                       Of_Group (I, 1) := F.Arm;
+                                       Of_Group (I, 2) := Arms_N + Quarter (F.Scale, S1, S2, S3);
+                                       Of_Group (I, 3) := Arms_N + 4 + F.Sixth;
+                                       Of_Group (I, 4) := Arms_N + 10 + Quarter (Stated (I), T1, T2, T3);
+                                       Of_Group (I, 5) := Arms_N + 14 + (if F.On_Table then 1 else 2);
+                                    end;
+                                 end loop;
+                                 declare
+                                    type Normals is array (1 .. Groups) of Real_Matrix (1 .. G_N, 1 .. G_N);
+                                    type Sides is array (1 .. Groups) of Real_Vector (1 .. G_N);
+                                    Nm     : Real_Matrix (1 .. G_N, 1 .. G_N) := [others => [others => 0.0]];
+                                    Bv     : Real_Vector (1 .. G_N) := [others => 0.0];
+                                    Ng     : Normals := [others => [others => [others => 0.0]]];
+                                    Bg     : Sides := [others => [others => 0.0]];
+                                    Count  : array (1 .. Groups) of Natural := [others => 0];
+                                    Sum_Sq : Real := 0.0;
+                                 begin
+                                    for I in 1 .. N loop
+                                       if Keep (I) then
+                                          for Row in 2 * I - 1 .. 2 * I loop
+                                             Sum_Sq := Sum_Sq + Ew (Row) ** 2;
+                                             for P in 1 .. G_N loop
+                                                Bv (P) := Bv (P) + Jw (Row, P) * Ew (Row);
+                                                for Q in 1 .. G_N loop
+                                                   Nm (P, Q) := Nm (P, Q) + Jw (Row, P) * Jw (Row, Q);
+                                                end loop;
+                                             end loop;
+                                             for K in 1 .. 5 loop
+                                                declare
+                                                   Gk : constant Positive := Of_Group (I, K);
+                                                begin
+                                                   for P in 1 .. G_N loop
+                                                      Bg (Gk) (P) := Bg (Gk) (P) + Jw (Row, P) * Ew (Row);
+                                                      for Q in 1 .. G_N loop
+                                                         Ng (Gk) (P, Q) := Ng (Gk) (P, Q) + Jw (Row, P) * Jw (Row, Q);
+                                                      end loop;
+                                                   end loop;
+                                                end;
+                                             end loop;
+                                          end loop;
+                                          for K in 1 .. 5 loop
+                                             Count (Of_Group (I, K)) := Count (Of_Group (I, K)) + 1;
+                                          end loop;
+                                       end if;
+                                    end loop;
+                                    --  The split: B = L' N L, L the flows' covariance's factor; the places' directions
+                                    --  D = L U where B's eigenvalue is one or more.
+                                    declare
+                                       Bm, U  : Real_Matrix (1 .. G_N, 1 .. G_N);
+                                       Lam    : Real_Vector (1 .. G_N);
+                                       D      : Real_Matrix (1 .. G_N, 1 .. G_N) := [others => [others => 0.0]];
+                                       Shift  : Real_Vector (1 .. G_N) := [others => 0.0];
+                                       Chi    : Real := 0.0;
+                                       Places : Natural := 0;
+                                    begin
+                                       Bm := Transpose (Flows_L) * Nm * Flows_L;
+                                       Driver.Numerics.Dense.Small_Eigensystem (Bm, Lam, U);
+                                       D := Flows_L * U;
+                                       for K in 1 .. G_N loop
+                                          if Lam (K) >= 1.0 then
+                                             declare
+                                                Along : Real := 0.0;
+                                             begin
+                                                for P in 1 .. G_N loop
+                                                   Along := Along + D (P, K) * Bv (P);
+                                                end loop;
+                                                Chi := Chi + Along ** 2 / Lam (K);
+                                                for P in 1 .. G_N loop
+                                                   Shift (P) := Shift (P) + D (P, K) * Along / Lam (K);
+                                                end loop;
+                                                Places := Places + 1;
+                                             end;
+                                          end if;
+                                       end loop;
+                                       Put_Line ("place study: the eye the places tell ("
+                                                 & (if not Whole then "the stated diagonal"
+                                                    elsif Floor > 0.0 then "the stated covariance and a floor of "
+                                                      & Image (EF.Sqrt (Floor), 3) & " px"
+                                                    else "the stated covariance")
+                                                 & "): chi square " & Image (Chi, 1) & " over the" & Places'Image
+                                                 & " directions they tell; the whitened errors' mean square "
+                                                 & Image (Sum_Sq / Real (Natural'Max (1, 2 * Kept_N)), 3) & ";"
+                                                 & Kept_N'Image & " of" & N'Image & " kept");
+                                       for Gk in 1 .. Groups loop
+                                          if Count (Gk) > 0 and then Chi > 0.0 then
+                                             declare
+                                                Name : constant String :=
+                                                  (if Gk <= Arms_N then "arm" & Gk'Image
+                                                   elsif Gk <= Arms_N + 4 then "scale quarter" & Positive'Image (Gk - Arms_N)
+                                                   elsif Gk <= Arms_N + 10 then "sixth" & Positive'Image (Gk - Arms_N - 4)
+                                                   elsif Gk <= Arms_N + 14 then "stated quarter" & Positive'Image (Gk - Arms_N - 10)
+                                                   elsif Gk = Arms_N + 15 then "on the table"
+                                                   else "on a thing");
+                                                Share, Var : Real := 0.0;
+                                             begin
+                                                for P in 1 .. G_N loop
+                                                   Share := Share + Shift (P) * Bg (Gk) (P);
+                                                   for Q in 1 .. G_N loop
+                                                      Var := Var + Shift (P) * Ng (Gk) (P, Q) * Shift (Q);
+                                                   end loop;
+                                                end loop;
+                                                Put_Line ("place study:   " & Name & ":" & Count (Gk)'Image
+                                                          & " places, share " & Image (Share / EF.Sqrt (Chi), 2)
+                                                          & " of " & Image (EF.Sqrt (Chi), 2) & " (sigma "
+                                                          & Image (EF.Sqrt (Var / Chi), 2) & ")");
+                                             end;
+                                          end if;
+                                       end loop;
+                                    end;
+                                 end;
+                              end Influence;
+                           begin
+                              for I in 1 .. N loop
+                                 Sc_All (I) := Found (I).Scale;
+                              end loop;
+                              Quartiles (Sc_All, S1, S2, S3);
+                              Quartiles (Stated (1 .. N), T1, T2, T3);
+                              Driver.Numerics.Dense.Cholesky (Refined.Covariance, Flows_L, Flows_Ok);
+                              if Flows_Ok then
+                                 Influence (Whole => False, Floor => 0.0);
+                                 Influence (Whole => True, Floor => 0.0);
+                                 declare
+                                    Floor : constant Real := Floor_Of;
+                                 begin
+                                    if Floor > 0.0 then
+                                       Influence (Whole => True, Floor => Floor);
+                                    end if;
+                                 end;
+                              end if;
+                              --  The aligner's pull: how far a place found moves when the prediction is a pixel
+                              --  off across or down, over the places found all three times (a share of the pixel:
+                              --  nought, the answer the picture's alone; one, the prediction's).
+                              declare
+                                 Puu, Pvu, Puv, Pvv : Real := 0.0;
+                                 C : Natural := 0;
+                                 Ru, Rv : Real_Array (1 .. N);
+                              begin
+                                 for I in 1 .. N loop
+                                    if Found (I).Pulled then
+                                       C := C + 1;
+                                       Puu := Puu + Found (I).Pull_Uu;
+                                       Pvu := Pvu + Found (I).Pull_Vu;
+                                       Puv := Puv + Found (I).Pull_Uv;
+                                       Pvv := Pvv + Found (I).Pull_Vv;
+                                       Ru (C) := Found (I).Pull_Uu;
+                                       Rv (C) := Found (I).Pull_Vv;
+                                    end if;
+                                 end loop;
+                                 if C > 0 then
+                                    Put_Line ("place study: the pull of a pixel's prediction: across "
+                                              & Image (Puu / Real (C), 3) & " (down " & Image (Pvu / Real (C), 3)
+                                              & "), down " & Image (Pvv / Real (C), 3) & " (across "
+                                              & Image (Puv / Real (C), 3) & "), medians " & Image (Driver.Stats.Median (Ru (1 .. C)), 3)
+                                              & " and " & Image (Driver.Stats.Median (Rv (1 .. C)), 3) & ", over" & C'Image);
+                                 end if;
+                              end;
+                           end;
+                        end if;
+                     end;
+                  end;
                end if;
                Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Refined);
                Put_Line ("the aligner's work in the refinement: " & Driver.Alignment.Work_Report);
@@ -1718,6 +2521,54 @@ begin
                               Vectors : Real_Matrix (1 .. G, 1 .. G);
                               Z       : Real_Vector (1 .. G);
                               Done    : array (1 .. G) of Boolean := [others => False];
+                              --  How far the eye's terms moved by D move the table's points (a grid 4 cm apart the
+                              --  true eye sees) in the picture, at most.
+                              function Moves (D : Real_Vector) return Real is
+                                 Worst : Real := 0.0;
+                                 Fm    : constant Real := Refined.Lens.Fx * EF.Exp (D (1));
+                              begin
+                                 for K in Sets'Range loop
+                                    declare
+                                       O  : constant Natural := 3 + 6 * (K - Sets'First);
+                                       P  : constant Rigid := Refined.Poses (K);
+                                       Pm : constant Rigid :=
+                                         (Rotation    =>
+                                            Times (P.Rotation, Exp (Vec3'[D (O + 1), D (O + 2), D (O + 3)])),
+                                          Translation =>
+                                            [P.Translation (1) + D (O + 4), P.Translation (2) + D (O + 5),
+                                             P.Translation (3) + D (O + 6)]);
+                                    begin
+                                       for I in -10 .. 10 loop
+                                          for J in -5 .. 20 loop
+                                             declare
+                                                Xw : constant Vec3 := [0.04 * Real (I), 0.04 * Real (J), W.Table_Z];
+                                                C0 : constant Vec3 :=
+                                                  Transposed_Times (P.Rotation, Minus (Xw, P.Translation));
+                                                C1 : constant Vec3 :=
+                                                  Transposed_Times (Pm.Rotation, Minus (Xw, Pm.Translation));
+                                                Ct : constant Vec3 :=
+                                                  Transposed_Times (Truth.Rotation, Minus (Xw, Truth.Translation));
+                                                Tu : constant Real :=
+                                                  (if Ct (3) > 0.0 then Cam.Cx + Cam.Fx * Ct (1) / Ct (3) else -1.0);
+                                                Tv : constant Real :=
+                                                  (if Ct (3) > 0.0 then Cam.Cy + Cam.Fy * Ct (2) / Ct (3) else -1.0);
+                                             begin
+                                                if C0 (3) > 0.0 and then C1 (3) > 0.0 and then Tu in 0.0 .. Real (Width)
+                                                  and then Tv in 0.0 .. Real (Height)
+                                                then
+                                                   Worst := Real'Max
+                                                     (Worst, EF.Sqrt ((D (2) + Fm * C1 (1) / C1 (3)
+                                                                            - Refined.Lens.Fx * C0 (1) / C0 (3)) ** 2
+                                                                      + (D (3) + Fm * C1 (2) / C1 (3)
+                                                                         - Refined.Lens.Fy * C0 (2) / C0 (3)) ** 2));
+                                                end if;
+                                             end;
+                                          end loop;
+                                       end loop;
+                                    end;
+                                 end loop;
+                                 return Worst;
+                              end Moves;
                            begin
                               Driver.Numerics.Dense.Small_Eigensystem (Refined.Covariance, Values, Vectors);
                               for I in 1 .. G loop
@@ -1760,6 +2611,16 @@ begin
                                              Append (Line, Top'Image & " (" & Image (Vectors (Top, Best), 2) & ")");
                                           end;
                                        end loop;
+                                       declare
+                                          D : Real_Vector (1 .. G);
+                                       begin
+                                          for X in 1 .. G loop
+                                             D (X) := Z (Best) * EF.Sqrt (Real'Max (0.0, Values (Best)))
+                                               * Vectors (X, Best);
+                                          end loop;
+                                          Append (Line, "; it moves the table's points by up to " & Image (Moves (D), 3)
+                                                  & " px");
+                                       end;
                                        Put_Line (To_String (Line));
                                     end;
                                  end;

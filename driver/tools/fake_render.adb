@@ -37,6 +37,9 @@ package body Fake_Render is
    Solids : Solid_Access;
    Cam    : Camera_Access;
    Into   : Pixels_Access;
+   --  The rays' own mean place in a pixel, less its centre (Raw_Offset's over every sub-sample): taken off every
+   --  ray, so that a pixel's light is about its centre. Set by Render before its workers start.
+   Off_U, Off_V : Driver.Real := 0.0;
 
    function Hash (X, Y : Integer) return Real;
    function Smooth (T : Real) return Real;
@@ -200,7 +203,7 @@ package body Fake_Render is
       return Place - Real'Floor (Place);
    end Spread;
 
-   function Offset (Sub : Natural; Axis : Positive) return Real is
+   function Raw_Offset (Sub : Natural; Axis : Positive) return Real is
    begin
       if Lens_Blur <= 0.0 then
          return Lattice (Sub, Axis);
@@ -213,7 +216,19 @@ package body Fake_Render is
       begin
          return Spread (Sub, Axis) + Radius * (if Axis = 1 then Cos (Turn) else Sin (Turn));
       end;
-   end Offset;
+   end Raw_Offset;
+
+   function Raw_Shift (Axis : Positive) return Driver.Real is
+      Sum : Real := 0.0;
+   begin
+      for Sub in 0 .. Supersample * Supersample - 1 loop
+         Sum := Sum + Raw_Offset (Sub, Axis);
+      end loop;
+      return Sum / Real (Supersample * Supersample) - 0.5;
+   end Raw_Shift;
+
+   function Offset (Sub : Natural; Axis : Positive) return Real is
+     (Raw_Offset (Sub, Axis) - (if Axis = 1 then Off_U else Off_V));
 
    --  The rows of one band of the picture being rendered.
    procedure Rows (Band : Positive) is
@@ -392,6 +407,8 @@ package body Fake_Render is
       end loop;
       Cam := C'Unchecked_Access;
       Into := Pixels'Unchecked_Access;
+      Off_U := Raw_Shift (1);
+      Off_V := Raw_Shift (2);
       for B in Workers'Range loop
          Workers (B).Go (B);
       end loop;

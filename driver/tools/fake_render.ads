@@ -26,6 +26,13 @@ package Fake_Render is
    --  Every surface lit alike whatever way it faces, no highlight: a surface that turns keeps its shade (studies of
    --  the picture's change as an arm turns, tools/driver-robot-flow_bench FLOW_FLAT).
 
+   function Raw_Shift (Axis : Positive) return Driver.Real;
+   --  How far the rays of a pixel fall on average from its centre along Axis (1 across, 2 down), in pixels, at the
+   --  present Supersample and Lens_Blur, before Render takes it off every ray: the lattice's and the blur's draws
+   --  are finitely many (64 rays and a blur of 0.6 px: -0.028 across, -0.006 down). Render's pixels hold the light
+   --  about their centres; the renders before 10-21 held it about their centres plus this, their content off the
+   --  camera's own principal point by it (studies of their caches, tools/driver-robot-flow_bench FLOW_STUDY_CENTRED).
+
    procedure Render (W : Fake_World.World; C : aliased Fake_World.Camera; Pixels : aliased in out Driver.Real_Array);
 
    procedure Nearest
