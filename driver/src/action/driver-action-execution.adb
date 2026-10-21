@@ -810,7 +810,13 @@ package body Driver.Action.Execution is
          end loop;
       end if;
       --  The lobes' ends are where the parts touch: where they are not measured, nor is the middle of them, however
-      --  well the tool is placed; nor is it where the touching parts' sigma is not known at all.
+      --  well the tool is placed; nor is it where the touching parts' sigma is not known at all (the log says which
+      --  of what they rest on is not: s78 refused "pusher above the small black box" with both of its lobe's tips
+      --  pressed, and nothing told why).
+      if E.Sigma = Real'Last then
+         Driver.Log.Line (Driver.Log.Action, "arm" & A'Image & "'s touching parts are not placed: not measured:"
+                          & To_String (E.Unplaced));
+      end if;
       It.Centre := (Mean => (if N > 0 then Sum / Real (N) else E.Tool.Translation),
                     Covariance => (if E.Sigma = Real'Last then [others => [others => Real'Last]]
                                    else Arm (S, A).Tool.Position_Covariance));

@@ -1500,6 +1500,10 @@ driver-robot-hand-measure.adb	& Driver.Log.Image (Driver.Conventions.Z * Sqrt (R
 driver-robot-hand-measure.adb	& Driver.Log.Image (Least, 4) & "")	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Allow_Place, 5) & ""	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & ""	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
+driver-robot-hand-measure.adb	& Driver.Log.Image (Off.Place_Sigma, 5) & "" & Driver.Log.Image (Off.Turn, 5)	5	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Room.Value, 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Share, 3) & "" & Driver.Log.Image (Doubt, 2)	2	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	& Driver.Log.Image (Share, 3) & "" & Driver.Log.Image (Doubt, 2)	3	format	digits printed in a log line or a message

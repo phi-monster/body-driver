@@ -1414,7 +1414,18 @@ procedure Measure (H : in out Hands; M : in out Model) is
          --  hand 2, the third joint at +0.07 for the -0.05 asked, lowered from there and fitted as the tip, 12.39 from
          --  the eye). The arm goes back to where the aim began, and the caller is told a tilt cannot be made. Whether
          --  it completed it is the tool's pose against the aim's (Pressing.At_Aim), whatever the joints' verdict.
-         if not Driver.Robot.Hand.Pressing.At_Aim (Off) then
+         --  An aim the arm ended in free air, no group of it blocked, is where its servos land it: as with the arm sent
+         --  back (Free_Landing, below), it lands within its dead band of its targets or sags under its load, and the
+         --  press reads the tilt it stands at (s76, seed 6: every tilted aim ended 0.8 to 1.3% of 744 to 1558 units
+         --  short, given up still moving, the tool 0.12 to 0.29 off against 0.03 to 0.09; no tilted press was made, and
+         --  the tip at the closed opening was never measured).
+         if not Driver.Robot.Hand.Pressing.At_Aim (Off) and then Report.Outcome = Driver.Robot.Motion.Reached then
+            Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the arm ended the aim of a press of lobe" & Lobe'Image
+                             & " at " & (if Which = Open then "open" else "closed") & " in free air short of it ("
+                             & Ada.Strings.Unbounded.To_String (Report.Detail) & " the tool stands "
+                             & Driver.Log.Image (Off.Place, 5) & " from the aim's place and turned " & Driver.Log.Image (Off.Turn, 5)
+                             & " rad from its turn): the press is made where it stands");
+         elsif not Driver.Robot.Hand.Pressing.At_Aim (Off) then
             Aim_Short := True;
             Driver.Log.Line (Driver.Log.Robot, "hand" & Id'Image & ": the arm did not reach the aim of a press of lobe" & Lobe'Image
                              & " at " & (if Which = Open then "open" else "closed") & ", turning the hand "
