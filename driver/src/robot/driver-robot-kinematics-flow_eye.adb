@@ -2534,6 +2534,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  How much less the flows' information is taken than their covariance states: their estimate's misfit against
       --  the places', where those tell a direction better (Weigh_Flows); one until it says more.
       Flows_Scale  : Real := 1.0;
+      --  Some direction of the flows' has no least of their misfit (Line_Search): the eye is not told.
+      Flows_Untold : Boolean := False;
       Began        : constant Duration := Driver.Clock.Seconds;   --  for the log: how long the rounds take
       Aligned_At, Fitted_At : Duration := 0.0;   --  and when the round's places were found, and fitted
 
@@ -2664,6 +2666,9 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  Brent's method within that bracket (a parabola through the three least misfits found, a golden section where
       --  the parabola's least would not shrink the bracket enough) until the least is within half Unchanged_Fraction of
       --  a sigma. Golden sections alone took sixteen misfits a search or more, most of the refinement's time.
+      --  A misfit that falls as far as the float goes (or turns to no number) has no least there: Real'Last, and the
+      --  direction is one the flows do not tell (Flows_Untold); the synthetic arms of robot.flow.scene first ran so,
+      --  their eye's distance and focal length growing together without end.
       function Line_Search (Z, V : Real_Vector; Skip_Arm, Skip_Pose : Natural := 0) return Real is
          function F (S : Real) return Real is
             X : Real_Vector (1 .. G);
@@ -2706,7 +2711,11 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Step := 2.0 * Step;
                      Next := Here + Step;
                      F_Next := F (Sign * Next);
-                     exit when F_Next >= F_Here;
+                     exit when not (F_Next < F_Here);
+                     if Doubling = Real'Machine_Mantissa then
+                        Flows_Untold := True;
+                        return Real'Last;
+                     end if;
                      Before := Here;
                      F_Before := F_Here;
                      Here := Next;
@@ -3019,6 +3028,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                type Slot is record
                   Got          : Boolean := False;
                   U, V, Su, Sv : Real := 0.0;
+                  --  why the aligner found it not, when it did not (Not_Asked: the point not in the picture)
+                  Because      : Driver.Alignment.Reason := Driver.Alignment.Not_Asked;
                end record;
                type Slot_Array is array (Positive range <>) of Slot;
                type Slot_Access is access Slot_Array;
@@ -3046,13 +3057,19 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                           and then Answer.Cov.UU > 0.0 and then Answer.Cov.VV > 0.0
                         then
                            Slots (I) := (Got => True, U => Answer.To.U, V => Answer.To.V,
-                                         Su => Sqrt (Answer.Cov.UU), Sv => Sqrt (Answer.Cov.VV));
+                                         Su => Sqrt (Answer.Cov.UU), Sv => Sqrt (Answer.Cov.VV),
+                                         Because => Driver.Alignment.Matched);
+                        else
+                           Slots (I).Because :=
+                             (if Answer.Verdict = Driver.Alignment.Found then Driver.Alignment.Matched
+                              else Answer.Because);
                         end if;
                      end;
                   end if;
                end One;
                procedure Every is new Driver.Parallel_For (One);
                Got : Natural := 0;
+               Missed : Unbounded_String;
             begin
                Every (Sights'First, Sights'Last);
                Aligned_At := Driver.Clock.Seconds - Began;
@@ -3061,6 +3078,22 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                      Got := Got + 1;
                   end if;
                end loop;
+               --  The points not found, by why (a found answer not narrow: MATCHED; a point out of the picture:
+               --  NOT_ASKED), for the round's line.
+               declare
+                  Tally : array (Driver.Alignment.Reason) of Natural := [others => 0];
+               begin
+                  for S of Slots.all loop
+                     if not S.Got then
+                        Tally (S.Because) := Tally (S.Because) + 1;
+                     end if;
+                  end loop;
+                  for R in Tally'Range loop
+                     if Tally (R) > 0 then
+                        Append (Missed, " " & Driver.Alignment.Reason'Image (R) & Tally (R)'Image);
+                     end if;
+                  end loop;
+               end;
                declare
                   Matches : Match_Access := new Match_Array (1 .. Natural'Max (1, Got));
                   Kept    : Flag_Access := new Flag_Array (1 .. Natural'Max (1, Got));
@@ -3296,10 +3329,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                                              V (P) := Dirs (P, I);
                                           end loop;
                                           S := Line_Search (Y, V);
-                                          for P in 1 .. G loop
-                                             Y (P) := Y (P) + S * V (P);
-                                          end loop;
-                                          Along := Real'Max (Along, abs S);
+                                          if S < Real'Last then
+                                             for P in 1 .. G loop
+                                                Y (P) := Y (P) + S * V (P);
+                                             end loop;
+                                             Along := Real'Max (Along, abs S);
+                                          end if;
                                        end;
                                     end if;
                                  end loop;
@@ -3376,7 +3411,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   begin
                      Normal_At (Y, R0, Ata, Atb, Scale => Per_Freedom);
                      Split (Ata, Dirs, Lambda);
-                     Definite := (for all I in 1 .. G => Lambda (I) > 0.0);
+                     Definite := (for all I in 1 .. G => Lambda (I) > 0.0) and then not Flows_Untold;
                      Cov := [others => [others => 0.0]];
                      Cov_F := [others => [others => 0.0]];
                      for I in 1 .. G loop
@@ -3645,7 +3680,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   begin
                   Driver.Log.Line (Driver.Log.Robot, "flow eye: the world's points, round" & Rounds'Image & ":"
                                    & Sights'Length'Image & " asked," & Got'Image & " found," & Kept_All'Image
-                                   & " kept (" & Per_Arm & "), " & Driver.Log.Image (Scatter, 2)
+                                   & " kept (" & Per_Arm & "; not found:" & To_String (Missed) & "), "
+                                   & Driver.Log.Image (Scatter, 2)
                                    & " px from the eye, aligned at " & Driver.Log.Image (Real (Aligned_At), 1)
                                    & " s, fitted at " & Driver.Log.Image (Real (Fitted_At), 1) & ", done at "
                                    & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ", widened "

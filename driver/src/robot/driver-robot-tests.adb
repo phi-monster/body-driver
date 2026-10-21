@@ -8669,10 +8669,281 @@ package body Driver.Robot.Tests is
       end if;
    end Flow_Eye_On_A_Synthetic_Arm;
 
+   --  A fixed eye placed again by the table two arms' own eyes see (Kinematics.Flow_Eye.Refine_By_Scene): the arm of
+   --  robot.flow.eye twice, side by side above a table 0.25 below their bases, each flow as that test makes it but
+   --  with 200 points a pose spread 8 cm about the links, a sigma of 0.02 and turns of 0.4 rad either way (with that
+   --  test's flows the eye's distance and focal length grew together without end along the table's open direction); the
+   --  last link of each carries an eye looking down at the table, its pictures at its flow's poses and at as many
+   --  more; the table's texture blobs a few centimetres wide, the fixed eye's picture of it with no arm in the way. The
+   --  eye placed again is told, within Z of its sigmas in every term, and the table's points it puts in its picture
+   --  lie nearer the true eye's places than the flows' eye put them.
+   procedure Scene_Places_A_Fixed_Eye is
+      package Flow renames Driver.Robot.Kinematics.Flow_Eye;
+      package KFit renames Driver.Robot.Kinematics.Fit;
+      Width  : constant := 320;
+      Height : constant := 240;
+      Focal  : constant Real := 150.0;
+      Wrist_W : constant := 160;
+      Wrist_H : constant := 120;
+      Wrist_Lens : constant KFit.Lens := (Fx | Fy => 120.0, Cx => 80.0, Cy => 60.0, K1 | K2 => 0.0);
+      Table_Z : constant Real := -0.25;
+      Arms    : constant := 2;
+      Bases   : constant array (1 .. Arms) of Vec3 := [[-0.15, 0.0, 0.0], [0.15, 0.0, 0.0]];
+      type Joints_Access is access KFit.Joint_Array;
+      Joints  : array (1 .. Arms) of Joints_Access;
+      Eye_At_Place : constant Vec3 := [0.15, -0.55, 0.75];
+      Target       : constant Vec3 := [0.0, 0.25, -0.1];
+      Forward      : constant Vec3 := Unit (Minus (Target, Eye_At_Place));
+      Right        : constant Vec3 := Unit (Cross (Forward, [0.0, 0.0, 1.0]));
+      Down         : constant Vec3 := Cross (Forward, Right);
+      Truth        : constant Rigid :=
+        (Rotation    => [[Right (1), Down (1), Forward (1)], [Right (2), Down (2), Forward (2)],
+                         [Right (3), Down (3), Forward (3)]],
+         Translation => Eye_At_Place);
+      --  The wrist eye at the reference, at the third link's far end: x along the world's x, looking straight down.
+      Wrist_Turn : constant Mat3 := [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+      Sigma  : constant Real := 0.02;
+      G      : Generator := (State => 11);
+      Poses  : constant := 6;
+      Points : constant := 200;
+      type Views_Access is access Flow.Pose_Array;
+      Views  : array (1 .. Arms) of Views_Access;
+      Result : Flow.Report (Arms => Arms, Count => Flow.Terms_For (Arms));
+      --  The table's texture: blobs of 2 to 5 cm, each of its own brightness, over every place either eye sees.
+      Blobs  : constant := 900;
+      type Blob is record
+         X, Y, S, A : Real;
+      end record;
+      Bank : array (1 .. Blobs) of Blob;
+      function Texture_At (X, Y : Real) return Real is
+         Sum : Real := 128.0;
+      begin
+         for B of Bank loop
+            declare
+               R2 : constant Real := (X - B.X) ** 2 + (Y - B.Y) ** 2;
+            begin
+               if R2 < 16.0 * B.S ** 2 then
+                  Sum := Sum + B.A * Exp (-R2 / (2.0 * B.S ** 2));
+               end if;
+            end;
+         end loop;
+         return Sum;
+      end Texture_At;
+      --  An eye's picture of the table (luma, row after row): its pose in the world and its lens.
+      function Picture_Of (Pose : Rigid; L : KFit.Lens; W, H : Positive) return Flow.Luma_Access is
+         Luma : constant Flow.Luma_Access := new Real_Array (1 .. W * H);
+      begin
+         for V in 0 .. H - 1 loop
+            for U in 0 .. W - 1 loop
+               declare
+                  D : constant Vec3 := Times (Pose.Rotation, KFit.Ray (L, Real (U) + 0.5, Real (V) + 0.5));
+               begin
+                  Luma (V * W + U + 1) :=
+                    (if D (3) < 0.0
+                     then Texture_At (Pose.Translation (1) + (Table_Z - Pose.Translation (3)) / D (3) * D (1),
+                                      Pose.Translation (2) + (Table_Z - Pose.Translation (3)) / D (3) * D (2))
+                     else 0.0);
+               end;
+            end loop;
+         end loop;
+         return Luma;
+      end Picture_Of;
+      --  Where the camera sees the point of arm A's link K (at the reference) with the joints at Readings.
+      procedure Project
+        (A : Positive; Point : Vec3; K : Positive; Readings : Real_Array; U, V : out Real; Ahead : out Boolean)
+      is
+         Moved : constant Rigid := KFit.Eye_At (Joints (A) (1 .. K), [for I in 1 .. K => I], Readings (1 .. K));
+         C     : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (Moved * Point, Truth.Translation));
+      begin
+         Ahead := C (3) > 0.0;
+         U := (if Ahead then Focal * C (1) / C (3) + Real (Width) / 2.0 else 0.0);
+         V := (if Ahead then Focal * C (2) / C (3) + Real (Height) / 2.0 else 0.0);
+      end Project;
+      type Pictures_Access is access Flow.Wrist_Picture_Array;
+      Pictures : array (1 .. Arms) of Pictures_Access;
+      Worlds   : Flow.Arm_World_Array (1 .. Arms);
+      In_Arms  : Flow.Arm_Flow_Array (1 .. Arms);
+      Fixed    : Flow.Luma_Access;
+      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Flow.Luma_Access);
+      --  How far an eye of those terms puts the table's points (a grid 4 cm apart the true eye sees) from the true
+      --  eye's places, at most.
+      function Table_Off (R : Flow.Report) return Real is
+         Worst : Real := 0.0;
+      begin
+         for I in -10 .. 10 loop
+            for J in -5 .. 20 loop
+               declare
+                  X  : constant Vec3 := [0.04 * Real (I), 0.04 * Real (J), Table_Z];
+                  Ct : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (X, Truth.Translation));
+                  Cf : constant Vec3 :=
+                    Transposed_Times (R.Poses (1).Rotation, Minus (X, R.Poses (1).Translation));
+               begin
+                  if Ct (3) > 0.0 and then Cf (3) > 0.0 then
+                     declare
+                        Tu : constant Real := Focal * Ct (1) / Ct (3) + Real (Width) / 2.0;
+                        Tv : constant Real := Focal * Ct (2) / Ct (3) + Real (Height) / 2.0;
+                     begin
+                        if Tu in 0.0 .. Real (Width) and then Tv in 0.0 .. Real (Height) then
+                           Worst := Real'Max
+                             (Worst, Sqrt ((R.Lens.Cx + R.Lens.Fx * Cf (1) / Cf (3) - Tu) ** 2
+                                           + (R.Lens.Cy + R.Lens.Fy * Cf (2) / Cf (3) - Tv) ** 2));
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Worst;
+      end Table_Off;
+   begin
+      for B of Bank loop
+         B := (X => -0.8 + 1.6 * Uniform (G), Y => -0.5 + 1.6 * Uniform (G), S => 0.02 + 0.03 * Uniform (G),
+               A => 70.0 * (2.0 * Uniform (G) - 1.0));
+      end loop;
+      for A in 1 .. Arms loop
+         Joints (A) := new KFit.Joint_Array'
+           [(W => [0.0, 0.0, 1.0], P => Bases (A), C => 0.001, Slide => False),
+            (W => [1.0, 0.0, 0.0], P => Plus (Bases (A), [0.0, 0.0, 0.1]), C => 0.001, Slide => False),
+            (W => [1.0, 0.0, 0.0], P => Plus (Bases (A), [0.0, 0.25, 0.1]), C => 0.001, Slide => False)];
+         Views (A) := new Flow.Pose_Array (1 .. Poses);
+         Pictures (A) := new Flow.Wrist_Picture_Array (1 .. 2 * Poses);
+         for P in 1 .. 2 * Poses loop
+            declare
+               Readings : Real_Array (1 .. 3);
+            begin
+               for J in 1 .. 3 loop
+                  Readings (J) := (if P = 1 then 0.0 else 400.0 * (2.0 * Uniform (G) - 1.0));
+               end loop;
+               --  The wrist eye's picture at the pose, and where it stood.
+               declare
+                  Moved : constant Rigid := KFit.Eye_At (Joints (A).all, [1, 2, 3], Readings);
+                  Pose  : constant Rigid :=
+                    Moved * Rigid'(Rotation => Wrist_Turn, Translation => Plus (Bases (A), [0.0, 0.45, 0.12]));
+               begin
+                  Pictures (A) (P) := (Luma => Picture_Of (Pose, Wrist_Lens, Wrist_W, Wrist_H), Width => Wrist_W,
+                                       Height => Wrist_H, Eye => Pose, World => null);
+               end;
+               --  The flow at the first poses, as robot.flow.eye makes it.
+               if P <= Poses then
+                  declare
+                     View : constant Flow.Pose_Access := new Flow.Pose_View (3, Points);
+                  begin
+                     View.Readings := Readings;
+                     View.Back := [others => 0.0];
+                     for I in 1 .. Points loop
+                        declare
+                           K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
+                           Along : constant Real := Uniform (G);
+                           Point : constant Vec3 :=
+                             Plus (Bases (A),
+                                   (if K = 2
+                                    then [0.08 * (2.0 * Uniform (G) - 1.0), 0.25 * Along,
+                                          0.1 + 0.08 * (2.0 * Uniform (G) - 1.0)]
+                                    else [0.08 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along,
+                                          0.1 + 0.08 * (2.0 * Uniform (G) - 1.0)]));
+                           Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
+                           U, V  : Real;
+                           Ahead : Boolean;
+                        begin
+                           Project (A, Point, K, Readings, U, V, Ahead);
+                           Check (Ahead, "a point of a synthetic arm is behind the fixed eye");
+                           View.U (I) := U;
+                           View.V (I) := V;
+                           View.Gu (I) := 30.0 * Cos (Angle);
+                           View.Gv (I) := 30.0 * Sin (Angle);
+                           View.Link (I) := K;
+                           for J in 1 .. 3 loop
+                              View.Sigma (I, J) := Sigma;
+                              if J <= K then
+                                 declare
+                                    Step     : constant Real := 1.0E-3;
+                                    Up, Back : Real_Array := Readings;
+                                    U1, V1, U2, V2 : Real;
+                                    A1, A2   : Boolean;
+                                 begin
+                                    Up (J) := Readings (J) + Step;
+                                    Back (J) := Readings (J) - Step;
+                                    Project (A, Point, K, Up, U1, V1, A1);
+                                    Project (A, Point, K, Back, U2, V2, A2);
+                                    View.Rate (I, J) :=
+                                      -(View.Gu (I) * (U1 - U2) + View.Gv (I) * (V1 - V2)) / (2.0 * Step)
+                                      + Sigma * Gaussian (G);
+                                 end;
+                              else
+                                 View.Rate (I, J) := Sigma * Gaussian (G);
+                              end if;
+                           end loop;
+                        end;
+                     end loop;
+                     Views (A) (P) := View;
+                  end;
+               end if;
+            end;
+         end loop;
+         In_Arms (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Joints (A).all'Unchecked_Access,
+                         Unit_Sigma => null);
+         Worlds (A) := (Pictures => Pictures (A).all'Unchecked_Access, Lens => Wrist_Lens,
+                        Table    => (Centre => [0.0, 0.25, Table_Z], Normal => [0.0, 0.0, 1.0],
+                                     Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
+                                     Offset_Sigma => 1.0E-4, Tilt_11 => 1.0E-8, Tilt_12 => 0.0, Tilt_22 => 1.0E-8,
+                                     Points => 1000, Scatter => 1.0));
+      end loop;
+      Fixed := Picture_Of (Truth, (Fx | Fy => Focal, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
+                                   K1 | K2 => 0.0), Width, Height);
+      Flow.Fit_Eye (In_Arms, Width, Height, Result);
+      declare
+         Flows_Off : constant Real := Table_Off (Result);
+      begin
+         Flow.Refine_By_Scene (In_Arms, Worlds, Fixed.all, Width, Height, Result);
+         Check (Result.Determined, "the eye placed again is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
+         Check (Table_Off (Result) < Flows_Off, "the table's points lie no nearer the true eye's places than the flows' "
+                & "eye put them:" & Real'Image (Table_Off (Result)) & " px against" & Real'Image (Flows_Off));
+      end;
+      if Result.Determined then
+         Check (abs Ada.Numerics.Long_Elementary_Functions.Log (Result.Lens.Fx / Focal)
+                <= Driver.Conventions.Z * Sqrt (Result.Covariance (1, 1)),
+                "the focal length is off its sigma:" & Real'Image (Result.Lens.Fx));
+         Check (abs (Result.Lens.Cx - Real (Width) / 2.0) <= Driver.Conventions.Z * Sqrt (Result.Covariance (2, 2))
+                and then abs (Result.Lens.Cy - Real (Height) / 2.0)
+                         <= Driver.Conventions.Z * Sqrt (Result.Covariance (3, 3)),
+                "the principal point is off its sigma:" & Real'Image (Result.Lens.Cx) & Real'Image (Result.Lens.Cy));
+         for A in 1 .. Arms loop
+            declare
+               Off_C  : constant Vec3 := Minus (Result.Poses (A).Translation, Truth.Translation);
+               Turned : constant Vec3 :=
+                 Driver.Numerics.Log (Times (Transposed (Truth.Rotation), Result.Poses (A).Rotation));
+               O      : constant Natural := 3 + 6 * (A - 1);
+            begin
+               for X in 1 .. 3 loop
+                  Check (abs Off_C (X) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + 3 + X, O + 3 + X)),
+                         "arm" & A'Image & "'s centre is off its sigma along axis" & X'Image & ":"
+                         & Real'Image (Off_C (X)));
+                  Check (abs Turned (X) <= Driver.Conventions.Z * Sqrt (Result.Covariance (O + X, O + X)),
+                         "arm" & A'Image & "'s turn is off its sigma about axis" & X'Image & ":"
+                         & Real'Image (Turned (X)));
+               end loop;
+            end;
+         end loop;
+      end if;
+      for A in 1 .. Arms loop
+         for P of Pictures (A).all loop
+            declare
+               L : Flow.Luma_Access := P.Luma;
+            begin
+               Free (L);
+            end;
+         end loop;
+      end loop;
+      Free (Fixed);
+   end Scene_Places_A_Fixed_Eye;
+
    procedure Register is
    begin
       Driver.Tests.Register ("robot.flow.eye", "a fixed eye placed by a synthetic arm's edge flow is not told or comes "
                              & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
+      Driver.Tests.Register ("robot.flow.scene", "a fixed eye placed again by the table two arms' own eyes see is "
+                             & "not told, comes back off its own sigmas, or puts the table's points no nearer their "
+                             & "places than the flows' eye", Scene_Places_A_Fixed_Eye'Access);
       Driver.Tests.Register ("robot.kinematics.scales", "the floor and gain of the scales residuals are judged at are "
                              & "read beside what their sightings state, whatever part of it the residuals bear out, so "
                              & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);

@@ -2634,7 +2634,6 @@ driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Aligned_At),
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Real (Fitted_At), 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& "" & Driver.Log.Image (Sqrt (Cov (2, 2)), 2) & ""	2	format	digits printed in a log line or a message
-driver-robot-kinematics-flow_eye.adb	& "" & Per_Arm & "" & Driver.Log.Image (Scatter, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (1000.0 * Sqrt (Cov (7, 7) + Cov (8, 8) + Cov (9, 9)), 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (1000.0 * Sqrt (Cov (7, 7) + Cov (8, 8) + Cov (9, 9)), 1)	1000.0	format	metres printed as millimetres
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (1000.0 * Sqrt (Cov (7, 7) + Cov (8, 8) + Cov (9, 9)), 1)	9	structure	the first arm's centre: the terms after the lens's three and its turn's three
@@ -2645,6 +2644,7 @@ driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Exp (Now.X (1)), 1) & "
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Flows_Scale, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Lens_Of (Y).Fx, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Began), 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Scatter, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-flow_eye.adb	& Driver.Log.Image (Spread_F, 2) & ""	2	format	digits printed in a log line or a message
