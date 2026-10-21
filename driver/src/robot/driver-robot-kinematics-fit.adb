@@ -463,6 +463,13 @@ package body Driver.Robot.Kinematics.Fit is
       --  The Jacobian's column of a parameter from Evaluate_Column, given the residuals at the estimate it moves the
       --  parameter from: it takes again only the residuals that parameter moves, the rest as given (Evaluate's, to
       --  the bit).
+      with procedure Normal_Of
+        (X : Real_Array; R : Real_Array; Sigma : Real; A : out Real_Matrix; G : out Real_Vector) is null;
+      Normal_Given : Boolean := False;
+      --  The normal equations at X from Normal_Of in place of the numerical Jacobian's: A the Huber-weighted J'WJ
+      --  (whole, both triangles), G the step's right side -J'Wr, R the residuals at X, each weighed as below. For a
+      --  fit whose residuals move with its parameters through a few numbers each (an order's quick fit: every sighting
+      --  of a keyframe through that keyframe's eye), which forms them from those.
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real);
 
    procedure Robust_Fit (X : in out Real_Array; Sigma : Real) is
@@ -470,7 +477,7 @@ package body Driver.Robot.Kinematics.Fit is
       procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Matrix_Access);
       R0     : Real_Access := new Real_Array (1 .. Residuals);
       Rn     : Real_Access := new Real_Array (1 .. Residuals);
-      J      : Matrix_Access := new Real_Matrix (1 .. Residuals, 1 .. Parameters);
+      J      : Matrix_Access := (if Normal_Given then null else new Real_Matrix (1 .. Residuals, 1 .. Parameters));
       Lambda : Real := Damping;
       Cost0  : Real;
 
@@ -488,34 +495,36 @@ package body Driver.Robot.Kinematics.Fit is
       loop
          --  Forward differences at the square root of the float's resolution
          --  relative to each parameter's size.
-         declare
-            procedure Column (K : Positive) is
-               Xp : Real_Array := X;
-               H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));
-               Rk : Real_Access := new Real_Array (1 .. Residuals);
+         if not Normal_Given then
+            declare
+               procedure Column (K : Positive) is
+                  Xp : Real_Array := X;
+                  H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));
+                  Rk : Real_Access := new Real_Array (1 .. Residuals);
+               begin
+                  Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
+                  if Column_Aware then
+                     Rk.all := R0.all;
+                     Evaluate_Column (Xp, K, Rk.all);
+                  else
+                     Evaluate (Xp, Rk.all);
+                  end if;
+                  for I in 1 .. Residuals loop
+                     J (I, K) := (Rk (I) - R0 (I)) / H;
+                  end loop;
+                  Free (Rk);
+               end Column;
+               procedure Columns is new Driver.Parallel_For (Column);
             begin
-               Xp (Xp'First + K - 1) := Xp (Xp'First + K - 1) + H;
-               if Column_Aware then
-                  Rk.all := R0.all;
-                  Evaluate_Column (Xp, K, Rk.all);
+               if At_Once then
+                  Columns (1, Parameters);
                else
-                  Evaluate (Xp, Rk.all);
+                  for K in 1 .. Parameters loop
+                     Column (K);
+                  end loop;
                end if;
-               for I in 1 .. Residuals loop
-                  J (I, K) := (Rk (I) - R0 (I)) / H;
-               end loop;
-               Free (Rk);
-            end Column;
-            procedure Columns is new Driver.Parallel_For (Column);
-         begin
-            if At_Once then
-               Columns (1, Parameters);
-            else
-               for K in 1 .. Parameters loop
-                  Column (K);
-               end loop;
-            end if;
-         end;
+            end;
+         end if;
          declare
             A : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
             G : Real_Vector (1 .. Parameters) := [others => 0.0];
@@ -548,17 +557,21 @@ package body Driver.Robot.Kinematics.Fit is
                end Row;
                procedure Rows is new Driver.Parallel_For (Row);
             begin
-               for I in 1 .. Residuals loop
-                  Weights (I) := Huber (R0 (I) / Sigma) / Sigma ** 2;
-               end loop;
-               Rows (1, Parameters);
+               if Normal_Given then
+                  Normal_Of (X, R0.all, Sigma, A, G);
+               else
+                  for I in 1 .. Residuals loop
+                     Weights (I) := Huber (R0 (I) / Sigma) / Sigma ** 2;
+                  end loop;
+                  Rows (1, Parameters);
+                  for P in 1 .. Parameters loop
+                     for Q in 1 .. P - 1 loop
+                        A (P, Q) := A (Q, P);
+                     end loop;
+                  end loop;
+               end if;
                Free (Weights);
             end;
-            for P in 1 .. Parameters loop
-               for Q in 1 .. P - 1 loop
-                  A (P, Q) := A (Q, P);
-               end loop;
-            end loop;
             --  Marquardt's damping, doubled until a step lowers the cost or
             --  the step no longer moves any parameter.
             loop
@@ -2783,9 +2796,10 @@ package body Driver.Robot.Kinematics.Fit is
          --  trade along a valley, and a desktop arm swept to 11.5 degrees settled at 330 px of 400, its sigma 4.5 px
          --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held at steps
          --  doubling from Z of its own sigma (held within that sigma, the search's measurement of it), everything
-         --  else refitted; a step whose sightings' median residual, over every sighting, lies below the solution's
-         --  by more than Z of the two medians' standard errors is a better basin, refitted from there and profiled
-         --  again; a step above by as much ends that way, as does the range the focal search ranged over.
+         --  else refitted; a step whose robust cost over every sighting lies below the solution's by more than Z
+         --  squared over two (a likelihood ratio at Z) is a better basin, refitted from there and profiled again; a
+         --  step whose median residual over every sighting lies above the solution's by more than Z of the two
+         --  medians' standard errors ends that way, as does the range the focal search ranged over.
          declare
             type Sign_Way is (Up, Down);
             Moved : Boolean := True;
@@ -2842,7 +2856,6 @@ package body Driver.Robot.Kinematics.Fit is
                         Way    : constant Sign_Way := Sign_Way'Val (Index - 1);
                         Offset : Real := Driver.Conventions.Z * Held;
                         Last_F : Real := 0.0;   --  the focal length of the last step taken, none yet
-                        Was_Told : Boolean := False;   --  the step before this one was told apart
                      begin
                         loop
                            declare
@@ -2889,14 +2902,17 @@ package body Driver.Robot.Kinematics.Fit is
                                  Walked (Way).Told := Walked (Way).Told or else Told_Apart (Rp);
                                  --  A better basin: the step's cost below the solution's by a likelihood ratio at Z,
                                  --  refitted from there, the focal length free within the search's width, and taken when
-                                 --  it stays below. The way ends at the second step told apart in a row, or where a step
-                                 --  leaves every sighting a median significantly above the solution's: one step past a ridge
-                                 --  falls into what lies beyond it or rises with the wall. Ended at its first step told
-                                 --  apart, the walk kept the desktop arm's wide lens at 327 px, between steps 8 and 11 above
-                                 --  the solution, where the next step (399 px) lay 884 below it (robot.kinematics.desktop,
-                                 --  10-20); ended by the median alone, which a step barely moves, the head rig's arm walked
-                                 --  twelve steps of 7693 sightings, to 1400 above the solution's cost, and the order exams
-                                 --  ran past the two-minute cap.
+                                 --  it stays below. The way ends where a step leaves every sighting a median significantly
+                                 --  above the solution's (or at the range searched): a cost that rises tells no ridge from a
+                                 --  wall. Ended at its first step told apart, the walk kept the desktop arm's wide lens at
+                                 --  327 px, its steps 8 and 11 above the solution, where the next step (399 px) lay 884 below
+                                 --  it (robot.kinematics.desktop, 10-20); at the second told apart in a row, the same arm
+                                 --  when the order search's quick fits went through the keyframes' eyes, its steps 5.3 and
+                                 --  11.0 above and the next (399 px) 883 below (10-21). Ended by the median alone, which a
+                                 --  step barely moves, the head rig's arm walked twelve steps of 7693 sightings to 1400 above
+                                 --  the solution's cost and the order exams ran past the two-minute cap (10-20); with the
+                                 --  quick fits through the eyes, 56 % more steps than the told ending cost robot.kinematics
+                                 --  3 % more time side by side (10-21).
                                  if Report.Cost_Judged - Rp.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0 then
                                     Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
                                                    Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
@@ -2906,9 +2922,7 @@ package body Driver.Robot.Kinematics.Fit is
                                     end if;
                                     exit;
                                  end if;
-                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err
-                                   or else (Was_Told and then Told_Apart (Rp));
-                                 Was_Told := Told_Apart (Rp);
+                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
                               end;
                               Offset := 2.0 * Offset;
                            end;
@@ -5425,28 +5439,193 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                end Evaluate;
 
-               --  A column moves one joint's terms alone, and a keyframe that does not turn that joint has the same
-               --  eye whatever its terms (its step is nought): only the keyframes that turn it are taken again. The
-               --  columns of every keyframe were most of the order search's time (the bench's table seed 1, 10-21: the
-               --  orders' own fits 3.9 to 5.1 s of the 6 to 7 s a round spent in stage 4).
-               procedure Evaluate_Column (V : Real_Array; Column : Positive; R : in out Real_Array) is
-                  Jx    : constant Joint_Array := Joints_Of (V);
-                  Moved : constant Positive := (Column - 1) / Per + 1;
+               --  The normal equations through each keyframe's eye (Robust_Fit's Normal_Of): a sighting's residual moves
+               --  with the joints' terms only through its keyframe's eye, the lens and its point's depth held, so each
+               --  keyframe's sightings give the six-by-six information of its eye's turn and step in the eye's own frame
+               --  (their residuals' forward differences in it, each weighed as Robust_Fit weighs a residual) and the
+               --  eye's own forward differences in the terms of the joints the keyframe turns (Eye_At): J'WJ and J'Wr
+               --  summed keyframe by keyframe through those six numbers, not sighting by sighting through every term.
+               --  The sums over every sighting of every term were most of an order search (the humanoid s3_1, 10-21: 56
+               --  of the 84 thousand samples its stage 4 took, the columns 21 more).
+               procedure Normal_Of
+                 (V : Real_Array; R : Real_Array; Sigma : Real; A : out Real_Matrix; G : out Real_Vector)
+               is
+                  Jx  : constant Joint_Array := Joints_Of (V);
+                  Eps : constant Real := Sqrt (Real'Model_Epsilon);
+                  type Six is array (1 .. 6) of Real;
+                  type Six_By_Six is array (1 .. 6, 1 .. 6) of Real;
+                  type Six_By_Terms is array (1 .. 6, 1 .. Count) of Real;
+                  type Frame_Part is record
+                     Info : Six_By_Six := [others => [others => 0.0]];
+                     Grad : Six := [others => 0.0];
+                     Pose : Six_By_Terms := [others => [others => 0.0]];
+                  end record;
+                  type Part_Array is array (Positive range <>) of Frame_Part;
+                  type Part_Access is access Part_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Part_Array, Part_Access);
+                  Parts : Part_Access := new Part_Array (1 .. Frames);
+
+                  procedure One_Frame (F : Positive) is
+                     Part  : Frame_Part renames Parts (F);
+                     Ch    : constant Real_Array := Changes_Of (F);
+                     --  Each joint's own step at the keyframe, along the chain, and the steps from each one to the
+                     --  eye (After (K): the K-th's and every one after it; After (N + 1) none).
+                     Steps : array (1 .. N) of Rigid;
+                     After : array (1 .. N + 1) of Rigid;
+                     Back  : Rigid;
+                  begin
+                     if Count_Of (F) = 0 then
+                        return;
+                     end if;
+                     for K in 1 .. N loop
+                        Steps (K) := Eye_At (Jx (C (K) .. C (K)), [1], [Ch (Ch'First + C (K) - 1)]);
+                     end loop;
+                     After (N + 1) := Identity;
+                     for K in reverse 1 .. N loop
+                        After (K) := Steps (K) * After (K + 1);
+                     end loop;
+                     Back := Inverse (After (1));
+                     for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
+                        declare
+                           I : constant Positive := By_Frame (Q);
+                           P : Vec3;
+                        begin
+                           if Has_Track (I) then
+                              P := Back * Track_Points (I);
+                              if P (3) > 0.0 then
+                                 declare
+                                    --  The projection's derivatives in the point (Project's lens), and the point's in
+                                    --  the eye's turn about its own axes and its step along them (the point moves the
+                                    --  other way in the eye's frame: P x turn, minus the step).
+                                    Xn  : constant Real := P (1) / P (3);
+                                    Yn  : constant Real := P (2) / P (3);
+                                    R2  : constant Real := Xn * Xn + Yn * Yn;
+                                    D   : constant Real := 1.0 + X.L.K1 * R2 + X.L.K2 * R2 * R2;
+                                    Dr  : constant Real := X.L.K1 + 2.0 * X.L.K2 * R2;
+                                    Uxy : constant array (1 .. 2) of Real :=
+                                      [X.L.Fx * (D + 2.0 * Xn * Xn * Dr), X.L.Fx * 2.0 * Xn * Yn * Dr];
+                                    Vxy : constant array (1 .. 2) of Real :=
+                                      [X.L.Fy * 2.0 * Xn * Yn * Dr, X.L.Fy * (D + 2.0 * Yn * Yn * Dr)];
+                                    --  the projection's derivatives in the point, through Xn = P (1) / P (3) and Yn
+                                    Up  : constant Vec3 :=
+                                      [Uxy (1) / P (3), Uxy (2) / P (3), -(Uxy (1) * Xn + Uxy (2) * Yn) / P (3)];
+                                    Vp  : constant Vec3 :=
+                                      [Vxy (1) / P (3), Vxy (2) / P (3), -(Vxy (1) * Xn + Vxy (2) * Yn) / P (3)];
+                                    Ju, Jv : Six;
+                                    Ru  : constant Real := R (R'First + 2 * I - 2);
+                                    Rv  : constant Real := R (R'First + 2 * I - 1);
+                                    Wu  : constant Real := Huber (Ru / Sigma) / Sigma ** 2;
+                                    Wv  : constant Real := Huber (Rv / Sigma) / Sigma ** 2;
+                                 begin
+                                    --  d(P x turn) / d turn K is P x e_K: (0, P3, -P2), (-P3, 0, P1), (P2, -P1, 0); then minus the
+                                    --  step.
+                                    Ju (1) := Up (2) * P (3) - Up (3) * P (2);
+                                    Ju (2) := Up (3) * P (1) - Up (1) * P (3);
+                                    Ju (3) := Up (1) * P (2) - Up (2) * P (1);
+                                    Jv (1) := Vp (2) * P (3) - Vp (3) * P (2);
+                                    Jv (2) := Vp (3) * P (1) - Vp (1) * P (3);
+                                    Jv (3) := Vp (1) * P (2) - Vp (2) * P (1);
+                                    for K in 1 .. 3 loop
+                                       Ju (3 + K) := -Up (K);
+                                       Jv (3 + K) := -Vp (K);
+                                    end loop;
+                                    for K in 1 .. 6 loop
+                                       Part.Grad (K) := Part.Grad (K) + Wu * Ju (K) * Ru + Wv * Jv (K) * Rv;
+                                       for L in 1 .. 6 loop
+                                          Part.Info (K, L) :=
+                                            Part.Info (K, L) + Wu * Ju (K) * Ju (L) + Wv * Jv (K) * Jv (L);
+                                       end loop;
+                                    end loop;
+                                 end;
+                              end if;
+                           end if;
+                        end;
+                     end loop;
+                     --  The eye's own move per term of the joints the keyframe turns (the others' terms move nothing):
+                     --  only that joint's own step moved, carried to the eye by the steps after it.
+                     for K in 1 .. N loop
+                        if Change (F, C (K)) /= 0.0 then
+                           for T in Per * (C (K) - 1) + 1 .. Per * C (K) loop
+                              declare
+                                 H  : constant Real := Eps * Real'Max (1.0, abs V (V'First + T - 1));
+                                 Vp : Real_Array := V;
+                              begin
+                                 Vp (Vp'First + T - 1) := Vp (Vp'First + T - 1) + H;
+                                 declare
+                                    Jp : constant Joint_Array := Joints_Of (Vp);
+                                    Mk : constant Rigid :=
+                                      Eye_At (Jp (C (K) .. C (K)), [1], [Ch (Ch'First + C (K) - 1)]);
+                                    D  : constant Rigid :=
+                                      Inverse (After (K + 1)) * (Inverse (Steps (K)) * Mk) * After (K + 1);
+                                 begin
+                                    Part.Pose (1, T) := (D.Rotation (3, 2) - D.Rotation (2, 3)) / (2.0 * H);
+                                    Part.Pose (2, T) := (D.Rotation (1, 3) - D.Rotation (3, 1)) / (2.0 * H);
+                                    Part.Pose (3, T) := (D.Rotation (2, 1) - D.Rotation (1, 2)) / (2.0 * H);
+                                    for L in 1 .. 3 loop
+                                       Part.Pose (3 + L, T) := D.Translation (L) / H;
+                                    end loop;
+                                 end;
+                              end;
+                           end loop;
+                        end if;
+                     end loop;
+                  end One_Frame;
+                  procedure Every_Frame is new Driver.Parallel_For (One_Frame);
                begin
+                  Every_Frame (1, Frames);
+                  A := [others => [others => 0.0]];
+                  G := [others => 0.0];
+                  --  Summed keyframe by keyframe in their order, whichever task made each part.
                   for F in 1 .. Frames loop
-                     if Count_Of (F) > 0 and then Change (F, Moved) /= 0.0 then
-                        Frame_Residuals (Jx, F, R);
+                     if Count_Of (F) > 0 then
+                        declare
+                           Part : Frame_Part renames Parts (F);
+                           Ip   : Six_By_Terms := [others => [others => 0.0]];   --  Info * Pose
+                        begin
+                           for J in 1 .. N loop
+                              if Change (F, J) /= 0.0 then
+                                 for Q in Per * (J - 1) + 1 .. Per * J loop
+                                    for K in 1 .. 6 loop
+                                       for L in 1 .. 6 loop
+                                          Ip (K, Q) := Ip (K, Q) + Part.Info (K, L) * Part.Pose (L, Q);
+                                       end loop;
+                                    end loop;
+                                 end loop;
+                              end if;
+                           end loop;
+                           for Jp in 1 .. N loop
+                              if Change (F, Jp) /= 0.0 then
+                                 for P in Per * (Jp - 1) + 1 .. Per * Jp loop
+                                    for K in 1 .. 6 loop
+                                       G (G'First + P - 1) := G (G'First + P - 1) - Part.Pose (K, P) * Part.Grad (K);
+                                    end loop;
+                                    for Jq in 1 .. N loop
+                                       if Change (F, Jq) /= 0.0 then
+                                          for Q in Per * (Jq - 1) + 1 .. Per * Jq loop
+                                             for K in 1 .. 6 loop
+                                                A (A'First (1) + P - 1, A'First (2) + Q - 1) :=
+                                                  A (A'First (1) + P - 1, A'First (2) + Q - 1)
+                                                  + Part.Pose (K, P) * Ip (K, Q);
+                                             end loop;
+                                          end loop;
+                                       end if;
+                                    end loop;
+                                 end loop;
+                              end if;
+                           end loop;
+                        end;
                      end if;
                   end loop;
-               end Evaluate_Column;
+                  Free (Parts);
+               end Normal_Of;
+
 
                --  Undamped from the first step, as Refine_Tracks begins (a damping of the float's epsilon): every
                --  order begins at the joints of the keyframes of one joint each, beside its own fit, with no valley
                --  to cross; begun at a damping of one, the order search's fits took 21 normal equations each on the
                --  bench's nine-joint humanoid s2_1 and 15 undamped (10-21: 1365 against 978 its first round).
                procedure Solve is new Robust_Fit (Count, 2 * S, Real'Model_Epsilon, Evaluate,
-                                                  At_Once => True, To_The_End => True,
-                                                  Evaluate_Column => Evaluate_Column, Column_Aware => True);
+                                                  To_The_End => True, Normal_Of => Normal_Of, Normal_Given => True);
                V0 : Real_Array (1 .. Count) := [others => 0.0];
                R0 : Real_Access := new Real_Array (1 .. 2 * S);
             begin
