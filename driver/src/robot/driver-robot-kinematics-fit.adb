@@ -1466,6 +1466,13 @@ package body Driver.Robot.Kinematics.Fit is
                   Jd    : Real_Access := new Real_Array (1 .. 2 * Used);
                   Owns  : Real_Access := new Real_Array (1 .. 2 * Used);   --  what the matcher stated, per residual
                   Scales : Real_Access := new Real_Array (1 .. 2 * Used);  --  what each residual is judged at
+                  --  Per joint, the residuals of the sightings in keyframes that turned it, in their order: no other
+                  --  residual moves with its terms (Residuals, Joint), so its column is nought elsewhere and the
+                  --  normal equations' sums over these alone are the sums over every residual, to the last bit. Its
+                  --  column and its row went over every residual: the humanoid's arm of nine joints, 2.6 of them turned
+                  --  at a residual, spent 66 of a fit's 110 s on them (10-21).
+                  type Row_Lists is array (1 .. N) of Natural_Access;
+                  Moved_Rows : Row_Lists := [others => null];
                   K     : Natural := 0;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
@@ -1487,6 +1494,30 @@ package body Driver.Robot.Kinematics.Fit is
                         Owns (2 * K) := Sight (Sight'First + I - 1).Own;
                      end if;
                   end loop;
+                  Jp.all := [others => [others => 0.0]];
+                  for J in 1 .. N loop
+                     declare
+                        function Turns (At_K : Positive) return Boolean is
+                          (Changes (Changes'First (1) + Sight (Sight'First + Natural (Index (At_K)) - 1).Frame - 1,
+                                    Changes'First (2) + J - 1) /= 0.0);
+                        Taken : Natural := 0;
+                     begin
+                        for At_K in 1 .. Used loop
+                           if Turns (At_K) then
+                              Taken := Taken + 2;
+                           end if;
+                        end loop;
+                        Moved_Rows (J) := new Natural_Array (1 .. Taken);
+                        Taken := 0;
+                        for At_K in 1 .. Used loop
+                           if Turns (At_K) then
+                              Moved_Rows (J) (Taken + 1) := 2 * At_K - 1;
+                              Moved_Rows (J) (Taken + 2) := 2 * At_K;
+                              Taken := Taken + 2;
+                           end if;
+                        end loop;
+                     end;
+                  end loop;
                   Residuals (X, Depth.all, Index, R0.all);
                   declare
                      Model : constant Error_Model := Model_Of (R0.all, Owns.all);
@@ -1500,6 +1531,9 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (R0);
                      Free (Rn);
                      Free (Jp);
+                     for J in 1 .. N loop
+                        Free (Moved_Rows (J));
+                     end loop;
                      Free (Jd);
                      Free (Owns);
                      Free (Scales);
@@ -1521,7 +1555,7 @@ package body Driver.Robot.Kinematics.Fit is
                         procedure Column (P : Positive) is
                            Xp : Real_Array := X;
                            H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
-                           Rp : Real_Access := new Real_Array'(R0.all);
+                           Rp : Real_Access := new Real_Array (1 .. 2 * Used);
                         begin
                            --  The terms a pinhole with square pixels has not, the lens's second focal length and its two
                            --  distortion terms, have no column, and a term with none stays where it is (a sliding joint's
@@ -1532,11 +1566,17 @@ package body Driver.Robot.Kinematics.Fit is
                               end loop;
                            else
                               Xp (P) := Xp (P) + H;
-                              Residuals (Xp, Depth.all, Index, Rp.all,
-                                         Joint => (if P <= 6 then 0 else (P - 7) / Per_Joint + 1));
-                              for I in 1 .. 2 * Used loop
-                                 Jp (I, P) := (Rp (I) - R0 (I)) / H;
-                              end loop;
+                              if P <= 6 then
+                                 Residuals (Xp, Depth.all, Index, Rp.all);
+                                 for I in 1 .. 2 * Used loop
+                                    Jp (I, P) := (Rp (I) - R0 (I)) / H;
+                                 end loop;
+                              else
+                                 Residuals (Xp, Depth.all, Index, Rp.all, Joint => (P - 7) / Per_Joint + 1);
+                                 for I of Moved_Rows ((P - 7) / Per_Joint + 1).all loop
+                                    Jp (I, P) := (Rp (I) - R0 (I)) / H;
+                                 end loop;
+                              end if;
                            end if;
                            Free (Rp);
                         end Column;
@@ -1593,8 +1633,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  declare
                                     Sum_G : Real := 0.0;
                                     Sum_A : Real_Array (P .. Count) := [others => 0.0];
-                                 begin
-                                    for I in 1 .. 2 * Used loop
+                                    procedure Add (I : Positive) is
+                                    begin
                                        if Jp (I, P) /= 0.0 then
                                           declare
                                              W : constant Real := Weights (I);
@@ -1614,7 +1654,17 @@ package body Driver.Robot.Kinematics.Fit is
                                              end loop;
                                           end;
                                        end if;
-                                    end loop;
+                                    end Add;
+                                 begin
+                                    if P <= 6 then
+                                       for I in 1 .. 2 * Used loop
+                                          Add (I);
+                                       end loop;
+                                    else
+                                       for I of Moved_Rows ((P - 7) / Per_Joint + 1).all loop
+                                          Add (I);
+                                       end loop;
+                                    end if;
                                     Gp (P) := Sum_G;
                                     for Q in P .. Count loop
                                        A (P, Q) := Sum_A (Q);
@@ -2036,6 +2086,9 @@ package body Driver.Robot.Kinematics.Fit is
                   Free (R0);
                   Free (Rn);
                   Free (Jp);
+                  for J in 1 .. N loop
+                     Free (Moved_Rows (J));
+                  end loop;
                   Free (Jd);
                   Free (Owns);
                   Free (Scales);
