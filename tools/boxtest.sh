@@ -26,8 +26,10 @@ SSH=(ssh -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=2
 quiet() { grep -v "Welcome\|Have fun\|authentication" || true; }
 HASH=$(git -C "$ROOT" rev-parse --short "$COMMIT") || exit 2
 D="/root/work/core/boxtest/$HASH-$$-$(date +%s)"
-NAMES=$(git -C "$ROOT" grep -h -o -E 'Register \("[A-Za-z0-9_.]+"' "$COMMIT" -- driver \
-        | sed -E 's/Register \("//; s/"$//' | sort -u)
+# A registration may break its line before the name (tools/selftests.sh): the files read whole.
+NAMES=$(git -C "$ROOT" ls-tree -r --name-only "$COMMIT" -- driver | grep -E '\.ad[sb]$' \
+        | while read -r F; do git -C "$ROOT" show "$COMMIT:$F"; echo; done \
+        | perl -0777 -ne 'print "$1\n" while /\bRegister\s*\(\s*"([A-Za-z0-9_.]+)"/g' | sort -u)
 COUNT=$(echo "$NAMES" | wc -l | tr -d ' ')
 echo "building $HASH on $BOX in $D for $COUNT tests"
 # The sources go up as one file, sent again while the connection fails (ssh's own status 255; a

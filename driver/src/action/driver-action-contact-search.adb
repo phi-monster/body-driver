@@ -244,7 +244,7 @@ package body Driver.Action.Contact.Search is
          else
             E.Unplaced := To_Unbounded_String
               ((if Pos_Sd = Real'Last then " the tool's place" else "")
-               & (if Rot_Sd = Real'Last then " the tool's turn" else "")
+               & (if Rot_Sd = Real'Last then " the tool's orientation" else "")
                & (if Tip_Sd = Real'Last then " a lobe's tip somewhere along its travel" else ""));
          end if;
       end;

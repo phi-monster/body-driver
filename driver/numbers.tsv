@@ -2803,8 +2803,8 @@ driver-robot-kinematics-flow_eye.adb	Cov (I, J) := (Cov (I, J) + Cov (J, I)) / 2
 driver-robot-kinematics-flow_eye.adb	Cov_F (I, J) := (Cov_F (I, J) + Cov_F (J, I)) / 2.0;	2.0	math	a matrix's symmetric part
 driver-robot-kinematics-flow_eye.adb	Curvature : constant Real := Fp - 2.0 * F0 + Fm;	2.0	math	the second difference of the misfit at a sigma either side and at the estimate
 driver-robot-kinematics-flow_eye.adb	D (T) := D (T) / 2.0;	2.0	numerics	a step halved until it lowers the cost
-driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * G2 * A2;	10	structure	the aspect's logarithm, an arm's own tenth term
-driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * G2 * W2;	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * Gy * A2;	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	DA (J, 10) := C * Gy * W2;	10	structure	the aspect's logarithm, an arm's own tenth term
 driver-robot-kinematics-flow_eye.adb	DA (J, 2) := C * G_Dot (0.0, W3, -W2);	0.0	math	the cross product's components
 driver-robot-kinematics-flow_eye.adb	DA (J, 3) := C * G_Dot (-W3, 0.0, W1);	0.0	math	the cross product's components
 driver-robot-kinematics-flow_eye.adb	DA (J, 4 + E) := C * G_Dot (W2 * Dt3 - W3 * Dt2, W3 * Dt1 - W1 * Dt3, W1 * Dt2 - W2 * Dt1);	4	structure	the centre's terms follow the turn's
@@ -2812,8 +2812,8 @@ driver-robot-kinematics-flow_eye.adb	DA (J, 4) := C * G_Dot (W2, -W1, 0.0);	0.0	
 driver-robot-kinematics-flow_eye.adb	DA (J, 9) := C * Gv * A3;	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	DA (J, 9) := C * Gv * W3;	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	DA, DB : Real_Matrix (1 .. Natural'Max (1, K), 1 .. Terms) := [others => [others => 0.0]];	1	structure	an array of at least one element
-driver-robot-kinematics-flow_eye.adb	DB (J, 10) := C * (G2 * B2 + Yn * (G1 * W3 - G3 * W1));	10	structure	the aspect's logarithm, an arm's own tenth term
-driver-robot-kinematics-flow_eye.adb	DB (J, 9) := C * (Gv * B3 + (G1 * W3 - G3 * W1) / Fy);	9	structure	the principal point down is the ninth term
+driver-robot-kinematics-flow_eye.adb	DB (J, 10) := C * (Gy * B2 + Yn * (Gx * W3 - Gz * W1));	10	structure	the aspect's logarithm, an arm's own tenth term
+driver-robot-kinematics-flow_eye.adb	DB (J, 9) := C * (Gv * B3 + (Gx * W3 - Gz * W1) / Fy);	9	structure	the principal point down is the ninth term
 driver-robot-kinematics-flow_eye.adb	DB (J, T) / Sg (J) + Rho * DA (J, T) / Sg (J) - (A (J) / Sg (J)) * (S1 + S2 + 2.0 * Rho * S3) / Aa;	2.0	math	the derivative of the variable projection (Golub and Pereyra)
 driver-robot-kinematics-flow_eye.adb	Du1 : constant Real := (case E is when 1 => 0.0, when 2 => -U3, when others => U2);	1	math	the cross product with the first basis vector
 driver-robot-kinematics-flow_eye.adb	Du1 : constant Real := (case E is when 1 => 0.0, when 2 => -U3, when others => U2);	2	math	the cross product with the second basis vector

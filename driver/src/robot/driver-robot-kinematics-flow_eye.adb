@@ -592,7 +592,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  a for rho = -a.y / a.a, and dr = dy + rho da - a (da.y + a.dy + 2 rho a.da) / a.a. A joint's turn in the camera's
    --  frame turns with the terms' turn e as w x e, the camera's centre in it moves as the frame's rows, the focal
    --  length scales the gradient across and down and the line of sight inversely, and the aspect the same down alone
-   --  (dG2 = G2, dyn = -yn). Written out, not through the vector operators: the secondary stack they take was most of
+   --  (dGy = Gy, dyn = -yn). Written out, not through the vector operators: the secondary stack they take was most of
    --  a fit's time (10-20, the arm's fit).
    procedure Pixel_Jacobian
      (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; D : out Real_Matrix;
@@ -608,14 +608,14 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Gu   : constant Real := View.Gu (I);
       Gv   : constant Real := View.Gv (I);
       --  The gradient in the camera's frame, and its derivative in the focal length's logarithm; the line of sight's.
-      G1 : constant Real := F * Gu;
-      G2 : constant Real := Fy * Gv;
-      G3 : constant Real := -(Gu * Du + Gv * Dv);
+      Gx : constant Real := F * Gu;
+      Gy : constant Real := Fy * Gv;
+      Gz : constant Real := -(Gu * Du + Gv * Dv);
       K    : constant Natural := View.Link (I);
       A, B, Sg : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];
       DA, DB : Real_Matrix (1 .. Natural'Max (1, K), 1 .. Terms) := [others => [others => 0.0]];
-      function G_Dot (V1, V2, V3 : Real) return Real is (G1 * V1 + G2 * V2 + G3 * V3);
-      function GF_Dot (V1, V2 : Real) return Real is (G1 * V1 + G2 * V2);
+      function G_Dot (V1, V2, V3 : Real) return Real is (Gx * V1 + Gy * V2 + Gz * V3);
+      function GF_Dot (V1, V2 : Real) return Real is (Gx * V1 + Gy * V2);
    begin
       Count := K;
       Ok := False;
@@ -636,10 +636,10 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                DA (J, 2) := C * G_Dot (0.0, W3, -W2);
                DA (J, 3) := C * G_Dot (-W3, 0.0, W1);
                DA (J, 4) := C * G_Dot (W2, -W1, 0.0);
-               --  The principal point moves the gradient's third coordinate by the gradient (G3 = -g . (u - c)).
+               --  The principal point moves the gradient's third coordinate by the gradient (Gz = -g . (u - c)).
                DA (J, 8) := C * Gu * W3;
                DA (J, 9) := C * Gv * W3;
-               DA (J, 10) := C * G2 * W2;
+               DA (J, 10) := C * Gy * W2;
             else
                declare
                   Q1 : constant Real := X (5) - T.P (1);
@@ -662,15 +662,15 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                   DA (J, 1) := C * GF_Dot (A1, A2);
                   --  d(w x m) for dm = (-xn, -yn, 0): w x dm = (w3 yn, -w3 xn, -w1 yn + w2 xn).
                   DB (J, 1) := C * (GF_Dot (B1, B2) + G_Dot (W3 * Yn, -W3 * Xn, W2 * Xn - W1 * Yn));
-                  --  The principal point: G3 moves by the gradient, the line of sight by minus one over the focal
+                  --  The principal point: Gz moves by the gradient, the line of sight by minus one over the focal
                   --  length across (w x dm = (0, -w3, w2) / f) or down (w x dm = (w3, 0, -w1) / fy).
                   DA (J, 8) := C * Gu * A3;
                   DA (J, 9) := C * Gv * A3;
-                  DB (J, 8) := C * (Gu * B3 + (G3 * W2 - G2 * W3) / F);
-                  DB (J, 9) := C * (Gv * B3 + (G1 * W3 - G3 * W1) / Fy);
-                  --  The aspect: G2 and yn scale, w x dm = (w3 yn, 0, -w1 yn) for dm = (0, -yn, 0).
-                  DA (J, 10) := C * G2 * A2;
-                  DB (J, 10) := C * (G2 * B2 + Yn * (G1 * W3 - G3 * W1));
+                  DB (J, 8) := C * (Gu * B3 + (Gz * W2 - Gy * W3) / F);
+                  DB (J, 9) := C * (Gv * B3 + (Gx * W3 - Gz * W1) / Fy);
+                  --  The aspect: Gy and yn scale, w x dm = (w3 yn, 0, -w1 yn) for dm = (0, -yn, 0).
+                  DA (J, 10) := C * Gy * A2;
+                  DB (J, 10) := C * (Gy * B2 + Yn * (Gx * W3 - Gz * W1));
                   for E in 1 .. 3 loop
                      declare
                         --  dw = w x e, du = u x e.

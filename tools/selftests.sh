@@ -16,8 +16,10 @@ JOBS="${2:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
 LIMIT="${3:-1200}"
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/bd_selftests.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
-grep -rhoE --include='*.ad[sb]' 'Register \("[A-Za-z0-9_.]+"' "$ROOT/driver" \
-  | sed -E 's/Register \("//; s/"$//' | sort -u > "$OUT/names"
+# A registration may break its line before the name (Register\n  ("alignment.affine", ...)): a one-line
+# grep missed the 26 alignment tests of 504 (10-21).
+find "$ROOT/driver" -name '*.ad[sb]' -not -path '*/obj/*' -print0 \
+  | xargs -0 perl -0777 -ne 'print "$1\n" while /\bRegister\s*\(\s*"([A-Za-z0-9_.]+)"/g' | sort -u > "$OUT/names"
 (cd "$ROOT/driver" && xargs -P "$JOBS" -I{} sh -c \
    'timeout "$2" "$0/selftest" "{}\$" > "$1/{}.log" 2>&1; echo "{} $?"' "$BIN" "$OUT" "$LIMIT" \
    < "$OUT/names") > "$OUT/results"
