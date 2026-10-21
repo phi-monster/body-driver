@@ -294,6 +294,65 @@ package body Driver.Robot.Kinematics.Fit is
      (Driver.Conventions.Z * Sqrt (Tilt_1 + Tilt_2) < Ada.Numerics.Pi / 2.0
       and then Driver.Uncertain.Significant (C, Sqrt (Scale_Variance)));
 
+   --  The step from a pinhole fit (Lp, Jp, R: its report) to a lens with its extras the sightings do not tell from it
+   --  (Le, Je), in the pinhole's own reduced terms (its axes' tilts and its points across them, each joint's scale, the
+   --  lens's six), taken into its covariance as its outer product, shrunk as the extras' cost above the pinhole's
+   --  (Worse) says: the fit may lie anywhere along the valley the two span, and the pinhole's held aspect and
+   --  distortion with it. Held square where the drone 3:1's and 5:1's eyes are 0.9981 and 0.9959, their joints came out
+   --  23 and 47 chi squares over 9 off the truth; taken whole, the steps to mast heads' extras at 55 by 81 and 94 by
+   --  128 px widened their pinholes' focal lengths to 204 and 92 px (the bench, 10-21).
+   procedure Take_Span
+     (Lp : Lens; Jp : Joint_Array; Le : Lens; Je : Joint_Array; Worse : Real; R : in out Fit_Report)
+   is
+      N       : constant Natural := Jp'Length;
+      Reduced : constant Natural := Terms (N);
+      D       : Real_Vector (1 .. Reduced) := [others => 0.0];
+      --  The step's share by the profile's rule: a step whose cost rose by C says the step over the root of 2 C, the
+      --  step itself where C stays under a sigma's half or falls.
+      Share   : constant Real := 1.0 / Real'Max (2.0 * Worse, 1.0);
+   begin
+      if Natural (R.Covariance.Length) /= Reduced * Reduced or else Je'Length /= N then
+         return;
+      end if;
+      D (Lens_Term'Pos (Log_Fx) + 1) := Ln (Le.Fx) - Ln (Lp.Fx);
+      D (Lens_Term'Pos (Log_Fy) + 1) := Ln (Le.Fy) - Ln (Lp.Fy);
+      D (Lens_Term'Pos (Centre_X) + 1) := Le.Cx - Lp.Cx;
+      D (Lens_Term'Pos (Centre_Y) + 1) := Le.Cy - Lp.Cy;
+      D (Lens_Term'Pos (Radial_1) + 1) := Le.K1 - Lp.K1;
+      D (Lens_Term'Pos (Radial_2) + 1) := Le.K2 - Lp.K2;
+      for J in 1 .. N loop
+         declare
+            O      : constant Natural := Lens_Terms + Joint_Terms * (J - 1);
+            A      : Joint renames Jp (Jp'First + J - 1);
+            B      : Joint renames Je (Je'First + J - 1);
+            --  The two axes the same way (a joint's axis and scale flip together).
+            Same   : constant Real := (if Dot (A.W, B.W) < 0.0 then -1.0 else 1.0);
+            E1, E2 : Vec3;
+         begin
+            Perp (A.W, E1, E2);
+            D (O + Joint_Term'Pos (Tilt_1) + 1) := Same * Dot (B.W, E1);
+            D (O + Joint_Term'Pos (Tilt_2) + 1) := Same * Dot (B.W, E2);
+            D (O + Joint_Term'Pos (Point_1) + 1) := Dot (B.P - A.P, E1);
+            D (O + Joint_Term'Pos (Point_2) + 1) := Dot (B.P - A.P, E2);
+            D (O + Joint_Term'Pos (Scale) + 1) := Same * B.C - A.C;
+         end;
+      end loop;
+      for P in 1 .. Reduced loop
+         for Q in 1 .. Reduced loop
+            declare
+               K : constant Positive := R.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
+            begin
+               R.Covariance.Replace_Element (K, R.Covariance (K) + Share * D (P) * D (Q));
+            end;
+         end loop;
+      end loop;
+      R.Focal_Sigma := Lp.Fx * Sqrt (R.Covariance (R.Covariance.First_Index));
+      Driver.Log.Line (Driver.Log.Robot, "kinematics: the pinhole at " & Driver.Log.Image (Lp.Fx, 1) & " px takes in the "
+                       & "step to the lens with its extras at " & Driver.Log.Image (Le.Fx, 1) & " by "
+                       & Driver.Log.Image (Le.Fy, 1) & " px: its focal length's sigma "
+                       & Driver.Log.Image (R.Focal_Sigma, 2) & " px");
+   end Take_Span;
+
    --  What the pinhole's cost says of a lens's aspect and distortion beyond the fit's covariance (L, R: the fit with
    --  them, of the joints Joints; Rise: the pinhole's robust cost over every sighting above the fit's, at one error
    --  model). The covariance puts the pinhole (the extras nought: the aspect's logarithm, the second focal length's
@@ -307,6 +366,8 @@ package body Driver.Robot.Kinematics.Fit is
    --  3.3 more over 5271 sightings where the covariance put it hundreds of chi squares away, its joints 85 chi squares
    --  over 9 off the truth (the bench's drone 3:1, 10-21); a table arm's (aspect 0.9973) costs 2 to 6 more, as its
    --  covariance says.
+   --  Where the covariance puts the pinhole more than Z of its sigmas further than the cost does, it is no account of
+   --  the extras: the fit is left undetermined (the pinhole taken).
    procedure Weigh_Extras (L : Lens; R : in out Fit_Report; Joints : Joint_Array; Rise : Real) is
       N       : constant Natural := Joints'Length;
       Reduced : constant Natural := Terms (N);
@@ -2800,6 +2861,12 @@ package body Driver.Robot.Kinematics.Fit is
       end Together;
 
       procedure Finish (Profiled : Boolean) is
+         --  The lens with its extras where the pinhole replaced it, whose step the pinhole takes in once its profile
+         --  is walked (Take_Span).
+         Span_Due : Boolean := False;
+         Extras_L : Lens := L;
+         Extras_J : Joint_Array := Joints;
+         Worse    : Real := 0.0;   --  the lens with its extras' cost above the pinhole's, at one error model
       begin
          --  The sign of every translation at once, which the epipolar constraint
          --  cannot tell: the matched points lie in front of both eyes.
@@ -2900,7 +2967,18 @@ package body Driver.Robot.Kinematics.Fit is
                Weigh_Extras (L, Report, Joints, Report_P.Cost_Judged - Report.Cost_Judged);
             end if;
             if not Report.Determined and then Report_P.All_Count > 0 then
+               Worse := Report.Cost_Judged - Report_P.Cost_Judged;
                Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True);
+               --  The pinhole taken where the lens with its extras is not (its covariance singular, or no account of
+               --  them: Weigh_Extras) takes the step between them into its covariance, its profile walked (Take_Span,
+               --  below): the sightings did not tell the extras, and held at nought they are in no covariance. Only
+               --  where the untold ones took the step, the drone 3:1 at draw 0 was fitted in its last round at 162.0 px
+               --  with a sigma of 1.3 px, its joints 23 chi squares over 9 off the truth (10-21).
+               if Report.All_Count > 0 and then Report_P.All_Count > 0 then
+                  Span_Due := True;
+                  Extras_L := L;
+                  Extras_J := Joints;
+               end if;
                if Report_P.All_Count > 0 then
                   Joints := Joints_P;
                   L := L_P;
@@ -3136,6 +3214,12 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end loop;
          end;
+         --  The pinhole taken in the extras' place takes the step between them in, its profile walked: taken in before,
+         --  the step's sigma (some 40 px on the bench's mast head 2:1) set the profile's first step past the range
+         --  searched, the fit was left undetermined and the next rounds wandered to 67 px for 173 (10-21).
+         if Span_Due and then Report.Pinhole and then Report.All_Count > 0 then
+            Take_Span (L, Joints, Extras_L, Extras_J, Worse, Report);
+         end if;
          declare
             Sum : Real := 0.0;
          begin

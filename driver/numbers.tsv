@@ -2020,6 +2020,7 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Here.L.Fx, 1) & ""	1	fo
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (J.Needed, 2) & "" & J.Aside'Image	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (L.Fx * Sqrt (V11), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (L.Fy / L.Fx, 4)	4	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Le.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Mo, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Multi_M, 3)	3	format	digits printed in a log line or a message
@@ -2046,9 +2047,11 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.I
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Le.Fy, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Multi_M, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (R.Focal_Sigma, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
@@ -2176,6 +2179,7 @@ driver-robot-kinematics-fit.adb	Dist : Real_Access := new Real_Array (1 .. Natur
 driver-robot-kinematics-fit.adb	Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));	1	structure	at least one element, for an array that may hold none
 driver-robot-kinematics-fit.adb	Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));	1.0	numerics	the scale floor of a finite difference
 driver-robot-kinematics-fit.adb	Dr : constant Real := X.L.K1 + 2.0 * X.L.K2 * R2;	2.0	math	the radial factor's derivative in the radius squared
+driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Driver.Log.Image (Rise, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Who & ""	"3	format	the stage named in a log line
 driver-robot-kinematics-fit.adb	Du (I - From + 1) := R (R'First + 2 * (I - L'First));	2	structure	two residuals a sighting, across and down
@@ -2395,6 +2399,8 @@ driver-robot-kinematics-fit.adb	S0 := Sqrt (S0 / Real (2 * M));	2	statistics	the
 driver-robot-kinematics-fit.adb	S1 := Sqrt (S1 / Real (2 * M));	2	statistics	the spread per axis: two axes a point
 driver-robot-kinematics-fit.adb	Said : constant Real := Real'Max (2.0 * Rise, 1.0);	1.0	statistics	no less than one: a step whose cost stays under a sigma's half says the step itself (the focal profile's rule)
 driver-robot-kinematics-fit.adb	Said : constant Real := Real'Max (2.0 * Rise, 1.0);	2.0	statistics	a likelihood ratio: twice the cost the step adds is its chi square
+driver-robot-kinematics-fit.adb	Same : constant Real := (if Dot (A.W, B.W) < 0.0 then -1.0 else 1.0);	1.0	math	a joint's axis and its scale flip together: the one sense or the other
+driver-robot-kinematics-fit.adb	Same : constant Real := (if Dot (A.W, B.W) < 0.0 then -1.0 else 1.0);	1.0	math	a joint's axis and its scale flip together: the one sense or the other
 driver-robot-kinematics-fit.adb	Scale : constant Real := Scale_Of (Judge, All_Own (2 * I));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Scale : constant Real := Scale_Of (Model, All_Own (2 * I));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Scales : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals to a sighting
@@ -2402,6 +2408,9 @@ driver-robot-kinematics-fit.adb	Scatter => Squares / Real (Count - 3));	3	statis
 driver-robot-kinematics-fit.adb	Score := (if Filled = 0 or else 2 * Below < Filled then Real'Last	2	statistics	the median is below a bound only when more than half the values are: twice the count against the whole
 driver-robot-kinematics-fit.adb	Share : Real := 1.0;	1.0	math	the whole of a turn, before it is halved
 driver-robot-kinematics-fit.adb	Share : Real := 1.0;	1.0	structure	the whole of the widest turns, each way
+driver-robot-kinematics-fit.adb	Share : constant Real := 1.0 / Real'Max (2.0 * Worse, 1.0);	1.0	statistics	the step's share: one over its chi square, no less than one where its cost stays under a sigma's half (the focal profile's rule)
+driver-robot-kinematics-fit.adb	Share : constant Real := 1.0 / Real'Max (2.0 * Worse, 1.0);	1.0	statistics	the step's share: one over its chi square, no less than one where its cost stays under a sigma's half (the focal profile's rule)
+driver-robot-kinematics-fit.adb	Share : constant Real := 1.0 / Real'Max (2.0 * Worse, 1.0);	2.0	statistics	a likelihood ratio: twice the cost the step adds is its chi square
 driver-robot-kinematics-fit.adb	Share := Share / 2.0;	2.0	structure	halves of the widest turns: the ladder's own steps double
 driver-robot-kinematics-fit.adb	Si, Sj : Real := 1.0;	1.0	structure	the whole of the widest turns, each way
 driver-robot-kinematics-fit.adb	Sign : Real := 1.0;	1.0	math	the sign of a way, the positive first
