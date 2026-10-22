@@ -1,4 +1,0 @@
-t103 103
-k202 202 --servo yes --ticks 4096
-d505 505 --class drone
-b308 308 --class base

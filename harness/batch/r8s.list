@@ -1,5 +1,0 @@
-t108 108
-k206 206 --servo yes --ticks 4096
-d508 508 --class drone
-b302 302 --class base
-h401 401 --class humanoid
