@@ -1538,6 +1538,13 @@ package body Driver.Robot.Motion is
                --  row of eye 3, the closer's column never had a beat there, and the closer, which only eye 3 sees, was
                --  left unclassified. The waits after looks that saw nothing real gave those pictures their rest before.
                Settle (M, Waited);
+               --  The level's look begins with its push: the beats since the last look ended (this settle, and the
+               --  estimate a sighting before it was confirmed by) showed the pushes before it settling and the eyes at
+               --  rest, and every one of them was a verdict that could only be a false alarm of this level. h401 (seed
+               --  401 of the default fake robot on the big machine, 10-22, a humanoid of 30 channels): each level of
+               --  each channel looked at the 436 to 484 beats since the last, its chance of a false alarm 1.000, was
+               --  "seen", and was confirmed by an estimate of 17 to 20 s that saw nothing; 4 channels in 28209 beats.
+               Unlooked := M.Beats;
                Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
                declare
                   Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
