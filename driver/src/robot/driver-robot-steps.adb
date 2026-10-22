@@ -103,29 +103,68 @@ package body Driver.Robot.Steps is
                   --  before the push and the one where it stopped.
                   Sigma : constant Real := Sqrt (2.0 * Spread);
                   Short : constant Real := E.Length - Along;
-                  --  It falls short by more than the group's free pushes do.
+                  --  What the readings of the push, where it began and
+                  --  where it stopped, can tell: their wire's resolution.
+                  Floor : constant Real :=
+                    Real'Max (Channels.Resolution (M, G, E.Start - 1), Channels.Resolution (M, G, Beat));
+                  --  Per channel the push asked a step of, how far it stands short of that step, along it; and where
+                  --  that is more than the channel's own free pushes fell short by, the shortfall as asked.
+                  Shorts, Falling : Real_Array (1 .. S.Size) := [others => 0.0];
+                  --  Some channel falls short by more than its free pushes do. Channel by channel: each reads in its
+                  --  own units and stops within its own servo's dead band, and the group's free pushes pooled in one
+                  --  list judged one channel by another's. The fake's seed 20 (10-22, default options) had every push
+                  --  of its sweep's second pass judged blocked, its first joint landing 0.05 units short (its servo's
+                  --  dead band 0.064) where three of its joints' bands are 0.001 to 0.004 units; seed 26 took its
+                  --  shoulder's dead band for 5.9 units from pushes judged free so, counted none of its keyframes'
+                  --  turns below 11.8, and asked its cells 12.9 units (52 degrees) of it.
                   Falls_Short : Boolean := False;
                begin
                   E.Shortfall := (Value => Short, Sigma => Sigma, Degrees_Of_Freedom => 0);
                   E.Delivered := (Value => Along / E.Length, Sigma => Sigma / E.Length, Degrees_Of_Freedom => 0);
-                  if Natural (S.Free_Shortfalls.Length) > 2 then
-                     declare
-                        --  What the readings of the push, where it began and
-                        --  where it stopped, can tell: their wire's resolution.
-                        Floor   : constant Real :=
-                          Real'Max (Channels.Resolution (M, G, E.Start - 1), Channels.Resolution (M, G, Beat));
-                        --  The most any free push of the group fell short by,
-                        --  either way, or by as much as the readings could
-                        --  tell from none: their noise, and where they repeat
-                        --  exactly the resolution of their wire.
-                        Largest : Real := Real'Max (Sigma, Floor);
-                     begin
-                        for F of S.Free_Shortfalls loop
-                           Largest := Real'Max (Largest, abs F);
-                        end loop;
-                        Falls_Short := Short > Driver.Conventions.Z * Largest;
-                     end;
-                  end if;
+                  while Natural (S.Free_Short_Most.Length) < S.Size loop
+                     S.Free_Short_Most.Append (0.0);
+                  end loop;
+                  while Natural (S.Free_Short_Count.Length) < S.Size loop
+                     S.Free_Short_Count.Append (0);
+                  end loop;
+                  for C in 1 .. S.Size loop
+                     if S.Asks (C - 1) and then S.Ask (C - 1) /= 0.0 then
+                        declare
+                           Way     : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);
+                           --  The most any free push that asked the channel fell short of it by, either way, or by
+                           --  as much as its readings could tell from none: the noise of a difference of two of
+                           --  them, and where they repeat exactly the resolution of their wire.
+                           Largest : constant Real :=
+                             Real'Max (Real'Max (Sqrt (2.0) * Channels.Noise (M, G, C), Floor),
+                                       S.Free_Short_Most (C - 1));
+                        begin
+                           Shorts (C) := abs S.Ask (C - 1) - Way * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));
+                           --  And by more than its dead band (Dead_Band): a servo stops anywhere within it and stands
+                           --  still for an ask within it. Without it, the fake's seed 20 (10-22) judged every push of
+                           --  its first pass blocked, 0.06 to 0.99 of each delivered, where each step also asked its
+                           --  other joints back from their landings (its base turn from 0.028 units off, its servo's
+                           --  band 0.032). Only where the band was measured where a push came to rest (Held_Off): the
+                           --  least ask the body executed bounds it from above alone, loosely where only large asks
+                           --  were made, and a joint stopped 0.12 units short at its end of travel stood within the
+                           --  0.45 of such an ask (robot.plan.beyond).
+                           --  A channel whose own free pushes are too few to judge it by is short where it went no way
+                           --  along its ask, by what its readings tell from none, an ask beyond its dead band: a joint
+                           --  stopped by something before it ever moved freely (A15's hand on the table, robot.steps.stuck)
+                           --  stands where it stood. One that went part of the way is not judged so: the first levels of
+                           --  the fake's seed 20 (10-22) delivered 0.48 to 0.75 of their asks, and were free.
+                           if (S.Free_Short_Count (C - 1) > 2 and then Shorts (C) > Driver.Conventions.Z * Largest
+                               and then (C > Natural (S.Held_Off.Length) or else Shorts (C) > Dead_Band (M, G, C)))
+                             or else (S.Free_Short_Count (C - 1) <= 2 and then Natural (S.Free_Shortfalls.Length) > 2
+                                      and then abs S.Ask (C - 1) - Shorts (C) <= Driver.Conventions.Z * Largest
+                                      and then (C > Natural (S.Held_Off.Length)
+                                                or else abs S.Ask (C - 1) > Dead_Band (M, G, C)))
+                           then
+                              Falls_Short := True;
+                              Falling (C) := Way * Shorts (C);
+                           end if;
+                        end;
+                     end if;
+                  end loop;
                   --  Free motion falls short too, so a push is blocked only by
                   --  falling short by more than the group's own free pushes
                   --  did, and by a shortfall the one test of motion sees,
@@ -138,19 +177,40 @@ package body Driver.Robot.Steps is
                   --  so that it did not seem to answer is evidence. One the
                   --  readings went against, by more than that, delivered less
                   --  than nothing: its shortfall is longer than its ask.
-                  E.Blocked :=
-                    not Answered
-                    or else (Falls_Short and then Channels.Visible (M, G, Along_Ask (S, E.Length, Short)));
+                  E.Blocked := not Answered or else (Falls_Short and then Channels.Visible (M, G, Falling));
                   --  A free push's shortfall is where it landed, its readings still: one given up while they still moved
                   --  had not landed, and kept as free it raises the most a free push falls short by, and the shortfall a
                   --  push is blocked by with it (h27, servo seed 3, 10-17: the last pushes of four aims delivered 0.011
                   --  to 0.418 of theirs, two given up still moving, and none was judged blocked: each step "reached").
                   if Answered and then Rested and then not E.Blocked then
                      S.Free_Shortfalls.Append (Short);
+                     for C in 1 .. S.Size loop
+                        if S.Asks (C - 1) and then S.Ask (C - 1) /= 0.0 then
+                           S.Free_Short_Most.Replace_Element
+                             (C - 1, Real'Max (S.Free_Short_Most (C - 1), abs Shorts (C)));
+                           S.Free_Short_Count.Replace_Element (C - 1, S.Free_Short_Count (C - 1) + 1);
+                        end if;
+                     end loop;
                   end if;
                end;
             end if;
          end;
+      end if;
+      --  Where a push came to rest unblocked, how far each channel's reading stood from its target
+      --  (Group_Stream.Held_Off, Dead_Band): a servo stops anywhere within its dead band of a target, and stands
+      --  still for an ask within it.
+      --  A blocked push stood off its target by what stopped it, not by the band.
+      if Rested and then not E.Blocked and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat)
+        and then Channels.Has_Target (M, G, Beat)
+      then
+         while Natural (S.Held_Off.Length) < S.Size loop
+            S.Held_Off.Append (0.0);
+         end loop;
+         for C in 1 .. S.Size loop
+            S.Held_Off.Replace_Element
+              (C - 1, Real'Max (S.Held_Off (C - 1),
+                                abs (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat, C))));
+         end loop;
       end if;
       S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
    end Finish;
@@ -174,6 +234,16 @@ package body Driver.Robot.Steps is
 
    function Executed_Least (M : Model; G : Group_Id; Channel : Positive) return Real is
      (if Channel <= Natural (M.Groups (G).Executed.Length) then M.Groups (G).Executed (Channel - 1) else Real'Last);
+
+   function Dead_Band (M : Model; G : Group_Id; Channel : Positive) return Real is
+      S : Group_Stream renames M.Groups (G);
+      Least : constant Real := Executed_Least (M, G, Channel);
+   begin
+      --  Held_Off has its channels once a push came to rest unblocked. No farther than the least ask the body
+      --  executed: an ask it executed was beyond its band, and a reading standing farther off its target than that
+      --  stood off it by something else.
+      return (if Channel <= Natural (S.Held_Off.Length) then Real'Min (S.Held_Off (Channel - 1), Least) else Least);
+   end Dead_Band;
 
    procedure Start (M : in out Model; G : Group_Id; Beat : Natural) is
       S : Group_Stream renames M.Groups (G);

@@ -102,7 +102,7 @@ package body Driver.Robot.Hand.Pressing.Tests is
    begin
       R.Fitted := True;
       for K in Truth'Range loop
-         R.Joints.Append (Joint_Fit'(W => Truth (K).W, P => Truth (K).P, C => Truth (K).C, Slide => Truth (K).Slide));
+         R.Joints.Append (Joint_Fit'(W => Truth (K).W, P => Truth (K).P, C => Truth (K).C, Slide => Truth (K).Slide, others => <>));
          R.Chain.Append (K - Truth'First + 1);   --  built in the order of its readings
          R.Reference.Append (0.0);
       end loop;
@@ -738,6 +738,11 @@ package body Driver.Robot.Hand.Pressing.Tests is
          M.Groups (Group_Id (G)).Free_Shortfalls.Append (1.0 / 300.0);
          for K in 1 .. 4 loop
             M.Groups (Group_Id (G)).Free_Shortfalls.Append (0.0);
+         end loop;
+         --  And channel by channel, as the step tracker keeps them: each channel asked by all six, the most 0.0125.
+         for C in 1 .. M.Groups (Group_Id (G)).Size loop
+            M.Groups (Group_Id (G)).Free_Short_Most.Append (0.0125);
+            M.Groups (Group_Id (G)).Free_Short_Count.Append (6);
          end loop;
       end loop;
       for G in 1 .. 4 loop

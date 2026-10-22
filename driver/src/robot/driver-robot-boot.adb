@@ -19,6 +19,7 @@ with Driver.Robot.Channels;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
+with Driver.Robot.Steps;
 with Driver.Uncertain;
 
 package body Driver.Robot.Boot is
@@ -366,7 +367,13 @@ package body Driver.Robot.Boot is
                end loop;
             end Read_Start;
             Least  : Real_Array (1 .. Size) := [others => 0.0];   --  per channel: the least turn a keyframe counts, now
+            --  Per channel, for the plan's log: what its least turn is made of (the turn the fit counts, the least
+            --  ask the body is known to execute, its dead band, the readings' noise), read in the plan's held beat.
+            Why_Least : array (1 .. Size) of Ada.Strings.Unbounded.Unbounded_String;
             Moves  : array (1 .. Size) of Boolean := [others => False];   --  per channel: it moves the eye's view (Lockin.Seen)
+            --  Per channel: the lock-in saw the eye's whole view move with it (Graph.Channels, Whole), the eye
+            --  riding on the joint; read in the plan's held beat.
+            Whole_View : array (1 .. Size) of Boolean := [others => False];
             Half   : Real := 0.0;
             Patch  : Real := 0.0;   --  a patch of the eye's view, in px: the farthest the aligner follows by itself
             Eye    : Natural := 0;
@@ -416,7 +423,25 @@ package body Driver.Robot.Boot is
                   Read_Shifts;
                   for C in 1 .. Size loop
                      Moves (C) := Lockin.Seen (M, Eye_Id (Eye), G, C);
+                     for Item of M.Graph.Channels (Eye_Id (Eye)) loop
+                        if Item.Group = G and then Item.Channel = C
+                          and then Item.Effect.Verdict = Driver.Robot.Whole
+                        then
+                           Whole_View (C) := True;
+                        end if;
+                     end loop;
                      First (C) := Driver.Robot.Motion.Sweep_Start (M, A, C);
+                     Why_Least (C) := Ada.Strings.Unbounded.To_Unbounded_String
+                       (": counted " & Driver.Log.Image (Driver.Robot.Kinematics.Counted_Turn (M, A, C), 3)
+                        & ", executed least "
+                        & (if Driver.Robot.Steps.Executed_Least (M, G, C) < Real'Last
+                           then Driver.Log.Image (Driver.Robot.Steps.Executed_Least (M, G, C), 3) else "none")
+                        & ", dead band "
+                        & (if Driver.Robot.Steps.Dead_Band (M, G, C) < Real'Last
+                           then Driver.Log.Image (Driver.Robot.Steps.Dead_Band (M, G, C), 4) else "none")
+                        & ", noise "
+                        & (if Driver.Robot.Channels.Noise (M, G, C) < Real'Last
+                           then Driver.Log.Image (Driver.Robot.Channels.Noise (M, G, C), 4) else "unknown"));
                      --  And no less than the turn at which the recognition's probe saw the eye's view move with the
                      --  channel, an executed turn the eye saw (Probe_Both_Ways): the first keyframe needs the view to
                      --  have moved, and before any keyframe the step a keyframe counts from may be none (the rig of
@@ -528,7 +553,7 @@ package body Driver.Robot.Boot is
                type Level_Mark is record
                   Offset   : Real := 0.0;
                   From, To : Natural := 0;
-                  Short    : Boolean := False;   --  the step to it was not reached: the joint met something
+                  Short    : Boolean := False;   --  the step to it moved the joint no way along it: it met something
                   Followed : Boolean := False;   --  after the round's estimate: its keyframe was followed
                   Framed   : Boolean := False;   --  and one was taken at all (Kinematics.Followed, Framed: Read_Round)
                end record;
@@ -606,7 +631,22 @@ package body Driver.Robot.Boot is
                      if Report.At_Rest then
                         Driver.Robot.Motion.Hold_For_Keyframe (M, A);
                      end if;
-                     Mark.Short := Report.Outcome /= Driver.Robot.Motion.Reached;
+                     --  A step that took the joint part of the way is a level it went to: a servo stops short
+                     --  of its target by its dead band, and an arm under load by its sag, by more than the
+                     --  recognition's larger pushes did, and what the keyframe counts is where the readings
+                     --  stand. Judged blocked as falling short, every first level of the fake's seed 20 (10-22,
+                     --  default options) ended its push: 0.48 to 0.75 of each delivered, the arm swept in one
+                     --  pass and never fitted. A step that moved it no way along its ask is where something
+                     --  stops it.
+                     Mark.Short := Report.Outcome = Driver.Robot.Motion.Blocked;
+                     if Report.Outcome /= Driver.Robot.Motion.Reached then
+                        Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " push c"
+                                         & Driver.Log.Image (P.Channel)
+                                         & (if P.Sign > 0.0 then "+" else "-") & " at " & Driver.Log.Image (Off, 4)
+                                         & " units ended "
+                                         & Ada.Characters.Handling.To_Lower (Report.Outcome'Image) & ": "
+                                         & Ada.Strings.Unbounded.To_String (Report.Detail));
+                     end if;
                      Last := Mark.Short or else Per_Unit (P.Channel) = 0.0;
                      if not Last then
                         --  Twice the level, or the level that moves the view by a patch once the view's motion per unit is
@@ -854,7 +894,8 @@ package body Driver.Robot.Boot is
                   for C in 1 .. Size loop
                      Ada.Strings.Unbounded.Append
                        (Text, " c" & C'Image & " " & Driver.Log.Image (First (C), 3) & " (least "
-                        & Driver.Log.Image (Least (C), 3) & ", "
+                        & Driver.Log.Image (Least (C), 3)
+                        & Ada.Strings.Unbounded.To_String (Why_Least (C)) & "; "
                         & (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & " px a unit" else "px a unit unmeasured")
                         & (if Moves (C) then ")" else ", does not move the eye)"));
                   end loop;
@@ -988,7 +1029,12 @@ package body Driver.Robot.Boot is
                                     --  from the keyframes before it by the step the fit counts): the ladder climbs
                                     --  past it.
                                  end loop;
-                                 if Unseen_Now (P.Channel) then
+                                 --  A channel the lock-in saw move the eye's whole view moves the eye: a level
+                                 --  that left the view still lay within its gears' slack (the fake's seed 20,
+                                 --  10-22: its base turned 0.10 units by its readings and its wrist eye's view not
+                                 --  at all), and the ladder climbs on from it. Behind the eye is a joint whose
+                                 --  whole view the lock-in never saw move.
+                                 if Unseen_Now (P.Channel) and then not Whole_View (P.Channel) then
                                     --  The view does not move with the joint: a joint behind the eye (the kiwi's
                                     --  wrist roll, whose eye is mounted before it, R5 on 10-14: unmeasured, its
                                     --  ladder doubled a level a pass to 3016 units, every level followed by the

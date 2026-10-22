@@ -38,7 +38,9 @@ package body Driver.Robot.Kinematics is
    procedure Free is new Ada.Unchecked_Deallocation (Count_List, Counts_Access);
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
    type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
+   type Play_Access is access Fit.Play_Paths;
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Fit.Play_Paths, Play_Access);
    type Flags_Access is access Fit.Flag_Matrix;
    procedure Free is new Ada.Unchecked_Deallocation (Fit.Flag_Matrix, Flags_Access);
    type Flag_Array is array (Natural range <>) of Boolean;
@@ -273,6 +275,25 @@ package body Driver.Robot.Kinematics is
      (if C'Length = 0 then ""
       elsif C'Length = 1 then Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left)
       else Ada.Strings.Fixed.Trim (C (C'First)'Image, Ada.Strings.Left) & ", " & Chain_Image (C (C'First + 1 .. C'Last)));
+
+   --  Each fitted joint's half slack and where its slack stood at the reference (Fit_Report.Slacks, Slack_Places), in
+   --  reading units, for the log; none when not fitted.
+   function Slacks_Image (Report : Fit.Fit_Report) return String is
+      Text : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      for K in Report.Slacks.First_Index .. Report.Slacks.Last_Index loop
+         Ada.Strings.Unbounded.Append
+           (Text, (if K = Report.Slacks.First_Index then "; half slacks, by the joints fitted: " else ", ")
+                  & Driver.Log.Image (Report.Slacks (K), 4));
+      end loop;
+      for K in Report.Slack_Places.First_Index .. Report.Slack_Places.Last_Index loop
+         Ada.Strings.Unbounded.Append
+           (Text, (if K = Report.Slack_Places.First_Index then "; their slacks at the reference, from the middle: "
+                   else ", ")
+                  & Driver.Log.Image (Report.Slack_Places (K), 4));
+      end loop;
+      return Ada.Strings.Unbounded.To_String (Text);
+   end Slacks_Image;
 
    --  How long each stage of a fit took, in seconds.
    function Stages_Image (Report : Fit.Fit_Report) return String is
@@ -572,12 +593,13 @@ package body Driver.Robot.Kinematics is
       Told   : constant Real := Keyframe_Step (M, A, Channel);
       Seen   : constant Estimate := Visible_Step (M, G, Channel);
       Jitter : constant Real := Channels.Noise (M, G, Channel);
-      --  And no nearer than the least turn the body is known to execute when asked (Steps.Executed_Least): a
-      --  servo lands within its dead band of a target it is sent back to, and a frame that differs from another
-      --  by less than that in a channel is the same asked pose, landed elsewhere, not a turn of the joint. The
+      --  And no nearer than the channel's dead band (Steps.Dead_Band, the least turn the body is known to execute
+      --  where nothing narrower was measured): a servo lands within its dead band of a target it is sent back
+      --  to, and a frame that differs from another by less than that in a channel is the same asked pose,
+      --  landed elsewhere, not a turn of the joint. The
       --  kiwi's returns to its reference landed two or three units off it (R6's sixth start, 10-14), beyond the
       --  matcher's step of 1.9, and every one was a keyframe of the arm with one joint turned by a landing error.
-      Least  : constant Real := Steps.Executed_Least (M, G, Channel);
+      Least  : constant Real := Steps.Dead_Band (M, G, Channel);
       function Floored (Step : Real) return Real is
         (if Least < Real'Last then Real'Max (Step, Least) else Step);
    begin
@@ -602,7 +624,7 @@ package body Driver.Robot.Kinematics is
    --  against a step of 4.
    function Counted_Turn (M : Model; A : Arm_Id; Channel : Positive) return Real is
       Step : constant Real := Step_Of (M, A, Channel);
-      Band : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
+      Band : constant Real := Steps.Dead_Band (M, Arm_Group (M, A), Channel);
    begin
       return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);
    end Counted_Turn;
@@ -2418,6 +2440,15 @@ package body Driver.Robot.Kinematics is
                --  Per keyframe and channel: the sweep asked the joint to turn for it (Keyframe.Asked; a frame with
                --  none asked nothing).
                Asked   : Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. N => False]);
+               --  The readings' way from the reference keyframe on (Fit's Play): per channel the stretches its readings
+               --  went one way, a keyframe's beat closing one, and how many came before each keyframe. A servo's gears
+               --  let the joint stand within its slack of its reading, the slack going with the reading's every change
+               --  (a play operator); read as where it stands, the fake's seed 20 (10-22, every quirk on) left its fit's
+               --  sightings 0.59 px off and its focal length 8 % off, against 0.11 px and 0.8 % with no slack. Taken up
+               --  whole on the side it was last turned from (a half slack times that side, against the reference's),
+               --  seed 26's wrist stood 4.07 units off that, of the 17.7 of its slack: its reference stood within it,
+               --  and pushes smaller than the slack took up a part of it.
+               Play    : Play_Access;
                Visible : Real_Array (1 .. N);
                Sigma   : constant Real := Match_Sigma (R);
             begin
@@ -2446,6 +2477,76 @@ package body Driver.Robot.Kinematics is
                      Asked (F, C) := C - 1 < Natural (R.Frames (F).Asked.Length) and then R.Frames (F).Asked (C - 1);
                   end loop;
                end loop;
+               declare
+                  type Stretch_Lists is array (1 .. N) of Real_Vectors.Vector;
+                  Lists  : Stretch_Lists;
+                  type Count_Grid is array (1 .. Frames, 1 .. N) of Natural;
+                  Counts : Count_Grid := [others => [others => 0]];
+                  Order  : array (1 .. Frames) of Positive;   --  the keyframes by their beats
+                  Most   : Natural := 0;
+               begin
+                  for F in 1 .. Frames loop
+                     Order (F) := F;
+                  end loop;
+                  for I in 2 .. Frames loop
+                     declare
+                        F : constant Positive := Order (I);
+                        P : Natural := I - 1;
+                     begin
+                        while P >= 1 and then R.Frames (Order (P)).Beat > R.Frames (F).Beat loop
+                           Order (P + 1) := Order (P);
+                           P := P - 1;
+                        end loop;
+                        Order (P + 1) := F;
+                     end;
+                  end loop;
+                  for C in 1 .. N loop
+                     declare
+                        From : constant Natural := R.Frames (Order (1)).Beat;
+                        Last : Real := R.Frames (Order (1)).Readings (C - 1);
+                        Run  : Real := 0.0;   --  the stretch under way: the readings' change since its start
+                        I    : Positive := 1;   --  the next keyframe by its beat
+                     begin
+                        while I <= Frames and then R.Frames (Order (I)).Beat <= From loop
+                           I := I + 1;
+                        end loop;
+                        for B in From + 1 .. R.Frames (Order (Frames)).Beat loop
+                           if Channels.Has_Reading (M, R.Group, B) then
+                              declare
+                                 Now : constant Real := Channels.Reading (M, R.Group, B, C);
+                                 D   : constant Real := Now - Last;
+                              begin
+                                 if D /= 0.0 and then Run /= 0.0 and then (D > 0.0) /= (Run > 0.0) then
+                                    Lists (C).Append (Run);
+                                    Run := 0.0;
+                                 end if;
+                                 Run := Run + D;
+                                 Last := Now;
+                              end;
+                           end if;
+                           while I <= Frames and then R.Frames (Order (I)).Beat <= B loop
+                              if Run /= 0.0 then
+                                 Lists (C).Append (Run);
+                                 Run := 0.0;
+                              end if;
+                              Counts (Order (I), C) := Natural (Lists (C).Length);
+                              I := I + 1;
+                           end loop;
+                        end loop;
+                     end;
+                     Most := Natural'Max (Most, Natural (Lists (C).Length));
+                  end loop;
+                  Play := new Fit.Play_Paths (Stretches => Most, Frames => Frames, Joints => N);
+                  Play.Path := [others => [others => 0.0]];
+                  for C in 1 .. N loop
+                     for K in 1 .. Natural (Lists (C).Length) loop
+                        Play.Path (K, C) := Lists (C) (K - 1);
+                     end loop;
+                     for F in 1 .. Frames loop
+                        Play.Upto (F, C) := Real (Counts (F, C));
+                     end loop;
+                  end loop;
+               end;
                --  The turn the fit counts (Counted_Turn): no nearer than two landings of one asked pose can differ.
                for C in 1 .. N loop
                   Visible (C) := Counted_Turn (M, R.Arm, C);
@@ -2499,6 +2600,8 @@ package body Driver.Robot.Kinematics is
                      procedure Free is new Ada.Unchecked_Deallocation (Fit.Sighting_Array, Sighting_Access);
                      Seen   : Sighting_Access := new Fit.Sighting_Array (1 .. Kept);
                      K      : Natural := 0;
+                     Slack  : Real_Access;     --  the joints' slack as measured, two a joint (Fit.Measure_Slack)
+                     Linked : Matrix_Access;   --  the keyframes' changes less the slack's
                      Joints : Fit.Joint_Array (1 .. N);
                      Chain  : Fit.Chain_Order (1 .. N);
                      Lens   : Fit.Lens;
@@ -2546,6 +2649,60 @@ package body Driver.Robot.Kinematics is
                         --  the estimate whose fit holds (Again), at its last stage alone.
                         Start.Whole := not (Again and then R.Result.Made_At = M.Beats);
                      end if;
+                     --  The joints' slack measured from the keyframes' sightings alone (Fit.Measure_Slack), before the
+                     --  sightings are taken less the motion of the joints their keyframes did not ask: that motion is
+                     --  of the joints' turns, the readings' changes less the slack's (Linked), and so is the fit's.
+                     for S of R.Matches loop
+                        for I in 0 .. Queries - 1 loop
+                           if Returns (S, I) then
+                              K := K + 1;
+                              Seen (K) := (Frame => S.Frame, Track => I + 1,
+                                           U0 => R.Query_U (I), V0 => R.Query_V (I),
+                                           U => S.To_U (I), V => S.To_V (I),
+                                           Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
+                                           others => <>);
+                           end if;
+                        end loop;
+                     end loop;
+                     K := 0;
+                     --  Measured where the arm has no fit of its own reference yet; else its last fit's, refined over every
+                     --  keyframe by the whole model, where the measure, a line through each track, loses a slack among the
+                     --  large turns' bends: seed 26 (10-22) measured its wrist's 8.84 as 7.51 from its first 50 keyframes
+                     --  and as nought from 79.
+                     if R.Result.Fitted and then R.Result.Reference_Beat = R.Frames (1).Beat
+                       and then Natural (R.Result.Joints.Length) = N
+                     then
+                        Slack := new Real_Array'
+                          ([for P in 1 .. 2 * N =>
+                              (if P mod 2 = 1 then R.Result.Joints (R.Result.Joints.First_Index + (P - 1) / 2).Slack
+                               else R.Result.Joints (R.Result.Joints.First_Index + (P - 1) / 2).Slack_Place)]);
+                     else
+                        Slack := new Real_Array'(Fit.Measure_Slack (Changes.all, Seen.all, Play.all));
+                     end if;
+                     Linked := new Driver.Numerics.Arrays.Real_Matrix'(Changes.all);
+                     if Slack'Length = 2 * N then
+                        declare
+                           Parts : constant Driver.Numerics.Arrays.Real_Matrix := Fit.Play_Parts (Play.all, Slack.all);
+                        begin
+                           for F in 1 .. Frames loop
+                              for C in 1 .. N loop
+                                 Linked (F, C) := Changes (F, C) - Parts (F, C);
+                              end loop;
+                           end loop;
+                        end;
+                        declare
+                           Text : Ada.Strings.Unbounded.Unbounded_String;
+                        begin
+                           for C in 1 .. N loop
+                              Ada.Strings.Unbounded.Append
+                                (Text, " c" & C'Image & " " & Driver.Log.Image (Slack (2 * C - 1), 4) & " at "
+                                       & Driver.Log.Image (Slack (2 * C), 4));
+                           end loop;
+                           Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " slack begun from, of its"
+                                            & Frames'Image & " keyframes, half slack at the reference's place, in reading"
+                                            & " units:" & Ada.Strings.Unbounded.To_String (Text));
+                        end;
+                     end if;
                      for S of R.Matches loop
                         for I in 0 .. Queries - 1 loop
                            if Returns (S, I) then
@@ -2564,7 +2721,7 @@ package body Driver.Robot.Kinematics is
                               --  asked joint's 4 to 50, and its one-joint stages scored every focal length alike).
                               for C in 1 .. N loop
                                  declare
-                                    Off   : constant Real := Changes (S.Frame, C);
+                                    Off   : constant Real := Linked (S.Frame, C);
                                     Index : constant Natural := (C - 1) * Queries + I;
                                  begin
                                     if not Asked (S.Frame, C)
@@ -2613,7 +2770,8 @@ package body Driver.Robot.Kinematics is
                         if Count = N or else Count = 0 then
                            Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
                                     M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,
-                                    Who => "arm" & R.Arm'Image, From => Start);
+                                    Who => "arm" & R.Arm'Image, From => Start, Play => Play.all,
+                                    Slack_Start => Slack.all);
                         else
                            declare
                               Index     : array (1 .. Count) of Positive;   --  the channel of each joint fitted
@@ -2621,6 +2779,8 @@ package body Driver.Robot.Kinematics is
                               K         : Natural := 0;
                               Changes_R : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. Count);
                               Asked_R   : Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. Count => False]);
+                              Play_R    : Play_Access :=
+                                new Fit.Play_Paths (Stretches => Play.Stretches, Frames => Frames, Joints => Count);
                               Visible_R : Real_Array (1 .. Count);
                               Joints_R  : Fit.Joint_Array (1 .. Count);
                               Chain_R   : Fit.Chain_Order (1 .. Count);
@@ -2640,10 +2800,14 @@ package body Driver.Robot.Kinematics is
                                  for J in 1 .. Count loop
                                     Changes_R (F, J) := Changes (F, Index (J));
                                     Asked_R (F, J) := Asked (F, Index (J));
+                                    Play_R.Upto (F, J) := Play.Upto (F, Index (J));
                                  end loop;
                               end loop;
                               for J in 1 .. Count loop
                                  Visible_R (J) := Visible (Index (J));
+                                 for K in 1 .. Play.Stretches loop
+                                    Play_R.Path (K, J) := Play.Path (K, Index (J));
+                                 end loop;
                               end loop;
                               if Start.N > 0 then
                                  Start_R.Valid := Start.Valid;
@@ -2687,13 +2851,31 @@ package body Driver.Robot.Kinematics is
                                                & Count'Image & " that turned");
                               Fit.Fit (Changes_R.all, Asked_R.all, Visible_R, Seen.all, M.Eyes (R.Eye).Grid.Width,
                                        M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints_R, Chain_R, Lens, Report,
-                                       Who => "arm" & R.Arm'Image, From => Start_R);
+                                       Who => "arm" & R.Arm'Image, From => Start_R, Play => Play_R.all,
+                                       Slack_Start =>
+                                         (if Slack'Length = 2 * N
+                                          then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]
+                                          else Fit.No_Slack));
                               --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
                               --  of the chain, their terms nought.
                               for C in 1 .. N loop
                                  Joints (C) := (if Into (C) > 0 then Joints_R (Into (C))
                                                 else (W => [0.0, 0.0, 1.0], P => Zero3, C => 0.0, Slide => False));
                               end loop;
+                              --  And their slacks: the held ones' none.
+                              declare
+                                 Slacks : constant Fit.Real_Lists.Vector := Report.Slacks;
+                                 Places : constant Fit.Real_Lists.Vector := Report.Slack_Places;
+                              begin
+                                 if Natural (Slacks.Length) = Count and then Natural (Places.Length) = Count then
+                                    Report.Slacks.Clear;
+                                    Report.Slack_Places.Clear;
+                                    for C in 1 .. N loop
+                                       Report.Slacks.Append (if Into (C) > 0 then Slacks (Into (C)) else 0.0);
+                                       Report.Slack_Places.Append (if Into (C) > 0 then Places (Into (C)) else 0.0);
+                                    end loop;
+                                 end if;
+                              end;
                               K := 0;
                               for P of Chain_R loop
                                  K := K + 1;
@@ -2776,6 +2958,7 @@ package body Driver.Robot.Kinematics is
                                  end loop;
                               end;
                               Free (Changes_R);
+                              Free (Play_R);
                               Free (Asked_R);
                            end;
                         end if;
@@ -2847,6 +3030,8 @@ package body Driver.Robot.Kinematics is
                         end;
                      end if;
                      Free (Seen);
+                     Free (Slack);
+                     Free (Linked);
                      Result.Fitted := Report.Fitted;
                      Result.Focal_Within := Report.Focal_Within;
                      Result.Searched_Least := Report.Searched_Least;
@@ -2908,8 +3093,20 @@ package body Driver.Robot.Kinematics is
                      Result.Sigma_Px := Report.Sigma_Px;
                      Result.Why := Report.Why;
                      Result.Reference := R.Frames (1).Readings;
-                     for J of Joints loop
-                        Result.Joints.Append (Joint_Fit'(W => J.W, P => J.P, C => J.C, Slide => J.Slide));
+                     Result.Reference_Beat := R.Frames (1).Beat;
+                     for K in Joints'Range loop
+                        declare
+                           J : constant Natural := K - Joints'First;   --  from nought
+                        begin
+                           Result.Joints.Append
+                             (Joint_Fit'(W => Joints (K).W, P => Joints (K).P, C => Joints (K).C, Slide => Joints (K).Slide,
+                                         Slack       =>
+                                           (if J < Natural (Report.Slacks.Length)
+                                            then Report.Slacks (Report.Slacks.First_Index + J) else 0.0),
+                                         Slack_Place =>
+                                           (if J < Natural (Report.Slack_Places.Length)
+                                            then Report.Slack_Places (Report.Slack_Places.First_Index + J) else 0.0)));
+                        end;
                      end loop;
                      for P of Chain loop
                         Result.Chain.Append (P);
@@ -2934,6 +3131,7 @@ package body Driver.Robot.Kinematics is
                                & Driver.Log.Image (Report.Own_Gain, 2) & " of what the matcher states; focal "
                                 & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
                                 & "; its joints from the base, by their readings: " & Chain_Image (Chain)
+                                & Slacks_Image (Report)
                                 & (if Report.Errors.Measured
                                    then "; errors, px: a sighting's own "
                                         & Driver.Log.Image (Report.Errors.Alone, 3) & ", a point's in every keyframe "
@@ -2951,6 +3149,7 @@ package body Driver.Robot.Kinematics is
                end;
                Free (Changes);
                Free (Asked);
+               Free (Play);
             end;
          end if;
       end Fit_Arm;
@@ -3691,6 +3890,48 @@ package body Driver.Robot.Kinematics is
       end loop;
       return Identity;
    end Eye_In_Reference;
+
+   function Slack_Parts (M : Model; A : Arm_Id; Beat : Natural) return Real_Array is
+   begin
+      for R of M.Kinematics loop
+         if R.Arm = A and then Current (M, R) and then R.Result.Fitted and then R.Result.Reference_Beat > 0
+           and then Beat > R.Result.Reference_Beat and then Beat <= M.Beats
+           and then Natural (R.Result.Joints.Length) = Group_Size (M, R.Group)
+           and then Natural (R.Result.Reference.Length) = Group_Size (M, R.Group)
+         then
+            declare
+               N     : constant Natural := Natural (R.Result.Joints.Length);
+               From  : constant Natural := R.Result.Reference_Beat;
+               Parts : Real_Array (1 .. N) := [others => 0.0];
+            begin
+               for C in 1 .. N loop
+                  declare
+                     H    : constant Real := Real'Max (0.0, R.Result.Joints (C).Slack);
+                     V0   : constant Real := Real'Max (-H, Real'Min (H, R.Result.Joints (C).Slack_Place));
+                     V    : Real := V0;
+                     Last : Real := R.Result.Reference (C - 1);
+                  begin
+                     if H > 0.0 then
+                        for B in From + 1 .. Beat loop
+                           if Channels.Has_Reading (M, R.Group, B) then
+                              declare
+                                 Now : constant Real := Channels.Reading (M, R.Group, B, C);
+                              begin
+                                 V := Real'Max (-H, Real'Min (H, V + (Now - Last)));
+                                 Last := Now;
+                              end;
+                           end if;
+                        end loop;
+                        Parts (C) := V - V0;
+                     end if;
+                  end;
+               end loop;
+               return Parts;
+            end;
+         end if;
+      end loop;
+      return [1 .. 0 => 0.0];
+   end Slack_Parts;
 
    procedure Pose_Covariance (M : Model; A : Arm_Id; Readings : Real_Array; Turn, Place : out Mat3) is
       R : constant Arm_Fit := (if Index_Of (M, A) > 0 then M.Kinematics (Index_Of (M, A)).Result else (others => <>));

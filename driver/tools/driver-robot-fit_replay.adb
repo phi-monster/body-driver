@@ -7,6 +7,7 @@
 with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Vectors;
+with Ada.Long_Float_Text_IO;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Driver.Numerics;
@@ -37,8 +38,8 @@ procedure Driver.Robot.Fit_Replay is
       end if;
    end Expect;
 begin
-   if Ada.Command_Line.Argument_Count /= 1 then
-      Put_Line (Standard_Error, "usage: fit_replay DUMP");
+   if Ada.Command_Line.Argument_Count not in 1 | 2 then
+      Put_Line (Standard_Error, "usage: fit_replay DUMP [SLACK]  (SLACK: a file of two numbers a joint, the slack to begin from)");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -81,6 +82,8 @@ begin
       type Sightings_Access is access Fit.Sighting_Array;
       Changes     : Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
       Asked       : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+      type Play_Access is access Fit.Play_Paths;
+      Play        : Play_Access := null;   --  the readings' way between the keyframes, when dumped
       Visible     : Real_Array (1 .. N);
       Sightings   : constant Sightings_Access := new Fit.Sighting_Array (1 .. S);
    begin
@@ -162,9 +165,73 @@ begin
          for J in 1 .. M loop
             From.Turns_Told (J) := Next_Flag;
          end loop;
+         --  The readings' way between the keyframes, when the dump has it (Fit's Play): its stretches' count, the
+         --  stretches a row each, each keyframe's count of them a row each.
+         if At_Token <= Tokens.Last_Index and then Tokens (At_Token) = "play" then
+            Expect ("play");
+            declare
+               Stretches : constant Natural := Next_Natural;
+            begin
+               Play := new Fit.Play_Paths (Stretches => Stretches, Frames => Frames, Joints => N);
+               for K in 1 .. Stretches loop
+                  for J in 1 .. N loop
+                     Play.Path (K, J) := Next_Real;
+                  end loop;
+               end loop;
+               for F in 1 .. Frames loop
+                  for J in 1 .. N loop
+                     Play.Upto (F, J) := Next_Real;
+                  end loop;
+               end loop;
+            end;
+         end if;
          Began := Ada.Calendar.Clock;
-         Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
-                  Who => To_String (Who), From => From);
+         if Play = null then
+            Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
+                     Who => To_String (Who), From => From);
+         else
+            declare
+               --  The slack measured from the keyframes alone, as the driver measures it before its fit; or the one a
+               --  file names (the slack the driver began from, its last fit's), two numbers a joint.
+               function Slack_Given return Real_Array is
+                  F : File_Type;
+                  R : Real_Array (1 .. 2 * N);
+               begin
+                  Open (F, In_File, Ada.Command_Line.Argument (2));
+                  for K in R'Range loop
+                     declare
+                        V : Long_Float;
+                     begin
+                        Ada.Long_Float_Text_IO.Get (F, V);
+                        R (K) := Real (V);
+                     end;
+                  end loop;
+                  Close (F);
+                  return R;
+               end Slack_Given;
+               Measured : constant Real_Array :=
+                 (if Ada.Command_Line.Argument_Count = 2 then Slack_Given
+                  else Fit.Measure_Slack (Changes, Sightings.all, Play.all));
+            begin
+               Put ("slack measured:");
+               for H of Measured loop
+                  Put (H'Image);
+               end loop;
+               New_Line;
+               Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
+                        Who => To_String (Who), From => From, Play => Play.all, Slack_Start => Measured);
+            end;
+         end if;
+         Put ("half slacks:");
+         for H of Report.Slacks loop
+            Put (H'Image);
+         end loop;
+         New_Line;
+         Put ("slacks at the reference:");
+         for H of Report.Slack_Places loop
+            Put (H'Image);
+         end loop;
+         New_Line;
          Put_Line ("fitted " & Report.Fitted'Image & ", determined " & Report.Determined'Image & ", stage"
                    & Report.Stage'Image & ", order told " & Report.Order_Told'Image & ", flipped "
                    & Report.Flipped'Image);

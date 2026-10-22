@@ -166,6 +166,13 @@ private package Driver.Robot.Kinematics is
    --  The arm's eye at those readings, in the frame of its eye at the
    --  reference keyframe; the identity until the arm is fitted.
 
+   function Slack_Parts (M : Model; A : Arm_Id; Beat : Natural) return Real_Array;
+   --  Per channel of arm A's group: where its joint's gears' slack stands at Beat less where it stood at the fitted
+   --  arm's reference keyframe, in reading units (Fit's Play): the joint stands at its reading less that, and at
+   --  Beat the eye as the arm stands is Eye_In_Reference of the readings less these. The play operator over the
+   --  group's readings from the reference's beat to Beat, from the fitted half slacks and places; nought where the
+   --  arm is not fitted in this stream (a body file keeps no stream) or Beat is not after its reference.
+
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
    function Contested_Pairs (M : Model; A : Arm_Id) return Joint_Pair_Lists.Vector;

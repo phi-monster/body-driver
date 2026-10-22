@@ -509,11 +509,18 @@ private
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
+      Free_Short_Most  : Real_Vectors.Vector;    --  per channel: the most an answered push that was not blocked and asked it a
+                                                 --  step fell short of its ask of it, along that ask (Driver.Robot.Steps)
+      Free_Short_Count : Count_Vectors.Vector;   --  per channel: those pushes, counted; both empty before any
       Pause       : Natural := 0;          --  the most beats the group stood still within a push, short of its target,
                                            --  and then went on toward it with no new ask (Driver.Robot.Steps)
       Executed    : Real_Vectors.Vector;   --  per channel: the least ask of it a push moved it for (Driver.Robot.Steps:
                                            --  the body executes asks that large; a servo stands still for one within
                                            --  its dead band), Real'Last until one did; empty before any push
+      Held_Off    : Real_Vectors.Vector;   --  per channel: the farthest its reading stood from its target where a push
+                                           --  came to rest (Driver.Robot.Steps: a servo stops anywhere within its dead
+                                           --  band of a target, and an ask within the band moves nothing); 0 until one
+                                           --  did, empty before any push
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
       Seen_At     : Real_Vectors.Vector;   --  per channel: the turn at which the recognition's probe saw an eye move
                                            --  with it (Boot), 0 where none did; empty before the groups are recognized
@@ -699,6 +706,8 @@ private
       W, P  : Vec3 := [0.0, 0.0, 0.0];
       C     : Real := 1.0;
       Slide : Boolean := False;
+      Slack       : Real := 0.0;   --  half its gears' slack, in reading units (Kinematics.Fit's Play); 0 where none
+      Slack_Place : Real := 0.0;   --  where its slack stood at the reference keyframe, from the slack's middle
    end record;
 
    package Joint_Fit_Vectors is new Ada.Containers.Vectors (Positive, Joint_Fit);
@@ -710,6 +719,8 @@ private
    type Arm_Fit is record
       Fitted    : Boolean := False;
       Reference : Real_Vectors.Vector;    --  the readings of the reference keyframe
+      Reference_Beat : Natural := 0;      --  its beat in this stream; 0 for a fit read from a body file, whose stream
+                                          --  is gone (Kinematics.Slack_Parts)
       Joints    : Joint_Fit_Vectors.Vector;
       Chain     : Count_Vectors.Vector;   --  the joints along the arm from its base, by their readings' places (Kinematics.Fit)
       Lens      : Lens_Fit;

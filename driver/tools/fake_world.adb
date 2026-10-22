@@ -1581,7 +1581,11 @@ package body Fake_World is
                  & " at " & V (L.Origin.Translation) & " axis " & V (L.Axis)
                  & (if L.Kind = Fixed then ""
                     else ", " & Img (L.Unit) & " per reading unit, ends " & Img (L.Lo) & " .. " & Img (L.Hi)
-                         & ", rest " & Img (L.Q) & ", tau " & Img (L.Tau) & " beats")
+                         & ", rest " & Img (L.Q) & ", tau " & Img (L.Tau) & " beats"
+                         --  The servo's dead band and its gears' slack, in the joint's reading units (before the
+                         --  scramble), where the quirks are on: the truth a fitted band or slack is set beside.
+                         & (if W.Quirk.Dead and then L.Dead > 0.0 then ", dead band " & Img (L.Dead) else "")
+                         & (if W.Quirk.Play and then L.Play > 0.0 then ", slack " & Img (L.Play) else ""))
                  & (if L.Mirror > 0 then ", mirrors " & To_String (W.Links (L.Mirror).Name) else ""));
          end;
       end loop;

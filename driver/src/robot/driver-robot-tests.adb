@@ -5388,7 +5388,7 @@ package body Driver.Robot.Tests is
             W : constant Vec3 := Unit (Axes (J));
          begin
             Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
-            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False, others => <>));
             Arm.Result.Chain.Append (J);
             Arm.Result.Reference.Append (0.0);
          end;
@@ -5437,7 +5437,7 @@ package body Driver.Robot.Tests is
             W : constant Vec3 := Unit (Axes (J));
          begin
             Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => Scales (J), Slide => Slides (J));
-            Arm.Result.Joints.Append (Joint_Fit'(W => W, P => Truth (J).P, C => Scales (J), Slide => Slides (J)));
+            Arm.Result.Joints.Append (Joint_Fit'(W => W, P => Truth (J).P, C => Scales (J), Slide => Slides (J), others => <>));
             Arm.Result.Chain.Append (J);
             Arm.Result.Reference.Append (0.0);
          end;
@@ -5539,7 +5539,7 @@ package body Driver.Robot.Tests is
             W : constant Vec3 := Unit (Axes (J));
          begin
             Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
-            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+            Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False, others => <>));
             Arm.Result.Chain.Append (J);
             Arm.Result.Reference.Append (0.0);
          end;
@@ -5675,7 +5675,7 @@ package body Driver.Robot.Tests is
    begin
       for J in 1 .. 2 loop
          Truth (J) := (W => [0.0, 0.0, 1.0], P => Pts (J), C => 1.0, Slide => False);
-         Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False));
+         Arm.Result.Joints.Append (Joint_Fit'(W => Truth (J).W, P => Truth (J).P, C => 1.0, Slide => False, others => <>));
          Arm.Result.Chain.Append (J);
          Arm.Result.Reference.Append (0.0);
       end loop;
@@ -5786,7 +5786,7 @@ package body Driver.Robot.Tests is
       Arm : Arm_Evidence := (Arm => 1, Group => 1, Eye => 1, others => <>);
    begin
       for J in 1 .. 2 loop
-         Arm.Result.Joints.Append (Joint_Fit'(W => [0.0, 0.0, 1.0], P => [0.1, 0.0, 0.0], C => 1.0, Slide => False));
+         Arm.Result.Joints.Append (Joint_Fit'(W => [0.0, 0.0, 1.0], P => [0.1, 0.0, 0.0], C => 1.0, Slide => False, others => <>));
          Arm.Result.Chain.Append (J);
          Arm.Result.Reference.Append (0.0);
       end loop;
@@ -6763,6 +6763,11 @@ package body Driver.Robot.Tests is
       --  short by more than they do (the last ones delivered all they were asked).
       for K in 1 .. 4 loop
          M.Groups (1).Free_Shortfalls.Append (0.0);
+      end loop;
+      --  And channel by channel, as the step tracker keeps them: each channel asked by all six, the most 0.0125.
+      for C in 1 .. 6 loop
+         M.Groups (1).Free_Short_Most.Append (0.0125);
+         M.Groups (1).Free_Short_Count.Append (6);
       end loop;
       M.Lags.Append (1);
       M.Lag_Known.Append (True);

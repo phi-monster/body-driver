@@ -608,6 +608,19 @@ package body Driver.Robot.Flows is
                   for C in 1 .. N loop
                      Absolute (C) := Driver.Robot.Channels.Reading (M, Info.Group, Last, C);
                   end loop;
+                  --  Where the joints stand, not their readings: each less where its gears' slack stands since the fitted
+                  --  arm's reference (Kinematics.Slack_Parts); the eye's pose and its readings for the flows are the
+                  --  joints'. Taken at its readings, the fake's seed 20 (10-22) stood its base turn up to four degrees
+                  --  off where it was.
+                  declare
+                     Parts : constant Real_Array := Driver.Robot.Kinematics.Slack_Parts (M, Info.Arm, Last);
+                  begin
+                     if Parts'Length = N then
+                        for C in 1 .. N loop
+                           Absolute (C) := Absolute (C) - Parts (C);
+                        end loop;
+                     end if;
+                  end;
                   declare
                      W    : constant Positive := Driver.Pixels.Width (V);
                      H    : constant Positive := Driver.Pixels.Height (V);

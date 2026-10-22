@@ -461,17 +461,17 @@ package body Driver.Robot.Motion is
                         declare
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
                            Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
-                           --  An error smaller than the least ask the body is known to execute (Steps.Executed_Least)
-                           --  is not sent again: the body stands still for an ask within its dead band, and sending
+                           --  An error within the channel's dead band (Steps.Dead_Band) is not sent again: the body
+                           --  stands still for an ask within its dead band, and sending
                            --  it bounced the kiwi's joints two or three units either side of their targets, a step
                            --  sent again two to four times each, 340 times in a boot whose sweep then held still
                            --  for no keyframe (R6's eighth start, 10-14).
-                           Least : constant Real := Steps.Executed_Least (M, Group_Id (G), C);
+                           Least : constant Real := Steps.Dead_Band (M, Group_Id (G), C);
                            Counted : constant Real := Least_Counted (C);
                         begin
                            if not Stopped and then Noise < Real'Last and then Noise > 0.0
                              and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))
-                             and then (Least = Real'Last or else abs Error >= Least)
+                             and then (Least = Real'Last or else abs Error > Least)
                              and then abs Error >= Counted
                            then
                               Off := True;
@@ -690,7 +690,7 @@ package body Driver.Robot.Motion is
       Step     : constant Real := Kinematics.Step_Of (M, A, Channel);
       Turn     : constant Real := Kinematics.Counted_Turn (M, A, Channel);
       Noise    : constant Real := Channels.Noise (M, Arm_Group (M, A), Channel);
-      Executed : constant Real := Steps.Executed_Least (M, Arm_Group (M, A), Channel);
+      Executed : constant Real := Steps.Dead_Band (M, Arm_Group (M, A), Channel);
       --  The turn the fit counts, and what the readings' noise can take off
       --  a turn asked of exactly it (a keyframe counts as a joint's own, and
       --  is kept at all, from the step on, and a turn of the step itself
@@ -703,7 +703,7 @@ package body Driver.Robot.Motion is
       if Step <= 0.0 then
          return 0.0;
       end if;
-      --  And the least ask the body is known to execute (Steps.Executed_Least) on top: a turn asked within a
+      --  And the channel's dead band (Steps.Dead_Band) on top: a turn asked within a
       --  servo's dead band moves nothing, and a keyframe needs the joint to have turned (the kiwi's sweep, R5
       --  on 10-14: first levels of 2.4 units, every one called blocked where it stood); and a turn that does
       --  execute lands short by up to that dead band, so a level of the counted step alone lands within the

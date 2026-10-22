@@ -197,7 +197,10 @@ package body Driver.Robot.Body_File is
               & ", ""free_shortfalls"": " & Reals (M.Groups (G).Free_Shortfalls)
               & ", ""pause"": " & Int (M.Groups (G).Pause)
               & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
-              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G))) & "}");
+              & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G)))
+              & ", ""held_off"": " & Reals (M.Groups (G).Held_Off)
+              & ", ""free_short_most"": " & Reals (M.Groups (G).Free_Short_Most)
+              & ", ""free_short_count"": " & Counts (M.Groups (G).Free_Short_Count) & "}");
       end loop;
       Add ("]}," & LF);
 
@@ -612,6 +615,13 @@ package body Driver.Robot.Body_File is
                            S.Executed.Append (if J <= Known.Last_Index and then Known (J) then Ex (J) else Real'Last);
                         end loop;
                      end;
+                     --  A body file written before the dead bands were measured where pushes came to rest has none:
+                     --  the band is the least executed ask until a push comes to rest (Steps.Dead_Band).
+                     S.Held_Off := Reals_Of (Field (Item (Gs, I), "held_off"));
+                     --  And one written before the free pushes were kept channel by channel has none: a channel is judged
+                     --  short once three free pushes asked it again (Steps.Finish).
+                     S.Free_Short_Most := Reals_Of (Field (Item (Gs, I), "free_short_most"));
+                     S.Free_Short_Count := Counts_Of (Field (Item (Gs, I), "free_short_count"));
                   end;
                end loop;
                Restored (Stored_Steps) := True;
@@ -778,7 +788,7 @@ package body Driver.Robot.Body_File is
                           (Joint_Fit'(W     => Three_Of (Field (Item (Js, J), "w")),
                             P     => Three_Of (Field (Item (Js, J), "p")),
                             C     => Value (Field (Item (Js, J), "c")),
-                            Slide => Truth (Item (Js, J), "slide")));
+                            Slide => Truth (Item (Js, J), "slide"), others => <>));
                      end loop;
                      R.Result.Lens := (Fx => Value (Field (L, "fx")), Fy => Value (Field (L, "fy")),
                                        Cx => Value (Field (L, "cx")), Cy => Value (Field (L, "cy")),

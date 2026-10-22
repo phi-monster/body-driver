@@ -900,6 +900,283 @@ package body Driver.Robot.Kinematics.Fit is
    --  they are significant).
    --  Judge_Floor, Judge_Gain: the error model Report.Cost_Judged is taken at (another fit's, to compare with it);
    --  the refinement's own when the floor is 0.
+   function Play_Parts (Play : Play_Paths; Slack : Real_Array) return Driver.Numerics.Arrays.Real_Matrix is
+      Parts : Driver.Numerics.Arrays.Real_Matrix (1 .. Play.Frames, 1 .. Play.Joints) := [others => [others => 0.0]];
+      Along : array (1 .. Play.Frames) of Positive;   --  a joint's keyframes in the order they stand along its way
+   begin
+      for J in 1 .. Play.Joints loop
+         declare
+            H  : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));
+            V0 : constant Real := Real'Max (-H, Real'Min (H, Slack (Slack'First + 2 * J - 1)));
+            V  : Real := V0;
+            K  : Natural := 0;
+            function Upto (F : Positive) return Natural is (Natural (Play.Upto (F, J)));
+         begin
+            if H > 0.0 then
+               for F in 1 .. Play.Frames loop
+                  Along (F) := F;
+               end loop;
+               --  Insertion: the keyframes are taken one after another, nearly in order already.
+               for I in 2 .. Play.Frames loop
+                  declare
+                     F : constant Positive := Along (I);
+                     P : Natural := I - 1;
+                  begin
+                     while P >= 1 and then Upto (Along (P)) > Upto (F) loop
+                        Along (P + 1) := Along (P);
+                        P := P - 1;
+                     end loop;
+                     Along (P + 1) := F;
+                  end;
+               end loop;
+               for I in 1 .. Play.Frames loop
+                  while K < Upto (Along (I)) loop
+                     K := K + 1;
+                     V := Real'Max (-H, Real'Min (H, V + Play.Path (K, J)));
+                  end loop;
+                  Parts (Along (I), J) := V - V0;
+               end loop;
+            end if;
+         end;
+      end loop;
+      return Parts;
+   end Play_Parts;
+
+   function Measure_Slack
+     (Changes : Driver.Numerics.Arrays.Real_Matrix; Sightings : Sighting_Array; Play : Play_Paths) return Real_Array
+   is
+      N      : constant Natural := Changes'Length (2);
+      Frames : constant Natural := Changes'Length (1);
+      Tracks : Natural := 0;
+   begin
+      if N = 0 or else Play.Frames /= Frames or else Play.Joints /= N or else Sightings'Length = 0 then
+         return No_Slack;
+      end if;
+      for X of Sightings loop
+         Tracks := Natural'Max (Tracks, X.Track);
+      end loop;
+      declare
+         Slack : Real_Array (1 .. 2 * N) := [others => 0.0];
+         --  The sightings track by track: those of track T are Order (First (T) .. First (T + 1) - 1).
+         Count : array (1 .. Tracks) of Natural := [others => 0];
+         First : array (1 .. Tracks + 1) of Positive := [others => 1];
+         Order : array (1 .. Sightings'Length) of Positive;
+         Most  : Real_Array (1 .. N) := [others => 0.0];   --  per joint, the most its reading went from the reference
+
+         --  Every track's squares left by its least-squares line on the joints' turns, the changes less the slack's.
+         function Squares (Of_Slack : Real_Array) return Real is
+            Parts : constant Driver.Numerics.Arrays.Real_Matrix := Play_Parts (Play, Of_Slack);
+            Total : Real := 0.0;
+            function Turn (F, J : Positive) return Real is
+              (Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1) - Parts (F, J));
+         begin
+            for T in 1 .. Tracks loop
+               declare
+                  Column : array (1 .. N) of Natural := [others => 0];
+                  K      : Natural := 0;
+               begin
+                  for I in First (T) .. First (T + 1) - 1 loop
+                     for J in 1 .. N loop
+                        --  A turn the floats tell from none, against the most the reading went: a slack that holds the
+                        --  whole of a joint's motion leaves its turns at rounding, and a column of those makes the
+                        --  track's normal equations singular.
+                        if Column (J) = 0
+                          and then abs Turn (Sightings (Order (I)).Frame, J) > Real'Model_Epsilon * Most (J)
+                        then
+                           K := K + 1;
+                           Column (J) := K;
+                        end if;
+                     end loop;
+                  end loop;
+                  --  More sightings than turning joints: a line through them leaves something to measure.
+                  if K > 0 and then Count (T) > K then
+                     declare
+                        A      : Driver.Numerics.Arrays.Real_Matrix (1 .. K, 1 .. K) := [others => [others => 0.0]];
+                        Bu, Bv : Real_Vector (1 .. K) := [others => 0.0];
+                        L      : Driver.Numerics.Arrays.Real_Matrix (1 .. K, 1 .. K);
+                        Pd     : Boolean;
+                        X      : Real_Array (1 .. K);
+                     begin
+                        for I in First (T) .. First (T + 1) - 1 loop
+                           declare
+                              Sg : Sighting renames Sightings (Order (I));
+                              W  : constant Real := (if Sg.Own > 0.0 then 1.0 / Sg.Own else 1.0);
+                           begin
+                              X := [others => 0.0];
+                              for J in 1 .. N loop
+                                 if Column (J) > 0 then
+                                    X (Column (J)) := W * Turn (Sg.Frame, J);
+                                 end if;
+                              end loop;
+                              for P in 1 .. K loop
+                                 Bu (P) := Bu (P) + X (P) * W * (Sg.U - Sg.U0);
+                                 Bv (P) := Bv (P) + X (P) * W * (Sg.V - Sg.V0);
+                                 for Q in 1 .. K loop
+                                    A (P, Q) := A (P, Q) + X (P) * X (Q);
+                                 end loop;
+                              end loop;
+                           end;
+                        end loop;
+                        Driver.Numerics.Dense.Cholesky (A, L, Pd);
+                        if Pd then
+                           declare
+                              Gu : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bu);
+                              Gv : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (L, Bv);
+                           begin
+                              for I in First (T) .. First (T + 1) - 1 loop
+                                 declare
+                                    Sg : Sighting renames Sightings (Order (I));
+                                    W  : constant Real := (if Sg.Own > 0.0 then 1.0 / Sg.Own else 1.0);
+                                    Pu : Real := W * (Sg.U - Sg.U0);
+                                    Pv : Real := W * (Sg.V - Sg.V0);
+                                 begin
+                                    for J in 1 .. N loop
+                                       if Column (J) > 0 then
+                                          Pu := Pu - W * Turn (Sg.Frame, J) * Gu (Column (J));
+                                          Pv := Pv - W * Turn (Sg.Frame, J) * Gv (Column (J));
+                                       end if;
+                                    end loop;
+                                    Total := Total + Pu ** 2 + Pv ** 2;
+                                 end;
+                              end loop;
+                           end;
+                        else
+                           --  Turns that tell no line through the track's sightings explain none of its motion: a
+                           --  track left out of the squares made them fewer for the slack that left it out.
+                           for I in First (T) .. First (T + 1) - 1 loop
+                              declare
+                                 Sg : Sighting renames Sightings (Order (I));
+                                 W  : constant Real := (if Sg.Own > 0.0 then 1.0 / Sg.Own else 1.0);
+                              begin
+                                 Total := Total + (W * (Sg.U - Sg.U0)) ** 2 + (W * (Sg.V - Sg.V0)) ** 2;
+                              end;
+                           end loop;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+            return Total;
+         end Squares;
+
+         Best    : Real;
+         Changed : Boolean := True;
+         --  The squares' degrees of freedom: two a sighting, less two a track for each joint that turned in its
+         --  keyframes (the lines' slopes), as the measure without slack has them.
+         Freedom : Integer := 0;
+      begin
+         for X of Sightings loop
+            Count (X.Track) := Count (X.Track) + 1;
+         end loop;
+         for T in 1 .. Tracks loop
+            First (T + 1) := First (T) + Count (T);
+         end loop;
+         declare
+            Next : array (1 .. Tracks) of Positive;
+         begin
+            for T in 1 .. Tracks loop
+               Next (T) := First (T);
+            end loop;
+            for I in Sightings'Range loop
+               Order (Next (Sightings (I).Track)) := I;
+               Next (Sightings (I).Track) := Next (Sightings (I).Track) + 1;
+            end loop;
+         end;
+         for F in 1 .. Frames loop
+            for J in 1 .. N loop
+               Most (J) := Real'Max (Most (J), abs Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1));
+            end loop;
+         end loop;
+         Best := Squares (Slack);
+         Freedom := 2 * Sightings'Length;
+         for T in 1 .. Tracks loop
+            declare
+               Turned : array (1 .. N) of Boolean := [others => False];
+            begin
+               for I in First (T) .. First (T + 1) - 1 loop
+                  for J in 1 .. N loop
+                     Turned (J) := Turned (J)
+                       or else Changes (Changes'First (1) + Sightings (Order (I)).Frame - 1,
+                                        Changes'First (2) + J - 1) /= 0.0;
+                  end loop;
+               end loop;
+               for J in 1 .. N loop
+                  if Turned (J) then
+                     Freedom := Freedom - 2;
+                  end if;
+               end loop;
+            end;
+         end loop;
+         if Freedom <= 0 then
+            return No_Slack;
+         end if;
+         --  Joint by joint, each round, a change taken only where it leaves fewer squares than its two terms explain
+         --  by chance, Z squared of the squares' scale each (the squares less by a chi square of two degrees of
+         --  freedom at Z, nested), until a round takes none. A joint whose keyframes turned it by one amount either
+         --  way tells its slack from its motion per unit by nothing (a line through the turns less a slack fits them
+         --  as well as one through the turns): seed 20 (10-22) measured from its first pass's 14 keyframes, every
+         --  joint at one level, half slacks 1.8 and 7 times the fake's for two joints, and 0.20 units for one whose
+         --  half slack is 0.033.
+         while Changed loop
+            Changed := False;
+            for J in 1 .. N loop
+               declare
+                  Kept_H : constant Real := Slack (2 * J - 1);
+                  Kept_P : constant Real := Slack (2 * J);
+                  Best_H : Real := Kept_H;
+                  Best_P : Real := Kept_P;
+                  Here   : Real := Best;
+                  H      : Real := Most (J);
+                  --  The squares with this joint's slack none, and what tells a slack from none (the test below).
+                  None   : Real;
+                  Tells  : constant Real := 2.0 * Driver.Conventions.Z ** 2 * Best / Real (Freedom);
+               begin
+                  Slack (2 * J - 1) := 0.0;
+                  Slack (2 * J) := 0.0;
+                  None := Squares (Slack);
+                  --  The halvings of the most the reading went, each at its place either end or the middle, down to
+                  --  where the squares at a halving cannot be told from those with no slack. Down to where halving
+                  --  again changed them by no more than the unchanged fraction, the widest halvings, each holding the
+                  --  joint's smaller turns alike, could end it before the slack: seed 26 (10-22) measured its wrist
+                  --  pitch's half slack as none at 47 keyframes, the fake's 8.8.
+                  while H > Most (J) * Real'Model_Epsilon loop
+                     declare
+                        Least : Real := Real'Last;
+                     begin
+                        for Side in -1 .. 1 loop
+                           Slack (2 * J - 1) := H;
+                           Slack (2 * J) := Real (Side) * H;
+                           declare
+                              E : constant Real := Squares (Slack);
+                           begin
+                              Least := Real'Min (Least, E);
+                              if E < Here then
+                                 Here := E;
+                                 Best_H := H;
+                                 Best_P := Real (Side) * H;
+                              end if;
+                           end;
+                        end loop;
+                        exit when abs (Least - None) <= Tells;
+                     end;
+                     H := H / 2.0;
+                  end loop;
+                  if Best - Here > Tells then
+                     Slack (2 * J - 1) := Best_H;
+                     Slack (2 * J) := Best_P;
+                     Best := Here;
+                     Changed := True;
+                  else
+                     Slack (2 * J - 1) := Kept_H;
+                     Slack (2 * J) := Kept_P;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         return Slack;
+      end;
+   end Measure_Slack;
+
    procedure Refine_Tracks
      (Changes      : Driver.Numerics.Arrays.Real_Matrix;
       Sight        : Sighting_Array;
@@ -911,9 +1188,15 @@ package body Driver.Robot.Kinematics.Fit is
       Spread       : Boolean := True;
       Pinhole      : Boolean := False;
       Judge_Floor  : Real := 0.0;
-      Judge_Gain   : Real := 0.0)
+      Judge_Gain   : Real := 0.0;
+      Play         : Play_Paths := No_Play;
+      Slack_From   : Real_Array := No_Slack)
    is
       N         : constant Natural := Joints'Length;
+      --  The joints' gears' slack is fitted where Play gives the readings' way between the keyframes (Fit): a half
+      --  slack a joint and where its slack stood at the reference, the seventh and eighth of its parameters.
+      Slacked   : constant Boolean :=
+        Play.Frames > 0 and then Play.Frames = Changes'Length (1) and then Play.Joints = N;
       --  The focal lengths the fit is given are the focal search's (stage 1), told within Focal_Within in the
       --  logarithm: they enter the fit as a measurement of that width, two residuals of unit scale (no measurement
       --  when the width is 0). Without it the fit walked the focal length along a direction the sightings do not
@@ -924,7 +1207,14 @@ package body Driver.Robot.Kinematics.Fit is
       Prior_W   : constant Real := (if Focal_Within > 0.0 then 1.0 / Focal_Within ** 2 else 0.0);
       Frames    : constant Natural := Changes'Length (1);
       S         : constant Natural := Sight'Length;
-      Per_Joint : constant := 6;
+      Per_Joint : constant Positive := (if Slacked then 8 else 6);
+      --  A joint's terms in the reduced set the covariance is made in: its tilt (2), its point across its axis (2), its
+      --  reading scale (1) and, slacked, its half slack and where its slack stood at the reference (2), which the
+      --  covariance reported leaves out (marginal).
+      Per_Reduced : constant Positive := (if Slacked then 7 else 5);
+      --  Whether the reduced set's term P is one the covariance reports: every term but the slack's.
+      function Reported (P : Positive) return Boolean is
+        (P <= 6 or else not Slacked or else (P - 7) mod Per_Reduced < 5);
       Count     : constant Positive := 6 + Per_Joint * N;
       Tracks    : Natural := 0;
       Base      : Joint_Array := Joints;
@@ -934,14 +1224,58 @@ package body Driver.Robot.Kinematics.Fit is
       procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
       procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
 
-      function Changes_Of (Frame : Positive) return Real_Array is
-         D : Real_Array (1 .. N);
+      subtype Parts_Matrix is Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. N);
+      No_Parts : constant Parts_Matrix := [others => [others => 0.0]];
+
+      --  Per joint, its keyframes in the order they stand along its readings' way (Play's Upto), and whether its
+      --  reading changed before each.
+      type Count_Matrix is array (Positive range <>, Positive range <>) of Natural;
+      Along : Count_Matrix (1 .. Frames, 1 .. N) := [others => [others => 1]];
+      Went  : Flag_Grid (1 .. Frames, 1 .. N) := [others => [others => False]];
+
+      function Upto (F, J : Positive) return Natural is
+        (Natural (Play.Upto (Play.Upto'First (1) + F - 1, Play.Upto'First (2) + J - 1)));
+
+      --  Each joint's slack at each keyframe less where it stood at the reference, for the half slacks and places
+      --  Slack (two a joint): the play operator along the readings' way, from the place clamped within the half slack.
+      function Parts_Of (Slack : Real_Array) return Parts_Matrix is
+         Parts : Parts_Matrix := No_Parts;
       begin
-         for J in 1 .. N loop
-            D (J) := Changes (Changes'First (1) + Frame - 1, Changes'First (2) + J - 1);
-         end loop;
-         return D;
-      end Changes_Of;
+         if Slacked then
+            for J in 1 .. N loop
+               declare
+                  H  : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));
+                  V0 : constant Real := Real'Max (-H, Real'Min (H, Slack (Slack'First + 2 * J - 1)));
+                  V  : Real := V0;
+                  K  : Natural := 0;
+               begin
+                  for I in 1 .. Frames loop
+                     declare
+                        F : constant Positive := Along (I, J);
+                     begin
+                        while K < Upto (F, J) loop
+                           K := K + 1;
+                           V := Real'Max
+                             (-H, Real'Min
+                                    (H, V + Play.Path (Play.Path'First (1) + K - 1, Play.Path'First (2) + J - 1)));
+                        end loop;
+                        Parts (F, J) := V - V0;
+                     end;
+                  end loop;
+               end;
+            end loop;
+         end if;
+         return Parts;
+      end Parts_Of;
+
+      --  A keyframe's joints' changes from the reference, each less its slack's (Parts_Of): where the joint stands, not
+      --  where its reading does.
+      function Changes_Of (Frame : Positive; Parts : Parts_Matrix) return Real_Array is
+        ([for J in 1 .. N => Changes (Changes'First (1) + Frame - 1, Changes'First (2) + J - 1) - Parts (Frame, J)]);
+
+      --  Whether joint J's terms move frame F's residuals: it turned there, or its reading went anywhere before it.
+      function Moves_Frame (F, J : Positive) return Boolean is
+        (Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1) /= 0.0 or else (Slacked and then Went (F, J)));
 
       function Lens_Of (X : Real_Array) return Lens is
         ((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + (if Pinhole then 0 else 1))), Cx => X (X'First + 2),
@@ -965,7 +1299,13 @@ package body Driver.Robot.Kinematics.Fit is
          return Out_J;
       end Joints_Of;
 
-      procedure To_X (Lx : Lens; Jx : Joint_Array; X : out Real_Array) is
+      --  The joints' half slacks and places at the reference among the parameters X, two a joint; nought where not
+      --  slacked.
+      function Slack_Of (X : Real_Array) return Real_Array is
+        ([for K in 1 .. 2 * N =>
+           (if Slacked then X (X'First + 6 + Per_Joint * ((K - 1) / 2) + 6 + (K - 1) mod 2) else 0.0)]);
+
+      procedure To_X (Lx : Lens; Jx : Joint_Array; Slack : Real_Array; X : out Real_Array) is
       begin
          X (X'First .. X'First + 5) := [Ln (Lx.Fx), Ln (Lx.Fy), Lx.Cx, Lx.Cy, Lx.K1, Lx.K2];
          for J in 1 .. N loop
@@ -978,6 +1318,10 @@ package body Driver.Robot.Kinematics.Fit is
                X (O + 3) := Jx (Jx'First + J - 1).P (2);
                X (O + 4) := Jx (Jx'First + J - 1).P (3);
                X (O + 5) := Jx (Jx'First + J - 1).C;
+               if Slacked then
+                  X (O + 6) := Slack (Slack'First + 2 * J - 2);
+                  X (O + 7) := Slack (Slack'First + 2 * J - 1);
+               end if;
             end;
          end loop;
       end To_X;
@@ -987,6 +1331,30 @@ package body Driver.Robot.Kinematics.Fit is
       end loop;
       if Tracks = 0 or else N = 0 then
          return;
+      end if;
+      if Slacked then
+         for J in 1 .. N loop
+            for F in 1 .. Frames loop
+               Along (F, J) := F;
+               for K in 1 .. Upto (F, J) loop
+                  Went (F, J) :=
+                    Went (F, J) or else Play.Path (Play.Path'First (1) + K - 1, Play.Path'First (2) + J - 1) /= 0.0;
+               end loop;
+            end loop;
+            --  Insertion: a handful of keyframes, nearly in order already (they are taken one after another).
+            for I in 2 .. Frames loop
+               declare
+                  F : constant Positive := Along (I, J);
+                  P : Natural := I - 1;
+               begin
+                  while P >= 1 and then Upto (Along (P, J), J) > Upto (F, J) loop
+                     Along (P + 1, J) := Along (P, J);
+                     P := P - 1;
+                  end loop;
+                  Along (P + 1, J) := F;
+               end;
+            end loop;
+         end loop;
       end if;
       declare
          Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  the log of each track's depth
@@ -1004,8 +1372,8 @@ package body Driver.Robot.Kinematics.Fit is
          Rounds : Natural := 0;   --  descent rounds over every pass, for the log (what the stage's time is made of)
          --  Each parameter's variance at the solution, in the reduced set: the
          --  lens (6), then per joint its tilt (2), its point across the axis
-         --  (2) and its reading scale (1).
-         Variance   : Real_Array (1 .. 6 + 5 * N) := [others => Real'Last];
+         --  (2), its reading scale (1) and, slacked, its half slack (1).
+         Variance   : Real_Array (1 .. 6 + Per_Reduced * N) := [others => Real'Last];
          Determined : Boolean := False;
          --  Why not, when it is not: the last pass that could not be made, and how.
          Why_Not    : Ada.Strings.Unbounded.Unbounded_String :=
@@ -1061,14 +1429,18 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             if Joint > 0 then
                for F in 1 .. Frames loop
-                  Turned (F) := Changes (Changes'First (1) + F - 1, Changes'First (2) + Joint - 1) /= 0.0;
+                  Turned (F) := Moves_Frame (F, Joint);
                end loop;
             end if;
-            for F in 1 .. Frames loop
-               if Turned (F) then
-                  Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F)));
-               end if;
-            end loop;
+            declare
+               Parts : constant Parts_Matrix := Parts_Of (Slack_Of (Xv));
+            begin
+               for F in 1 .. Frames loop
+                  if Turned (F) then
+                     Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F, Parts)));
+                  end if;
+               end loop;
+            end;
             for K in 1 .. Index'Length loop
                declare
                   Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
@@ -1320,7 +1692,8 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             for F in 1 .. Frames loop
                declare
-                  Change : constant Real_Array := Changes_Of (F);
+                  --  The linear start is made before the parameters are (To_X): from the readings, no slack.
+                  Change : constant Real_Array := Changes_Of (F, No_Parts);
                   Turn   : Mat3 := Identity3;
                begin
                   --  The joints compose in their order along the arm (Chain).
@@ -1460,7 +1833,8 @@ package body Driver.Robot.Kinematics.Fit is
          end Linear_Start;
       begin
          Linear_Start;
-         To_X (L, Joints, X);
+         --  The slack is fitted from its measure (Slack_From) where there is one, else from none, every refinement.
+         To_X (L, Joints, (if Slack_From'Length = 2 * N then Slack_From else [1 .. 2 * N => 0.0]), X);
          loop
             declare
                Used  : Natural := 0;
@@ -1513,8 +1887,7 @@ package body Driver.Robot.Kinematics.Fit is
                   for J in 1 .. N loop
                      declare
                         function Turns (At_K : Positive) return Boolean is
-                          (Changes (Changes'First (1) + Sight (Sight'First + Natural (Index (At_K)) - 1).Frame - 1,
-                                    Changes'First (2) + J - 1) /= 0.0);
+                          (Moves_Frame (Sight (Sight'First + Natural (Index (At_K)) - 1).Frame, J));
                         Taken : Natural := 0;
                      begin
                         for At_K in 1 .. Used loop
@@ -1696,7 +2069,7 @@ package body Driver.Robot.Kinematics.Fit is
                            end loop;
                            for F in 1 .. Frames loop
                               for J in 1 .. N loop
-                                 Moved_In (F, J) := Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1) /= 0.0;
+                                 Moved_In (F, J) := Moves_Frame (F, J);
                               end loop;
                            end loop;
                            Rows (1, Count + 1);
@@ -1761,6 +2134,19 @@ package body Driver.Robot.Kinematics.Fit is
                                        Xn (P) := X (P) + Dx (P);
                                        Moves := Moves or else Xn (P) /= X (P);
                                     end loop;
+                                    --  A half slack is no less than nought, and the slack stood within it at
+                                    --  the reference. Unbounded, one of the fake's seed 20 (10-22) ran to -773
+                                    --  units, the fit undetermined.
+                                    if Slacked then
+                                       for J in 1 .. N loop
+                                          declare
+                                             O : constant Natural := 6 + Per_Joint * (J - 1);
+                                          begin
+                                             Xn (O + 7) := Real'Max (0.0, Xn (O + 7));
+                                             Xn (O + 8) := Real'Max (-Xn (O + 7), Real'Min (Xn (O + 7), Xn (O + 8)));
+                                          end;
+                                       end loop;
+                                    end if;
                                     for T in 1 .. Tracks loop
                                        if Cl (T) > 0.0 then
                                           declare
@@ -1814,7 +2200,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sqrt (C (T)) else Real'Last);
                            end loop;
                            declare
-                              Reduced : constant Positive := 6 + 5 * N;
+                              Reduced : constant Positive := 6 + Per_Reduced * N;
                               Tm  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Reduced) :=
                                 [others => [others => 0.0]];
                               Anchor : Positive := 1;
@@ -1836,7 +2222,7 @@ package body Driver.Robot.Kinematics.Fit is
                               for J in 1 .. N loop
                                  declare
                                     O  : constant Natural := 6 + Per_Joint * (J - 1);
-                                    Ro : constant Natural := 6 + 5 * (J - 1);
+                                    Ro : constant Natural := 6 + Per_Reduced * (J - 1);
                                     E1, E2 : Vec3;
                                  begin
                                     Perp (Base (Base'First + J - 1).W, E1, E2);
@@ -1847,6 +2233,10 @@ package body Driver.Robot.Kinematics.Fit is
                                        Tm (O + 2 + D, Ro + 4) := E2 (D);
                                     end loop;
                                     Tm (O + 6, Ro + 5) := 1.0;
+                                    if Slacked then
+                                       Tm (O + 7, Ro + 6) := 1.0;
+                                       Tm (O + 8, Ro + 7) := 1.0;
+                                    end if;
                                  end;
                               end loop;
                               declare
@@ -1886,12 +2276,26 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  nought, the sandwich's gradients of it being nought).
                                  for J in 1 .. N loop
                                     if Joints (Joints'First + J - 1).Slide then
-                                       for P in 6 + 5 * (J - 1) + 3 .. 6 + 5 * (J - 1) + 4 loop
+                                       for P in 6 + Per_Reduced * (J - 1) + 3 .. 6 + Per_Reduced * (J - 1) + 4 loop
                                           for Q in 1 .. Reduced loop
                                              Ar (P, Q) := 0.0;
                                              Ar (Q, P) := 0.0;
                                           end loop;
                                           Ar (P, P) := 1.0;
+                                       end loop;
+                                    end if;
+                                    --  Nor has a slack's term that no keyframe tells (a half slack of nought leaves
+                                    --  the place within it nothing to tell): kept out of the others alike, and out of
+                                    --  the covariance reported.
+                                    if Slacked then
+                                       for P in 6 + Per_Reduced * J - 1 .. 6 + Per_Reduced * J loop
+                                          if Ar (P, P) = 0.0 then
+                                             for Q in 1 .. Reduced loop
+                                                Ar (P, Q) := 0.0;
+                                                Ar (Q, P) := 0.0;
+                                             end loop;
+                                             Ar (P, P) := 1.0;
+                                          end if;
                                        end loop;
                                     end if;
                                  end loop;
@@ -2083,8 +2487,10 @@ package body Driver.Robot.Kinematics.Fit is
                                  Report.Depth_Gains.Clear;
                                  for T in 1 .. Tracks loop
                                     for P in 1 .. Reduced loop
-                                       Report.Depth_Gains.Append
-                                         (if T /= Anchor and then C (T) > 0.0 then -Br (P, T) / C (T) else 0.0);
+                                       if Reported (P) then
+                                          Report.Depth_Gains.Append
+                                            (if T /= Anchor and then C (T) > 0.0 then -Br (P, T) / C (T) else 0.0);
+                                       end if;
                                     end loop;
                                  end loop;
                                  Free (Br);
@@ -2114,7 +2520,11 @@ package body Driver.Robot.Kinematics.Fit is
             for J of Base loop
                J.P := J.P - Dot (J.P, J.W) * J.W;
             end loop;
-            To_X (Lens_Of (X), Base, X);
+            declare
+               Kept : constant Real_Array := Slack_Of (X);   --  the slacks stay as fitted
+            begin
+               To_X (Lens_Of (X), Base, Kept, X);
+            end;
             --  The sightings that fit, re-chosen against every residual's noise.
             declare
                All_Index : Real_Access := new Real_Array (1 .. S);
@@ -2149,9 +2559,13 @@ package body Driver.Robot.Kinematics.Fit is
                         Fitting (Sight (Sight'First + I - 1).Track) := True;
                      end if;
                   end loop;
-                  for F in 1 .. Frames loop
-                     Views (F) := Eye_At (Jx, Chain, Changes_Of (F));
-                  end loop;
+                  declare
+                     Parts : constant Parts_Matrix := Parts_Of (Slack_Of (X));
+                  begin
+                     for F in 1 .. Frames loop
+                        Views (F) := Eye_At (Jx, Chain, Changes_Of (F, Parts));
+                     end loop;
+                  end;
                   for I in 1 .. S loop
                      declare
                         Sg : Sighting renames Sight (Sight'First + I - 1);
@@ -2317,9 +2731,13 @@ package body Driver.Robot.Kinematics.Fit is
                      if Ok then
                         for P in 1 .. Reduced loop
                            Variance (P) := V (P, P);
-                           for Q in 1 .. Reduced loop
-                              Report.Covariance.Append (V (P, Q));
-                           end loop;
+                           if Reported (P) then
+                              for Q in 1 .. Reduced loop
+                                 if Reported (Q) then
+                                    Report.Covariance.Append (V (P, Q));
+                                 end if;
+                              end loop;
+                           end if;
                         end loop;
                         Report.Errors := Summary_Of (Kinds, Clipped);
                      else
@@ -2339,6 +2757,18 @@ package body Driver.Robot.Kinematics.Fit is
          end if;
          L := Lens_Of (X);
          Joints := Joints_Of (X);
+         Report.Slacks.Clear;
+         Report.Slack_Places.Clear;
+         if Slacked then
+            declare
+               Two : constant Real_Array := Slack_Of (X);
+            begin
+               for J in 1 .. N loop
+                  Report.Slacks.Append (Two (2 * J - 1));
+                  Report.Slack_Places.Append (Two (2 * J));
+               end loop;
+            end;
+         end if;
          --  Fitted only when the sightings determine every parameter that has a
          --  value of its own: each focal length and each reading scale
          --  significant against its uncertainty, and each axis known to a
@@ -2360,7 +2790,7 @@ package body Driver.Robot.Kinematics.Fit is
             end if;
             for J in 1 .. N loop
                declare
-                  O    : constant Natural := 6 + 5 * (J - 1);
+                  O    : constant Natural := 6 + Per_Reduced * (J - 1);
                   Tilt : constant Real := Sqrt (Variance (O + 1) + Variance (O + 2));
                   C    : constant Real := Joints (Joints'First + J - 1).C;
                begin
@@ -2432,7 +2862,8 @@ package body Driver.Robot.Kinematics.Fit is
 
    procedure Dump_Inputs
      (Changes : Driver.Numerics.Arrays.Real_Matrix; Asked : Flag_Matrix; Visible : Real_Array;
-      Sightings : Sighting_Array; Width, Height : Positive; Unit_Frames : Natural; Who : String; From : Fit_Start)
+      Sightings : Sighting_Array; Width, Height : Positive; Unit_Frames : Natural; Who : String; From : Fit_Start;
+      Play : Play_Paths)
    is
       use Ada.Text_IO;
       File   : File_Type;
@@ -2533,6 +2964,23 @@ package body Driver.Robot.Kinematics.Fit is
          Put_Flag (T);
       end loop;
       New_Line (File);
+      --  The readings' way (Fit's Play), when given: its stretches' count, then its stretches a row each, then each
+      --  keyframe's count of them a row each; a fit given none dumps none.
+      if Play.Frames > 0 then
+         Put_Line (File, "play" & Play.Stretches'Image);
+         for I in Play.Path'Range (1) loop
+            for J in Play.Path'Range (2) loop
+               Put_Real (Play.Path (I, J));
+            end loop;
+            New_Line (File);
+         end loop;
+         for I in Play.Upto'Range (1) loop
+            for J in Play.Upto'Range (2) loop
+               Put_Real (Play.Upto (I, J));
+            end loop;
+            New_Line (File);
+         end loop;
+      end if;
       Close (File);
    end Dump_Inputs;
 
@@ -2548,10 +2996,23 @@ package body Driver.Robot.Kinematics.Fit is
       L          : out Lens;
       Report     : out Fit_Report;
       Who        : String := "";
-      From       : Fit_Start := No_Start)
+      From       : Fit_Start := No_Start;
+      Play       : Play_Paths := No_Play;
+      Slack_Start : Real_Array := No_Slack)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
+      --  The keyframes' changes less the slack's as measured (Slack_Start), for every stage before the refinement.
+      Started : constant Boolean := Slack_Start'Length = 2 * N and then Play.Frames = Frames and then Play.Joints = N;
+      Start_Parts : constant Driver.Numerics.Arrays.Real_Matrix :=
+        (if Started then Play_Parts (Play, Slack_Start) else [1 .. Frames => [1 .. N => 0.0]]);
+      --  The joints' turns with the slack as measured: what the search of the orders (stage 4) refines, its slack held,
+      --  as every stage before it takes it; the last stage refines the slack with the rest. Refined with the slack free
+      --  from the start, seed 26 (10-22) took its focal length for 162 px of the true 207, 0.26 of the bend for 0.009,
+      --  and seed 20 down to 3 px.
+      Joint_Turns : constant Driver.Numerics.Arrays.Real_Matrix :=
+        [for F in 1 .. Frames => [for J in 1 .. N => Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1)
+                                                    - Start_Parts (F, J)]];
       --  The keyframes that define the unit of length.
       Unit_Count : constant Natural := (if Unit_Frames = 0 then Frames else Unit_Frames);
       S      : constant Natural := Sightings'Length;
@@ -2560,7 +3021,7 @@ package body Driver.Robot.Kinematics.Fit is
       procedure Free is new Ada.Unchecked_Deallocation (Sighting_Array, Sighting_Access);
 
       function Change (Frame, J : Positive) return Real is
-        (Changes (Changes'First (1) + Frame - 1, Changes'First (2) + J - 1));
+        (Changes (Changes'First (1) + Frame - 1, Changes'First (2) + J - 1) - Start_Parts (Frame, J));
 
       function Changes_Of (Frame : Positive) return Real_Array is
          D : Real_Array (1 .. N);
@@ -3011,7 +3472,8 @@ package body Driver.Robot.Kinematics.Fit is
             L_P      : Lens;
             Report_P : Fit_Report := Report;
          begin
-            Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within);
+            Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within, Play => Play,
+                           Slack_From => Slack_Start);
             --  The pinhole nearest the lens with them, refined from its joints (begun from the stage before, a wheeled
             --  base's head, bench seed 1 10-20, went from 166 px to 25, the truth 171, in 18 passes while the lens
             --  with them stayed at 166), and judged at the lens's error model: the lens with them holds it as its own
@@ -3019,7 +3481,8 @@ package body Driver.Robot.Kinematics.Fit is
             Joints_P := Joints;
             L_P := (Fx | Fy => Sqrt (L.Fx * L.Fy), Cx => L.Cx, Cy => L.Cy, others => 0.0);
             Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Spread => False,
-                           Pinhole => True, Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                           Pinhole => True, Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
+                           Slack_From => Slack_Start);
             --  Where the pinhole's sightings cost less, the lens with them lies in a worse basin than its special
             --  case (the bench's drone 1:1, 10-21: at 118.7 by 151.0 px, its cost 2000 above the pinhole's at 170.7
             --  px, the truth 171.4): it is refitted from the pinhole's.
@@ -3031,7 +3494,8 @@ package body Driver.Robot.Kinematics.Fit is
                   Report_E : Fit_Report := Report;
                begin
                   Refine_Tracks (Changes, Sight, Joints_E, Order, L_E, Report_E, Focal_Within,
-                                 Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                                 Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
+                                 Slack_From => Slack_Start);
                   if Report_E.All_Count > 0 and then Report_E.Cost_Judged < Report.Cost_Judged then
                      Joints := Joints_E;
                      L := L_E;
@@ -3044,7 +3508,8 @@ package body Driver.Robot.Kinematics.Fit is
             end if;
             if not Report.Determined and then Report_P.All_Count > 0 then
                Worse := Report.Cost_Judged - Report_P.Cost_Judged;
-               Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True);
+               Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True, Play => Play,
+                              Slack_From => Slack_Start);
                --  The pinhole taken where the lens with its extras is not (its covariance singular, or no account of
                --  them: Weigh_Extras) takes the step between them into its covariance, its profile walked (Take_Span,
                --  below): the sightings did not tell the extras, and held at nought they are in no covariance. Only
@@ -3150,7 +3615,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Lp.Fy := L.Fy * Factor;
                               Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held, Spread => False,
                                              Pinhole => Report.Pinhole, Judge_Floor => Report.Judge_Floor,
-                                             Judge_Gain => Report.Judge_Gain);
+                                             Judge_Gain => Report.Judge_Gain, Play => Play, Slack_From => Slack_Start);
                               exit when Rp.All_Count = 0;
                               --  Where the step's focal length went, held within its own sigma: a profile is flat as far
                               --  as its steps went untold, not as far as they were asked (the sightings pulled a step at
@@ -3187,7 +3652,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  3 % more time side by side (10-21).
                                  if Report.Cost_Judged - Rp.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0 then
                                     Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
-                                                   Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                                                   Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
+                                                   Slack_From => Slack_Start);
                                     if Rp.All_Count > 0 and then Rp.Cost_Judged < Report.Cost_Judged then
                                        Walked (Way) := (Moved => True, L => Lp, Report => Rp, others => <>);
                                        Walked_Joints (Way) := Jp;
@@ -3407,7 +3873,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    begin
       if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
-         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From);
+         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play);
       end if;
       Report := (others => <>);
       Joints := [others => <>];
@@ -5417,7 +5883,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Alone (K) := X;
                end if;
             end loop;
-            Refine_Tracks (Changes, Alone.all, Joints, Order, Lx, Rep, Focal_Within);
+            Refine_Tracks (Joint_Turns, Alone.all, Joints, Order, Lx, Rep, Focal_Within);
             --  A joint taken for a slide is weighed again against the turn its own keyframes were explained by nearly
             --  as well (Slide_Turns), now that the lens is refined: the turn whose rotation is that turn's across the
             --  slide's travel and whose eye travels as the slide's does (its axis through the point that makes it so),
@@ -5455,7 +5921,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Jt (Jt'First + J - 1) :=
                           (W => (1.0 / Rate) * Omega, P => (1.0 / Rate ** 2) * Cross (Omega, V), C => Rate,
                            Slide => False);
-                        Refine_Tracks (Changes, Alone.all, Jt, Order, Lt, Rt, Focal_Within,
+                        Refine_Tracks (Joint_Turns, Alone.all, Jt, Order, Lt, Rt, Focal_Within,
                                        Judge_Floor => Rep.Judge_Floor, Judge_Gain => Rep.Judge_Gain);
                         declare
                            Known : constant Boolean := Natural (Rt.Covariance.Length) = Terms (N) ** 2;
@@ -5521,7 +5987,7 @@ package body Driver.Robot.Kinematics.Fit is
                      begin
                         Js (Js'First + J - 1) :=
                           (W => (1.0 / Sqrt (Dot (V, V))) * V, P => Zero3, C => Sqrt (Dot (V, V)), Slide => True);
-                        Refine_Tracks (Changes, Alone.all, Js, Order, Ls, Rs, Focal_Within,
+                        Refine_Tracks (Joint_Turns, Alone.all, Js, Order, Ls, Rs, Focal_Within,
                                        Judge_Floor => Rep.Judge_Floor, Judge_Gain => Rep.Judge_Gain);
                         declare
                            Power : constant Real := Apart (J, Joints, Lx, Rep, Js, Ls, Rs);
@@ -6904,7 +7370,7 @@ package body Driver.Robot.Kinematics.Fit is
                               Lx  : Lens := X.L;
                               Rep : Fit_Report;
                            begin
-                              Refine_Tracks (Changes, Sight, Jx, X.Order, Lx, Rep, Focal_Within, Spread => False);
+                              Refine_Tracks (Joint_Turns, Sight, Jx, X.Order, Lx, Rep, Focal_Within, Spread => False);
                               Refined (K) := (Order => X.Order, Joints => Jx, L => Lx, Report => Rep);
                            end;
                         end if;

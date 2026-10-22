@@ -295,6 +295,10 @@ package Driver.Robot.Kinematics.Fit is
       Untold     : Joint_Pair_Lists.Vector;  --  when stage 4 did not tell the order: the joints next to each other along
                                              --  the best order whose swap leaves residuals not significantly the
                                              --  larger; empty when told, or when no stage 4 was run
+      Slacks       : Real_Lists.Vector;
+      --  Per joint, half its gears' slack in reading units (Fit's Play); empty when the fit was given no way.
+      Slack_Places : Real_Lists.Vector;
+      --  Per joint, where its slack stood at the reference keyframe, from the slack's middle, in reading units.
       Untold_Turns : Real_Lists.Vector;
       --  Per pair of Untold, two: the turns of its Earlier joint and of its Later one, in their readings' units, that
       --  tell the untold orders apart most (by the pixels between their places of the points times the root of how
@@ -376,6 +380,42 @@ package Driver.Robot.Kinematics.Fit is
 
    No_Start : constant Fit_Start := (N => 0, Valid => False, others => <>);
 
+   --  The readings' way from the reference keyframe on, for the joints' gears' slack (Fit's Play). Per joint (a
+   --  column of Path), what its reading did between the keyframes, stretch by stretch in time order: each the change
+   --  over a stretch it went one way, a keyframe's beat ending one; per keyframe (a row of Upto) and joint, how many
+   --  stretches came before it. A joint's slack goes with every change of its reading and stays within a half slack
+   --  either way of its middle (a play operator: the motor turns within the slack before it takes the link along),
+   --  from where it stood at the reference, and the joint stands at its reading less that. A joint its load holds to
+   --  one side of its slack is fitted a half slack of nought. With no rows, the slack is not fitted.
+   type Play_Paths (Stretches, Frames, Joints : Natural) is record
+      Path : Driver.Numerics.Arrays.Real_Matrix (1 .. Stretches, 1 .. Joints);
+      Upto : Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. Joints);
+   end record;
+
+   No_Play : constant Play_Paths :=
+     (Stretches => 0, Frames => 0, Joints => 0, Path => [others => [others => 0.0]],
+      Upto => [others => [others => 0.0]]);
+
+   No_Slack : constant Real_Array (1 .. 0) := [others => 0.0];
+
+   function Play_Parts (Play : Play_Paths; Slack : Real_Array) return Driver.Numerics.Arrays.Real_Matrix
+     with Pre => Slack'Length = 2 * Play.Joints;
+   --  Per keyframe (row) and joint, where its slack stands less where it stood at the reference, in reading units:
+   --  the play operator along Play, for the half slacks and places at the reference Slack (two a joint, in that
+   --  order), the place clamped within the half slack.
+
+   function Measure_Slack
+     (Changes : Driver.Numerics.Arrays.Real_Matrix; Sightings : Sighting_Array; Play : Play_Paths) return Real_Array;
+   --  A measure of every joint's slack from the keyframes alone, before any geometry: per joint its half slack and
+   --  where its slack stood at the reference (two a joint), those that let every track's sightings move most nearly
+   --  in proportion to the joints' turns (the changes less the slack's, Play_Parts): each track's displacements from
+   --  its reference pixel regressed on the turns of the joints that turned in its keyframes, by least squares, over
+   --  every track, found joint by joint in turn, each joint's from the halvings of the most its reading went from the
+   --  reference down to nought and its place at either end or the middle, until a round changes none. The fit's first
+   --  stages take the changes less these and its refinement begins from them (Fit's Slack_Start): taken from the
+   --  readings, the fake's seed 20 (10-22, every quirk on) searched its focal length down to 20 px and its fit to
+   --  1.6, its base turn's four degrees of slack taken for the joint's turns. No_Slack where Play has no rows.
+
    procedure Fit
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;   --  per keyframe (row), every joint's reading change from the reference
       Asked      : Flag_Matrix;        --  per keyframe (row) and joint: the sweep asked the joint to turn for it
@@ -388,7 +428,14 @@ package Driver.Robot.Kinematics.Fit is
       L          : out Lens;
       Report     : out Fit_Report;
       Who        : String := "";   --  what is fitted, for a line at every stage it enters; none when empty
-      From       : Fit_Start := No_Start)   --  a fit just made to begin from: the last stage alone (Fit_Start)
+      From       : Fit_Start := No_Start;   --  a fit just made to begin from: the last stage alone (Fit_Start)
+      Play       : Play_Paths := No_Play;
+      --  the readings' way between the keyframes (Play_Paths); given, the nonlinear stages fit each joint's half slack
+      --  and where its slack stood at the reference (Fit_Report.Slacks, Slack_Places), every keyframe's change taken
+      --  less its slack's since the reference
+      Slack_Start : Real_Array := No_Slack)
+      --  with Play, per joint its half slack and place at the reference as measured (Measure_Slack): the stages before
+      --  the refinement take the changes less the slack's, and the refinement begins from it
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);

@@ -99,6 +99,19 @@ private package Driver.Robot.Steps is
    --  execute asks that large, and nothing is known of smaller ones (a servo stands still for an ask within its
    --  dead band: the kiwi's joints, asked 2.4 to 3.8 units, R5 on 10-14). Real'Last until a push moved it.
 
+   function Dead_Band (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  How far from a target the channel may stand still, in reading units: the band a servo neither moves within
+   --  nor lands nearer than. The farthest its reading stood from its target where a push came to rest
+   --  (Group_Stream.Held_Off) once one did; before that, the least ask it is known to execute (Executed_Least): a
+   --  boot begun from a body file has no rests yet. Executed_Least alone missed the band both ways, four of it the
+   --  sweep's least turn (twice in the counted turn, twice for the two landings): where the probe saw a channel
+   --  move at its first level it is that level, and the fake's seed 26 (10-22, default options) asked its base turn
+   --  4.7 units, its wrist eye's view 200 px away, no keyframe of it in six passes; where readings at rest repeat
+   --  exactly (noise 0) their jitter after a push counted asks of 0.001 to 0.08 units executed, and seed 20's first
+   --  levels lay inside its servos' bands, every push of arm 1 blocked in its one pass.
+   --  Held_Off no farther than Executed_Least: an ask the body executed lay beyond the band, and the fake's seed 26
+   --  (10-22) had its shoulder's Held_Off grow to 5.9 units, where its least executed ask was 1.1.
+
    function Latest (M : Model; G : Group_Id) return Episode
      with Pre => Episodes (M, G) > 0;
 
