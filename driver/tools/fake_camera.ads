@@ -35,6 +35,17 @@ package Fake_Camera is
    --  sends: exposed, noisy, rounded and clipped, and (with MJPEG) compressed and decoded back. The exposure moves
    --  towards a mid grey by a third of a stop a frame at most, once it is off by more than a sixth of one.
 
+   --  What a picture made elsewhere (Fake_GPU) takes from the camera and gives back: the exposure it is made at, whether
+   --  it is coded, MJPEG's steps (natural order, the row the vertical frequency), the next exposure from the mean grey
+   --  of the exposed picture (as Expose adapts it), and a seed of the sensor's noise for it (the generator stepped once).
+   function Gain (S : State) return Real;
+   function Coded (S : State) return Boolean;
+   type Step_Table is array (0 .. 63) of Real;
+   function Luma_Steps (S : State) return Step_Table;
+   function Chroma_Steps (S : State) return Step_Table;
+   procedure Adapt (S : in out State; Mean : Real);
+   function Draw_Seed (N : in out Noise_Source) return Interfaces.Unsigned_64;
+
    procedure Next_Beat (S : in out State);
    --  Whether the camera gives a frame this beat (Gives): a hiccup, once begun, lasts a drawn number of beats.
 

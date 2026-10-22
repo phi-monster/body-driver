@@ -10,6 +10,9 @@
 
 with Ada.Calendar;
 with Ada.Command_Line;
+with Ada.Environment_Variables;
+with Ada.Streams.Stream_IO;
+with Ada.Strings.Fixed;
 with Ada.Numerics.Float_Random;
 with Ada.Text_IO;
 with Ada.Unchecked_Conversion;
@@ -17,6 +20,7 @@ with Interfaces;
 with Driver;
 with Driver.Bytes;
 with Fake_Camera;
+with Fake_GPU;
 with Fake_Render;
 with Fake_World;
 
@@ -107,13 +111,19 @@ begin
             H_Render, H_Picture : Unsigned_64 := Basis;
          begin
             Fake_Camera.Next_Beat (Cam_State (C));
-            Fake_Render.Render (W, Cam, Scratch (C).all);
-            T1 := Ada.Calendar.Clock;
-            for I in Scratch (C)'Range loop
-               Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
-            end loop;
-            Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
-                                Noise, Pixels (C).all);
+            if Fake_GPU.Available then
+               --  Rendered, settled and exposed at once: its time all the render's.
+               Fake_GPU.Picture (W, C, True, Share, Cam_State (C), Noise, Pixels (C).all);
+               T1 := Ada.Calendar.Clock;
+            else
+               Fake_Render.Render (W, Cam, Scratch (C).all);
+               T1 := Ada.Calendar.Clock;
+               for I in Scratch (C)'Range loop
+                  Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
+               end loop;
+               Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
+                                   Noise, Pixels (C).all);
+            end if;
             Cam.Fresh := False;
             Render_Time := Render_Time + (T1 - T0);
             Expose_Time := Expose_Time + (Ada.Calendar.Clock - T1);
@@ -126,6 +136,22 @@ begin
             end loop;
             Put_Line ("beat" & Beat'Image & " camera" & C'Image & " render" & H_Render'Image
                       & " picture" & H_Picture'Image);
+            --  FAKE_FRAMES_DUMP names a folder: the bytes of every picture of the first, middle and last beats go there
+            --  as they are sent (RGB, rows top to bottom), for comparing two ways of making them.
+            if Ada.Environment_Variables.Exists ("FAKE_FRAMES_DUMP")
+              and then (Beat = 1 or else Beat = Beats / 2 or else Beat = Beats)
+            then
+               declare
+                  F : Ada.Streams.Stream_IO.File_Type;
+               begin
+                  Ada.Streams.Stream_IO.Create
+                    (F, Ada.Streams.Stream_IO.Out_File, Ada.Environment_Variables.Value ("FAKE_FRAMES_DUMP") & "/beat"
+                     & Ada.Strings.Fixed.Trim (Beat'Image, Ada.Strings.Left) & "_camera"
+                     & Ada.Strings.Fixed.Trim (C'Image, Ada.Strings.Left) & ".raw");
+                  Driver.Bytes.Byte_Array'Write (Ada.Streams.Stream_IO.Stream (F), Pixels (C).all);
+                  Ada.Streams.Stream_IO.Close (F);
+               end;
+            end if;
          end;
       end loop;
    end loop;

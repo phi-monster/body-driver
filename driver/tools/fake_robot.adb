@@ -52,6 +52,7 @@ with Driver.Msgpack;
 with Driver.Numerics;
 with Driver.Wire;
 with Fake_Camera;
+with Fake_GPU;
 with Fake_Render;
 with Fake_World;
 
@@ -787,11 +788,37 @@ procedure Fake_Robot is
          declare
             Cam   : Camera renames W.Cameras (C);
             Share : constant Real := (if W.Quirk.Settle and then not Cam.Fresh then W.Quirk.Settle_Share else 1.0);
+            Anew  : Boolean;   --  the picture is rendered anew: the world or the camera moved since the last render
+
+            procedure Keep_The_World is
+            begin
+               if World_At (C) = null or else World_At (C)'Length /= Natural (W.Solids.Length) + 1 then
+                  World_At (C) := new Rigid_Array (1 .. Natural (W.Solids.Length) + 1);
+               end if;
+               for I in 1 .. Natural (W.Solids.Length) loop
+                  World_At (C) (I) := W.Solids (I).Pose;
+               end loop;
+               World_At (C) (World_At (C)'Last) := Cam.Pose;
+            end Keep_The_World;
          begin
             Fake_Camera.Next_Beat (Cam_State (C));
-            if Still_Shown (C) then
+            Anew := not Still_Shown (C);
+            if Anew then
+               Renders := Renders + 1;
+            else
                Kept_Renders := Kept_Renders + 1;
-               if Check_Still then
+            end if;
+            if Fake_GPU.Available then
+               --  The picture made on the GPU (Fake_GPU), rendered anew where the processors would render it.
+               Fake_GPU.Picture (W, C, Anew, Share, Cam_State (C), Noise, Pixels (C).all);
+               if Anew then
+                  Keep_The_World;
+               end if;
+            else
+               if Anew then
+                  Fake_Render.Render (W, Cam, Scratch (C).all);
+                  Keep_The_World;
+               elsif Check_Still then
                   if Check_Buffer = null or else Check_Buffer'Length /= Scratch (C)'Length then
                      Check_Buffer := new Real_Array (Scratch (C)'Range);
                   end if;
@@ -804,23 +831,13 @@ procedure Fake_Robot is
                      Worst_Kept := Real'Max (Worst_Kept, abs (Check_Buffer (I) - Scratch (C) (I)));
                   end loop;
                end if;
-            else
-               Fake_Render.Render (W, Cam, Scratch (C).all);
-               Renders := Renders + 1;
-               if World_At (C) = null or else World_At (C)'Length /= Natural (W.Solids.Length) + 1 then
-                  World_At (C) := new Rigid_Array (1 .. Natural (W.Solids.Length) + 1);
-               end if;
-               for I in 1 .. Natural (W.Solids.Length) loop
-                  World_At (C) (I) := W.Solids (I).Pose;
+               for I in Scratch (C)'Range loop
+                  Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
                end loop;
-               World_At (C) (World_At (C)'Last) := Cam.Pose;
+               --  What the camera makes of it: its exposure, the sensor's noise, MJPEG (Fake_Camera).
+               Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
+                                   Noise, Pixels (C).all);
             end if;
-            for I in Scratch (C)'Range loop
-               Cam.Shown (I) := (1.0 - Share) * Cam.Shown (I) + Share * Scratch (C) (I);
-            end loop;
-            --  What the camera makes of it: its exposure, the sensor's noise, MJPEG (Fake_Camera).
-            Fake_Camera.Expose (Cam_State (C), Cam.Shown.all, Cam.Width, Cam.Height, W.Quirk.Image_Noise,
-                                Noise, Pixels (C).all);
             Cam.Fresh := False;
          end;
       end loop;

@@ -6,7 +6,7 @@
 --  obj-profile and bin-profile: a run writes gmon.out for gprof (where the
 --  time of the main task went, function by function).
 project Driver is
-   type Build_Kind is ("normal", "asan", "profile", "release");
+   type Build_Kind is ("normal", "asan", "profile", "release", "fast");
    Build : Build_Kind := external ("BD_BUILD", "normal");
 
    for Source_Dirs use ("src/**", "tests", "tools");
@@ -23,6 +23,9 @@ project Driver is
       when "release" =>
          for Object_Dir use "obj-release";
          for Exec_Dir use "bin-release";
+      when "fast" =>
+         for Object_Dir use "obj-fast";
+         for Exec_Dir use "bin-fast";
    end case;
    for Create_Missing_Dirs use "True";
    for Main use ("body_driver.adb", "selftest.adb", "replay.adb", "frame.adb", "score.adb", "numbers.adb", "deadcode.adb", "proxy.adb",
@@ -35,6 +38,9 @@ project Driver is
    --  The body on a robot: without the assertions (the contracts the tests prove, checked on every call of the
    --  aligner's sampling), the language's own checks kept.
    Release_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
+   --  BD_BUILD=fast: the normal build's checks, optimized for the machine that builds it (-O3, its own instruction set,
+   --  inlining across units), for the batches of fake boots on the big machine.
+   Fast_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g");
 
    package Compiler is
       case Build is
@@ -46,6 +52,8 @@ project Driver is
             for Default_Switches ("Ada") use Common_Switches & ("-pg");
          when "release" =>
             for Default_Switches ("Ada") use Release_Switches;
+         when "fast" =>
+            for Default_Switches ("Ada") use Fast_Switches;
       end case;
    end Compiler;
 
@@ -61,7 +69,7 @@ project Driver is
             for Default_Switches ("Ada") use ("-fsanitize=address");
          when "profile" =>
             for Default_Switches ("Ada") use ("-pg");
-         when "release" =>
+         when "release" | "fast" =>
             null;
       end case;
    end Linker;

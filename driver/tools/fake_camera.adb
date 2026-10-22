@@ -329,17 +329,7 @@ package body Fake_Camera is
       for I in 1 .. N loop
          Mean := Mean + 0.299 * R (I) + 0.587 * G (I) + 0.114 * B (I);
       end loop;
-      Mean := Mean / Real (N);
-      --  The exposure for the next frame: towards a mid grey, a third of a stop at most, once off by a sixth.
-      if S.Exposure and then Mean > 0.0 then
-         declare
-            Off : constant Real := Log (118.0 / Mean, 2.0);
-         begin
-            if abs Off > 1.0 / 6.0 then
-               S.Gain := S.Gain * 2.0 ** Real'Max (-1.0 / 3.0, Real'Min (1.0 / 3.0, Off));
-            end if;
-         end;
-      end if;
+      Adapt (S, Mean / Real (N));
       if S.Mjpeg then
          declare
             Cw : constant Positive := (Width + 1) / 2;
@@ -400,6 +390,44 @@ package body Fake_Camera is
       end if;
       Sent_Rows (1, Height);
    end Expose;
+
+   function Gain (S : State) return Real is (S.Gain);
+   function Coded (S : State) return Boolean is (S.Mjpeg);
+
+   function Steps_Of (Base : Table; Quality : Natural) return Step_Table is
+      Q : constant Table := Scaled (Base, Quality);
+      R : Step_Table;
+   begin
+      for K in 0 .. 7 loop
+         for L in 0 .. 7 loop
+            R (8 * K + L) := Q (K, L);
+         end loop;
+      end loop;
+      return R;
+   end Steps_Of;
+
+   function Luma_Steps (S : State) return Step_Table is (Steps_Of (Luma_Base, S.Quality));
+   function Chroma_Steps (S : State) return Step_Table is (Steps_Of (Chroma_Base, S.Quality));
+
+   --  The exposure for the next frame: towards a mid grey, a third of a stop at most, once off by a sixth.
+   procedure Adapt (S : in out State; Mean : Real) is
+   begin
+      if S.Exposure and then Mean > 0.0 then
+         declare
+            Off : constant Real := Log (118.0 / Mean, 2.0);
+         begin
+            if abs Off > 1.0 / 6.0 then
+               S.Gain := S.Gain * 2.0 ** Real'Max (-1.0 / 3.0, Real'Min (1.0 / 3.0, Off));
+            end if;
+         end;
+      end if;
+   end Adapt;
+
+   function Draw_Seed (N : in out Noise_Source) return Interfaces.Unsigned_64 is
+   begin
+      N.State := Next (N.State);
+      return N.State;
+   end Draw_Seed;
 
    procedure Next_Beat (S : in out State) is
    begin
