@@ -98,6 +98,7 @@ package body Driver.Robot.Regression is
       return Result : Start (P) do
          --  As Solve_On's first pass at weights of one: the same sums in the same order.
          Result.Normal := [others => [others => 0.0]];
+         Result.Support := [others => 0];
          for I in 1 .. N loop
             for J in 1 .. P loop
                declare
@@ -107,6 +108,7 @@ package body Driver.Robot.Regression is
                      for K in J .. P loop
                         Result.Normal (J, K) := Result.Normal (J, K) + Xj * X (R0 + I, C0 + K);
                      end loop;
+                     Result.Support (J) := Result.Support (J) + 1;
                   end if;
                end;
             end loop;
@@ -121,8 +123,7 @@ package body Driver.Robot.Regression is
    end Start_Of;
 
    function Solve_On
-     (X : Real_Matrix; Y : Real_Array; Floor : Real; W, Residual : in out Real_Array; From : access constant Start)
-      return Fit
+     (X : Real_Matrix; Y : Real_Array; Floor : Real; W, Residual : in out Real_Array; From : Start) return Fit
    is
       N  : constant Natural := X'Length (1);
       P  : constant Natural := X'Length (2);
@@ -135,6 +136,7 @@ package body Driver.Robot.Regression is
       Converged : Boolean := False;
       Passes    : Natural := 0;
       Inv       : Real_Matrix (1 .. P, 1 .. P);   --  the pseudo-inverse of A, as the latest pass solved with it
+      Whole_Rhs : Real_Vector (1 .. P) := [others => 0.0];   --  X' Y at weights of one, the first pass's
 
       --  The coefficients at the right-hand side, the residuals and their scale: the rest of a pass.
       procedure Finish (Rhs : Real_Vector) is
@@ -159,25 +161,66 @@ package body Driver.Robot.Regression is
          S := Real'Max (Floor, Driver.Stats.Robust_Sigma (Residual));
       end Finish;
 
-      --  Weighted normal equations and their solution at the current weights.
+      --  The first pass: the normal equations and their pseudo-inverse at weights of one are X's, made once for it
+      --  (Start_Of); the right-hand side alone is Y's.
+      procedure First_Pass is
+      begin
+         for I in 1 .. N loop
+            for J in 1 .. P loop
+               declare
+                  Xj : constant Real := X (R0 + I, C0 + J);
+               begin
+                  if Xj /= 0.0 then
+                     Whole_Rhs (J) := Whole_Rhs (J) + Xj * Y (Y0 + I);
+                  end if;
+               end;
+            end loop;
+         end loop;
+         A := From.Normal;
+         Inv := From.Inverse;
+         Finish (Whole_Rhs);
+      end First_Pass;
+
+      --  The normal equations at the current weights: those at weights of one less, for every observation its weight
+      --  took something from, what it took. Huber's weights leave whole every observation within Z of the scale, and
+      --  summed over every observation at every pass the equations were most of the lock-in's time once its rows grew:
+      --  12000 rows of 31 columns, the sums of 31 by 31 products, at each of a cell's passes (h403 and h405, humanoids,
+      --  the big machine, 10-22). A column left with no observation of weight is nought, as the weighted sums made it.
       procedure Weighted_Solve is
-         Rhs  : Real_Vector (1 .. P) := [others => 0.0];
+         Rhs  : Real_Vector := Whole_Rhs;
+         Left : Count_Array := From.Support;
          Rank : Natural;
       begin
-         A := [others => [others => 0.0]];
+         A := From.Normal;
          for I in 1 .. N loop
-            if W (I) > 0.0 then
-               for J in 1 .. P loop
-                  declare
-                     Xj : constant Real := W (I) * X (R0 + I, C0 + J);
-                  begin
-                     if Xj /= 0.0 then
-                        Rhs (J) := Rhs (J) + Xj * Y (Y0 + I);
-                        for K in J .. P loop
-                           A (J, K) := A (J, K) + Xj * X (R0 + I, C0 + K);
-                        end loop;
-                     end if;
-                  end;
+            if W (I) < 1.0 then
+               declare
+                  Taken : constant Real := 1.0 - W (I);
+               begin
+                  for J in 1 .. P loop
+                     declare
+                        Xj : constant Real := X (R0 + I, C0 + J);
+                     begin
+                        if Xj /= 0.0 then
+                           Rhs (J) := Rhs (J) - Taken * Xj * Y (Y0 + I);
+                           for K in J .. P loop
+                              A (J, K) := A (J, K) - Taken * Xj * X (R0 + I, C0 + K);
+                           end loop;
+                           if W (I) = 0.0 then
+                              Left (J) := Left (J) - 1;
+                           end if;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end loop;
+         for J in 1 .. P loop
+            if Left (J) = 0 then
+               Rhs (J) := 0.0;
+               for K in 1 .. P loop
+                  A (J, K) := 0.0;
+                  A (K, J) := 0.0;
                end loop;
             end if;
          end loop;
@@ -189,29 +232,6 @@ package body Driver.Robot.Regression is
          Pseudo_Inverse (A, Inv, Rank);
          Finish (Rhs);
       end Weighted_Solve;
-
-      --  The first pass From the normal equations and their pseudo-inverse at weights of one, made once for X
-      --  (Start_Of): the right-hand side alone is Y's.
-      procedure First_Pass is
-         Rhs : Real_Vector (1 .. P) := [others => 0.0];
-      begin
-         for I in 1 .. N loop
-            if W (I) > 0.0 then
-               for J in 1 .. P loop
-                  declare
-                     Xj : constant Real := W (I) * X (R0 + I, C0 + J);
-                  begin
-                     if Xj /= 0.0 then
-                        Rhs (J) := Rhs (J) + Xj * Y (Y0 + I);
-                     end if;
-                  end;
-               end loop;
-            end if;
-         end loop;
-         A := From.Normal;
-         Inv := From.Inverse;
-         Finish (Rhs);
-      end First_Pass;
 
       function Weight (R : Real) return Real is
       begin
@@ -228,11 +248,7 @@ package body Driver.Robot.Regression is
       end Weight;
 
    begin
-      if From = null then
-         Weighted_Solve;
-      else
-         First_Pass;
-      end if;
+      First_Pass;
       --  One pass per observation bounds the iterations; they stop as soon
       --  as the coefficients stop changing.
       for Pass in 1 .. N loop
@@ -260,19 +276,14 @@ package body Driver.Robot.Regression is
    end Solve_On;
 
    function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit is
-      W        : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);
-      Residual : Real_Access := new Real_Array (1 .. X'Length (1));
-      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all, null);
    begin
-      Free (W);
-      Free (Residual);
-      return Result;
+      return Solve (X, Y, Floor, Start_Of (X));
    end Solve;
 
-   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real; From : aliased Start) return Fit is
+   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real; From : Start) return Fit is
       W        : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);
       Residual : Real_Access := new Real_Array (1 .. X'Length (1));
-      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all, From'Access);
+      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all, From);
    begin
       Free (W);
       Free (Residual);

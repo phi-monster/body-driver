@@ -316,6 +316,14 @@ package body Driver.Robot.Lockin is
       function Push_Start (G : Group_Id; Beat : Natural) return Natural is
         (Starts ((Natural (G) - 1) * M.Beats + Beat + 1));
 
+      --  Whether each commandable group moved at each beat, by the one test of motion at the steps below: asked once for
+      --  every eye's settling tail, marks and rows. Asked by each of them for each eye, it was asked nine times a beat
+      --  of a humanoid's stream with three eyes, every estimate.
+      Moving_At : Flags_Access;
+
+      function Group_Moved (G : Group_Id; Beat : Natural) return Boolean is
+        (Moving_At ((Natural (G) - 1) * M.Beats + Beat + 1));
+
       --  What the measure before this one knew of every group in every eye, for telling a held group's motion that
       --  no cell of an eye can see (Usable): its verdict, every channel's pixels per reading unit, the eye's cell noise.
       Total_Channels : Natural := 0;
@@ -389,6 +397,14 @@ package body Driver.Robot.Lockin is
             end loop;
          end;
       end loop;
+      Moving_At := new Flags'(1 .. Groups * M.Beats => False);
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         if M.Groups (G).Commandable then
+            for B in 0 .. M.Beats - 1 loop
+               Moving_At ((Natural (G) - 1) * M.Beats + B + 1) := Channels.Moving (M, G, B, Steps_Of (G));
+            end loop;
+         end if;
+      end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
             S     : Eye_Stream renames M.Eyes (E);
@@ -415,7 +431,7 @@ package body Driver.Robot.Lockin is
             begin
                for B in 0 .. Natural'Min (M.Beats, Natural (S.Settled_At.Length)) - 1 loop
                   if (for some G in M.Groups.First_Index .. M.Groups.Last_Index =>
-                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Channels.Moving (M, G, B, Steps_Of (G))))
+                        M.Groups (G).Commandable and then (Channels.Pushed (M, G, B) or else Group_Moved (G, B)))
                   then
                      Last := B;
                      Waiting := True;
@@ -563,7 +579,7 @@ package body Driver.Robot.Lockin is
                            if Channels.Pushed (M, G, B) then
                               Pushed := B + 1;
                            end if;
-                           if Channels.Moving (M, G, B, Steps_Of (G)) then
+                           if Group_Moved (G, B) then
                               Moved := B + 1;
                               if not Unseen (G, B) then
                                  Seen := B + 1;
@@ -597,7 +613,7 @@ package body Driver.Robot.Lockin is
                      elsif Channels.Pushed (M, G, R) then
                         Pushes := Pushes + 1;
                         Pusher := G;
-                     elsif Channels.Moving (M, G, R, Steps_Of (G)) then
+                     elsif Group_Moved (G, R) then
                         Held_Moving := True;
                      end if;
                   end if;
@@ -653,6 +669,8 @@ package body Driver.Robot.Lockin is
             S.Kept_Channels.Clear;
             S.Gains.Clear;
             S.Gain_Variances.Clear;
+            S.Gain_Totals.Clear;
+            S.Spread_Totals.Clear;
             S.Shifts.Clear;
             if N > 0 then
                Mark_Motions;
@@ -954,6 +972,7 @@ package body Driver.Robot.Lockin is
                            S.Gain_Variances.Append (Spread_Of (I));
                            S.Shifts.Append (Shift_Of (I));
                         end loop;
+                        Total_Gains (S);
                         Free (Noise_Of);
                         Free (Gain_Of);
                         Free (Spread_Of);
@@ -1123,6 +1142,7 @@ package body Driver.Robot.Lockin is
          end;
       end loop;
       Free (Starts);
+      Free (Moving_At);
       Free (Was_Shift);
       Free (Step_Table);
    end Measure;
@@ -1398,6 +1418,25 @@ package body Driver.Robot.Lockin is
       return 0;
    end Column_Of;
 
+   procedure Total_Gains (S : in out Eye_Stream) is
+      Kept : constant Natural := Natural (S.Kept_Groups.Length);
+   begin
+      S.Gain_Totals.Clear;
+      S.Spread_Totals.Clear;
+      for Column in 1 .. Kept loop
+         declare
+            Gain, Spread : Real := 0.0;
+         begin
+            for Cell in 0 .. Natural (S.Gains.Length) / Kept - 1 loop
+               Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+               Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+            end loop;
+            S.Gain_Totals.Append (Gain);
+            S.Spread_Totals.Append (Spread);
+         end;
+      end loop;
+   end Total_Gains;
+
    procedure Gain_Of
      (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive; Gain, Spread : out Real; Measured : out Boolean)
    is
@@ -1409,10 +1448,15 @@ package body Driver.Robot.Lockin is
       Spread := 0.0;
       Measured := Column > 0;
       if Measured then
-         for Cell in 0 .. Natural (S.Gains.Length) / Kept - 1 loop
-            Gain := Gain + S.Gains (Cell * Kept + Column - 1);
-            Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
-         end loop;
+         if Natural (S.Gain_Totals.Length) = Kept then
+            Gain := S.Gain_Totals (Column - 1);
+            Spread := S.Spread_Totals (Column - 1);
+         else
+            for Cell in 0 .. Natural (S.Gains.Length) / Kept - 1 loop
+               Gain := Gain + S.Gains (Cell * Kept + Column - 1);
+               Spread := Spread + S.Gain_Variances (Cell * Kept + Column - 1);
+            end loop;
+         end if;
       end if;
    end Gain_Of;
 

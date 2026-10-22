@@ -109,6 +109,12 @@ private package Driver.Robot.Lockin is
    --  textured cells of the noise of their displacements about the
    --  regression on the pushes, in pixels; Real'Last before it is measured.
 
+   procedure Total_Gains (S : in out Eye_Stream);
+   --  Each regressor's gains summed over the eye's cells, and their variances, in the cells' order: what Gain_Of gives,
+   --  made once whenever the gains are. Summed at every asking, a channel's visible step summed every cell of every
+   --  eye, and the one test of motion asks for every channel's at every beat of every group (a humanoid's boot on the
+   --  Mac, 10-22: 6 in a hundred of the driver's handling of a beat).
+
    procedure Gain_Of
      (M : Model; E : Eye_Id; G : Group_Id; Channel : Positive; Gain, Spread : out Real; Measured : out Boolean);
    --  The channel's gain in the eye summed over its cells (Measure: each

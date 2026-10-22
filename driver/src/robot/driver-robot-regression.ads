@@ -34,9 +34,12 @@ private package Driver.Robot.Regression is
    --  quantity): exact data would otherwise give a zero scale, and every
    --  observation that is not fitted exactly would lose all its weight.
 
+   type Count_Array is array (Positive range <>) of Natural;
+
    type Start (Columns : Natural) is record
       Normal  : Real_Matrix (1 .. Columns, 1 .. Columns);
       Inverse : Real_Matrix (1 .. Columns, 1 .. Columns);
+      Support : Count_Array (1 .. Columns);   --  the observations each column is not nought at
    end record;
    --  A fit's first pass, at equal weights: its normal equations and their pseudo-inverse are X's alone, the same for
    --  every Y regressed on X, and made once for all of them. The lock-in regresses each cell's two displacements on the
@@ -46,7 +49,7 @@ private package Driver.Robot.Regression is
    function Start_Of (X : Real_Matrix) return Start
      with Pre => X'Length (2) > 0, Post => Start_Of'Result.Columns = X'Length (2);
 
-   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real; From : aliased Start) return Fit
+   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real; From : Start) return Fit
      with Pre => X'Length (1) = Y'Length and then X'Length (2) > 0 and then Floor >= 0.0
                  and then From.Columns = X'Length (2);
    --  Solve, its first pass From Start_Of (X): the same fit to the bit.

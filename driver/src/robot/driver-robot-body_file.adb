@@ -7,6 +7,7 @@ with Driver.Log;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Lockin;
 
 package body Driver.Robot.Body_File is
 
@@ -675,6 +676,7 @@ package body Driver.Robot.Body_File is
                      S.Gains := Reals_Of (Field (X, "gains"));
                      S.Gain_Variances := Reals_Of (Field (X, "gain_variances"));
                      S.Shifts := Reals_Of (Field (X, "shifts"));
+                     Lockin.Total_Gains (S);
                      for G in 1 .. Natural'Min (Size (F), Group_Count) loop
                         declare
                            Y : constant Node := Item (F, G);

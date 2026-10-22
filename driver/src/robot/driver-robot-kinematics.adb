@@ -1418,7 +1418,7 @@ package body Driver.Robot.Kinematics is
                            --  Scaled by their standard deviations, the residuals have unit variance at the least.
                            declare
                               --  The two fits' first pass is X's alone, made once (Regression.Start_Of).
-                              Pass_1 : aliased constant Regression.Start := Regression.Start_Of (X);
+                              Pass_1 : constant Regression.Start := Regression.Start_Of (X);
                               Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0, Pass_1);
                               Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0, Pass_1);
                               Cov_U : constant Real_Matrix := Regression.Covariance_Of (Fu);

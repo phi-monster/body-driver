@@ -582,6 +582,8 @@ private
                                              --  unit over the cell's noise, less its estimation variance;
                                              --  zero where the cell does not respond to that group
       Gain_Variances : Real_Vectors.Vector;  --  their variances
+      Gain_Totals   : Real_Vectors.Vector;   --  per regressor: its gains summed over the cells, and their variances'
+      Spread_Totals : Real_Vectors.Vector;   --  (Lockin.Total_Gains), as Lockin.Gain_Of gives them
       Shifts        : Real_Vectors.Vector;   --  per cell and regressor: pixels moved per reading unit,
                                              --  zero where the cell does not respond to that group
       Luma_Variance : Real_Vectors.Vector;   --  per cell: a resting pixel's luma variance (Stillness)
