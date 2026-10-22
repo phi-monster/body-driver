@@ -3349,8 +3349,8 @@ driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (E
 driver-robot-kinematics.adb	Ends : array (1 .. 2) of Vec3;	2	math	a central difference: one standard deviation either way
 driver-robot-kinematics.adb	Fixed_Terms : constant := Fit.Lens_Terms + 6;	6	structure	an arm's six terms in a fixed eye's fit: the camera's turn about its own axes and its centre
 driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (if In_World then 3 else 0);	3	structure	the turn's three terms follow the lens's
-driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
-driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
+driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0, Pass_1);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
+driver-robot-kinematics.adb	Fv : constant Regression.Fit := Regression.Solve (X, Yv, 1.0, Pass_1);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
 driver-robot-kinematics.adb	Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;	1	structure	the two focal lengths
 driver-robot-kinematics.adb	Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;	1	structure	the two focal lengths
 driver-robot-kinematics.adb	Fx_Fy : constant Real := Cv_Lens (1, 1) * Cv_Lens (2, 2) - Cv_Lens (1, 2) ** 2;	1	structure	the two focal lengths
@@ -3535,22 +3535,27 @@ driver-robot-kinematics.adb	when 5 => (L with delta K1 => L.K1 + By),	5	structur
 driver-robot-kinematics.adb	while P >= 1 and then R.Frames (Order (P)).Beat > R.Frames (F).Beat loop	1	structure	an insertion sort: down to the first element
 driver-robot-kinematics.adb	with Pre => On'First = 1	1	structure	indexes start at one
 driver-robot-kinematics.adb	with Pre => S'First = 1 and then S'Length = Natural (U.Length) and then Natural (V.Length) = Natural (U.Length)	1	structure	indexes start at one
+driver-robot-lag.adb	Add (Of_Rows, 1, M.Beats, Shift);	1	structure	the stream's first place: beat 0 is stored at 1
 driver-robot-lag.adb	Best : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Beyond : Real := 1.0;	1.0	math	a probability: no fit yet, so noise explains everything
 driver-robot-lag.adb	Child := 2 * Root;	2	structure	in a binary heap the children of node k are 2 k and 2 k + 1
 driver-robot-lag.adb	Due : constant Boolean := M.Lag_Evidence = 0 or else M.Beats >= 2 * M.Lag_Evidence;	2	numerics	measuring again when the evidence doubles keeps the number of measures logarithmic in the stream, as the estimates (Graph_Evidence)
 driver-robot-lag.adb	Gaps : Real_Access := new Real_Array (1 .. Natural'Max (1, Natural (List.Length)));	1	structure	at least one element, so an empty list allocates a buffer no smaller than one
 driver-robot-lag.adb	I : Positive := 1;	1	structure	arrays are indexed from one
+driver-robot-lag.adb	Mid : constant Positive := Lo + (Hi - Lo) / 2;	2	structure	a binary search halves the places left
+driver-robot-lag.adb	Origin := (if Still_At (Varying (J)) > 0 then Integer (2.0 * S.Value (Still_At (Varying (J))))	2.0	math	twice a rank is whole: tied values share the mean of their places, a half at most
+driver-robot-lag.adb	Pn (I) := Pn (I - 1) + (if Motion.Have (I) then 1 else 0);	1	structure	a beat the motion is had at counts once
 driver-robot-lag.adb	Ranks (L) := Real (I + J) / 2.0;	2.0	math	tied values share the mean of the ranks they span
 driver-robot-lag.adb	Sift (1, Stop - 1);	1	structure	the heap's root is node one, and the heap shrinks by one per extraction
 driver-robot-lag.adb	Sum := Sum + Sqrt ((Real (X1 - X0) / 2.0) ** 2 + (Real (Y1 - Y0) / 2.0) ** 2);	2.0	structure	an unresolved cell moved at least as far as a resolved one can: half its width and height
 driver-robot-lag.adb	Sum := Sum + Sqrt ((Real (X1 - X0) / 2.0) ** 2 + (Real (Y1 - Y0) / 2.0) ** 2);	2.0	structure	an unresolved cell moved at least as far as a resolved one can: half its width and height
+driver-robot-lag.adb	Xs (J) (I) := Integer (2.0 * S.Value (I)) - Origin;	2.0	math	twice a rank is whole: tied values share the mean of their places, a half at most
+driver-robot-lag.adb	Y (I) := Integer (2.0 * Motion.Value (I)) - (Have + 1);	2.0	math	twice a rank is whole, and the mean of the ranks 1 to n is half of n + 1: twice the rank less n + 1 is whole and its mean nought
 driver-robot-lag.adb	for Start in reverse 1 .. N / 2 loop	2	structure	the last node of a binary heap that has a child is N / 2
 driver-robot-lag.adb	for Stop in reverse 2 .. N loop	2	structure	extraction stops when one node is left, which is then in place
 driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two beats
 driver-robot-lag.adb	if Used = 0 or else R2 >= 1.0 then	1.0	math	a fraction of variance explained is at most one
 driver-robot-lag.adb	return (if Used = 0 then 1.0 else 0.0);	1.0	math	probabilities: no positive coefficient explains nothing, a perfect fit cannot be noise
-driver-robot-lag.adb	return 1.0;	1.0	math	a probability: too few rows to fit, so noise explains everything
 driver-robot-lockin.adb	& "" & Driver.Log.Image (Sum_Variance, 4) & "" & Far'Image & "");	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));	5	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
@@ -3711,9 +3716,12 @@ driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Coun
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
-driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);	2	structure	the block's rows and the fit's coefficients both counted from one: the block's I-th is the covariance's First + I - 1, its first one less
+driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
 driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);	2	structure	the block's columns and the fit's coefficients both counted from one: the block's J-th is the covariance's First + J - 1, its first one less
+driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);	2	structure	the block's rows and the fit's coefficients both counted from one: the block's I-th is the covariance's First + I - 1, its first one less
+driver-robot-regression.adb	S := S - 2.0 * B (J) * C (J);	2.0	math	the residual's squares expanded: (y - X b)'(y - X b) = y'y - 2 b'X'y + b'X'X b
 driver-robot-regression.adb	Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);	1.0	math	a zero diagonal entry belongs to a zero row and column, which scaling leaves as it is
+driver-robot-regression.adb	W : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);	1.0	math	the iteration starts from ordinary least squares, every weight one
 driver-robot-regression.adb	W : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);	1.0	math	the iteration starts from ordinary least squares, every weight one
 driver-robot-regression.adb	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is	1	structure	a count that is no best of many is one test
 driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight

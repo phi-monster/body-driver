@@ -88,7 +88,42 @@ package body Driver.Robot.Regression is
       end;
    end Pseudo_Inverse;
 
-   function Solve_On (X : Real_Matrix; Y : Real_Array; Floor : Real; W, Residual : in out Real_Array) return Fit is
+   function Start_Of (X : Real_Matrix) return Start is
+      N  : constant Natural := X'Length (1);
+      P  : constant Natural := X'Length (2);
+      R0 : constant Integer := X'First (1) - 1;
+      C0 : constant Integer := X'First (2) - 1;
+      Rank : Natural;
+   begin
+      return Result : Start (P) do
+         --  As Solve_On's first pass at weights of one: the same sums in the same order.
+         Result.Normal := [others => [others => 0.0]];
+         for I in 1 .. N loop
+            for J in 1 .. P loop
+               declare
+                  Xj : constant Real := X (R0 + I, C0 + J);
+               begin
+                  if Xj /= 0.0 then
+                     for K in J .. P loop
+                        Result.Normal (J, K) := Result.Normal (J, K) + Xj * X (R0 + I, C0 + K);
+                     end loop;
+                  end if;
+               end;
+            end loop;
+         end loop;
+         for J in 1 .. P loop
+            for K in 1 .. J - 1 loop
+               Result.Normal (J, K) := Result.Normal (K, J);
+            end loop;
+         end loop;
+         Pseudo_Inverse (Result.Normal, Result.Inverse, Rank);
+      end return;
+   end Start_Of;
+
+   function Solve_On
+     (X : Real_Matrix; Y : Real_Array; Floor : Real; W, Residual : in out Real_Array; From : access constant Start)
+      return Fit
+   is
       N  : constant Natural := X'Length (1);
       P  : constant Natural := X'Length (2);
       R0 : constant Integer := X'First (1) - 1;
@@ -99,11 +134,34 @@ package body Driver.Robot.Regression is
       S  : Real := 0.0;
       Converged : Boolean := False;
       Passes    : Natural := 0;
+      Inv       : Real_Matrix (1 .. P, 1 .. P);   --  the pseudo-inverse of A, as the latest pass solved with it
+
+      --  The coefficients at the right-hand side, the residuals and their scale: the rest of a pass.
+      procedure Finish (Rhs : Real_Vector) is
+      begin
+         declare
+            Beta : constant Real_Vector := Inv * Rhs;
+         begin
+            for J in 1 .. P loop
+               B (J) := Beta (J);
+            end loop;
+         end;
+         for I in 1 .. N loop
+            declare
+               Predicted : Real := 0.0;
+            begin
+               for J in 1 .. P loop
+                  Predicted := Predicted + X (R0 + I, C0 + J) * B (J);
+               end loop;
+               Residual (I) := Y (Y0 + I) - Predicted;
+            end;
+         end loop;
+         S := Real'Max (Floor, Driver.Stats.Robust_Sigma (Residual));
+      end Finish;
 
       --  Weighted normal equations and their solution at the current weights.
       procedure Weighted_Solve is
          Rhs  : Real_Vector (1 .. P) := [others => 0.0];
-         Inv  : Real_Matrix (1 .. P, 1 .. P);
          Rank : Natural;
       begin
          A := [others => [others => 0.0]];
@@ -129,25 +187,31 @@ package body Driver.Robot.Regression is
             end loop;
          end loop;
          Pseudo_Inverse (A, Inv, Rank);
-         declare
-            Beta : constant Real_Vector := Inv * Rhs;
-         begin
-            for J in 1 .. P loop
-               B (J) := Beta (J);
-            end loop;
-         end;
-         for I in 1 .. N loop
-            declare
-               Predicted : Real := 0.0;
-            begin
-               for J in 1 .. P loop
-                  Predicted := Predicted + X (R0 + I, C0 + J) * B (J);
-               end loop;
-               Residual (I) := Y (Y0 + I) - Predicted;
-            end;
-         end loop;
-         S := Real'Max (Floor, Driver.Stats.Robust_Sigma (Residual));
+         Finish (Rhs);
       end Weighted_Solve;
+
+      --  The first pass From the normal equations and their pseudo-inverse at weights of one, made once for X
+      --  (Start_Of): the right-hand side alone is Y's.
+      procedure First_Pass is
+         Rhs : Real_Vector (1 .. P) := [others => 0.0];
+      begin
+         for I in 1 .. N loop
+            if W (I) > 0.0 then
+               for J in 1 .. P loop
+                  declare
+                     Xj : constant Real := W (I) * X (R0 + I, C0 + J);
+                  begin
+                     if Xj /= 0.0 then
+                        Rhs (J) := Rhs (J) + Xj * Y (Y0 + I);
+                     end if;
+                  end;
+               end loop;
+            end if;
+         end loop;
+         A := From.Normal;
+         Inv := From.Inverse;
+         Finish (Rhs);
+      end First_Pass;
 
       function Weight (R : Real) return Real is
       begin
@@ -164,7 +228,11 @@ package body Driver.Robot.Regression is
       end Weight;
 
    begin
-      Weighted_Solve;
+      if From = null then
+         Weighted_Solve;
+      else
+         First_Pass;
+      end if;
       --  One pass per observation bounds the iterations; they stop as soon
       --  as the coefficients stop changing.
       for Pass in 1 .. N loop
@@ -187,13 +255,24 @@ package body Driver.Robot.Regression is
             end if;
          end;
       end loop;
-      return (Columns => P, Beta => B, Scale => S, Normal => A, Converged => Converged, Passes => Passes);
+      return (Columns => P, Beta => B, Scale => S, Normal => A, Inverse => Inv, Converged => Converged,
+              Passes => Passes);
    end Solve_On;
 
    function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real) return Fit is
       W        : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);
       Residual : Real_Access := new Real_Array (1 .. X'Length (1));
-      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all);
+      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all, null);
+   begin
+      Free (W);
+      Free (Residual);
+      return Result;
+   end Solve;
+
+   function Solve (X : Real_Matrix; Y : Real_Array; Floor : Real; From : aliased Start) return Fit is
+      W        : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);
+      Residual : Real_Access := new Real_Array (1 .. X'Length (1));
+      Result   : constant Fit := Solve_On (X, Y, Floor, W.all, Residual.all, From'Access);
    begin
       Free (W);
       Free (Residual);
@@ -433,15 +512,124 @@ package body Driver.Robot.Regression is
       return Result;
    end Explained_Nonnegative;
 
+   function Explained_Nonnegative
+     (Gram : Real_Matrix; Cross : Real_Vector; Total : Real; Used : out Natural) return Real
+   is
+      P : constant Natural := Cross'Length;
+      B : Real_Vector (1 .. P) := [others => 0.0];
+      Positive_Set : array (1 .. P) of Boolean := [others => False];
+
+      function G (J, K : Positive) return Real is (Gram (Gram'First (1) + J - 1, Gram'First (2) + K - 1));
+      function C (J : Positive) return Real is (Cross (Cross'First + J - 1));
+
+      --  The least-squares coefficients on the columns in the positive set, zero elsewhere.
+      function Restricted return Real_Vector is
+         A    : Real_Matrix (1 .. P, 1 .. P) := [others => [others => 0.0]];
+         R    : Real_Vector (1 .. P) := [others => 0.0];
+         Inv  : Real_Matrix (1 .. P, 1 .. P);
+         Rank : Natural;
+      begin
+         for J in 1 .. P loop
+            if Positive_Set (J) then
+               R (J) := C (J);
+               for K in 1 .. P loop
+                  if Positive_Set (K) then
+                     A (J, K) := G (J, K);
+                  end if;
+               end loop;
+            end if;
+         end loop;
+         Pseudo_Inverse (A, Inv, Rank);
+         return Inv * R;
+      end Restricted;
+
+      --  The squares of Y about its mean the fit leaves: Total less twice B against Cross plus B against Gram.
+      function Residual_Sum return Real is
+         S : Real := Total;
+      begin
+         for J in 1 .. P loop
+            S := S - 2.0 * B (J) * C (J);
+            for K in 1 .. P loop
+               S := S + B (J) * G (J, K) * B (K);
+            end loop;
+         end loop;
+         return S;
+      end Residual_Sum;
+   begin
+      Used := 0;
+      if Total <= 0.0 then
+         return 0.0;
+      end if;
+      --  As Explained_On: each round admits the column that most lowers the residual; a column leaves when keeping
+      --  it would need a negative coefficient.
+      for Round in 1 .. P * P loop
+         declare
+            Best  : Natural := 0;
+            Slope : Real := 0.0;
+         begin
+            for J in 1 .. P loop
+               if not Positive_Set (J) then
+                  declare
+                     W : Real := C (J);
+                  begin
+                     for K in 1 .. P loop
+                        W := W - G (J, K) * B (K);
+                     end loop;
+                     if W > Slope then
+                        Slope := W;
+                        Best := J;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            exit when Best = 0;
+            Positive_Set (Best) := True;
+            for Inner in 1 .. P loop
+               declare
+                  S : constant Real_Vector := Restricted;
+                  Alpha : Real := 1.0;
+                  Feasible : Boolean := True;
+               begin
+                  for J in 1 .. P loop
+                     if Positive_Set (J) and then S (J) <= 0.0 then
+                        Feasible := False;
+                        if B (J) - S (J) > 0.0 then
+                           Alpha := Real'Min (Alpha, B (J) / (B (J) - S (J)));
+                        end if;
+                     end if;
+                  end loop;
+                  if Feasible then
+                     B := S;
+                     exit;
+                  end if;
+                  for J in 1 .. P loop
+                     if Positive_Set (J) then
+                        B (J) := B (J) + Alpha * (S (J) - B (J));
+                        if B (J) <= 0.0 then
+                           B (J) := 0.0;
+                           Positive_Set (J) := False;
+                        end if;
+                     end if;
+                  end loop;
+               end;
+            end loop;
+         end;
+      end loop;
+      for J in 1 .. P loop
+         if Positive_Set (J) and then B (J) > 0.0 then
+            Used := Used + 1;
+         end if;
+      end loop;
+      return Real'Max (0.0, 1.0 - Residual_Sum / Total);
+   end Explained_Nonnegative;
+
    function Covariance_Of (F : Fit) return Real_Matrix is
-      Inv    : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
-      Rank   : Natural;
       Result : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
    begin
-      Pseudo_Inverse (F.Normal, Inv, Rank);
+      --  The pseudo-inverse of Normal the final pass solved with, the same to the bit as made again from it.
       for I in Result'Range (1) loop
          for J in Result'Range (2) loop
-            Result (I, J) := F.Scale * F.Scale * Inv (I, J);
+            Result (I, J) := F.Scale * F.Scale * F.Inverse (I, J);
          end loop;
       end loop;
       return Result;

@@ -27,6 +27,8 @@ package body Driver.Robot.Lockin is
    procedure Free is new Ada.Unchecked_Deallocation (Natural_Array, Natural_Access);
    type Matrix_Access is access Driver.Numerics.Arrays.Real_Matrix;
    procedure Free is new Ada.Unchecked_Deallocation (Driver.Numerics.Arrays.Real_Matrix, Matrix_Access);
+   type Start_Access is access Regression.Start;
+   procedure Free is new Ada.Unchecked_Deallocation (Regression.Start, Start_Access);
    type Flags is array (Positive range <>) of Boolean;
    type Flags_Access is access Flags;
    procedure Free is new Ada.Unchecked_Deallocation (Flags, Flags_Access);
@@ -707,6 +709,9 @@ package body Driver.Robot.Lockin is
                   if Kept > 0 then
                      declare
                         X : Matrix_Access := new Real_Matrix (1 .. Rows, 1 .. Kept + 1);
+                        --  The first pass of every cell that resolved every row, at equal weights: theirs is X's
+                        --  alone (Regression.Start_Of), made once X is.
+                        All_Rows : Start_Access := null;
                         Responding : Flag_Grid_Access :=
                           new Flag_Grid'[1 .. N => [M.Groups.First_Index .. M.Groups.Last_Index => False]];
                         --  What each cell's block of each group's columns measured: the energy of the
@@ -770,8 +775,13 @@ package body Driver.Robot.Lockin is
                            end if;
                            declare
                               Floor : constant Real := Driver.Stats.Median (Floors.all);
-                              Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
-                              Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
+                              --  A cell that resolved every row regresses on X itself, whose first pass is made once
+                              --  for all of them (All_Rows); a cell's two fits share their first pass either way.
+                              Mine   : Start_Access :=
+                                (if Here = Rows then null else new Regression.Start'(Regression.Start_Of (Xc.all)));
+                              Pass_1 : constant Start_Access := (if Mine = null then All_Rows else Mine);
+                              Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor, Pass_1.all);
+                              Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor, Pass_1.all);
                               --  Each fit's covariance, made once for all its tests below (Regression.Covariance_Of).
                               Cov_U : constant Real_Matrix := Regression.Covariance_Of (Fu);
                               Cov_V : constant Real_Matrix := Regression.Covariance_Of (Fv);
@@ -859,6 +869,7 @@ package body Driver.Robot.Lockin is
                                     end if;
                                  end loop;
                               end;
+                              Free (Mine);
                            end;
                            Free (Xc);
                            Free (U);
@@ -896,6 +907,7 @@ package body Driver.Robot.Lockin is
                               X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
+                        All_Rows := new Regression.Start'(Regression.Start_Of (X.all));
                         declare
                            Motion_Rows : Natural := 0;
                         begin
@@ -1087,6 +1099,7 @@ package body Driver.Robot.Lockin is
                            end;
                         end;
                         Free (X);
+                        Free (All_Rows);
                         Free (Responding);
                         Free (Energy);
                         Free (Dof);
