@@ -29,7 +29,7 @@ project Driver is
                  "feed.adb", "brain_measure.adb", "brain_scene.adb", "fake_brain.adb", "world_check.adb",
                  "action_matrix.adb", "contact_matrix.adb", "truth_warp.adb", "align_study.adb", "fake_robot.adb", "probe_study.adb", "truth_points.adb",
                  "grammar_dump.adb", "driver-robot-fit_replay.adb", "driver-robot-step2_bench.adb",
-                 "driver-robot-flow_bench.adb");
+                 "driver-robot-flow_bench.adb", "fake_frames.adb");
 
    Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
    --  The body on a robot: without the assertions (the contracts the tests prove, checked on every call of the

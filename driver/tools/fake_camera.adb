@@ -1,5 +1,7 @@
 with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Parallel_For;
+with Fake_Rounding;
 
 package body Fake_Camera is
 
@@ -89,7 +91,7 @@ package body Fake_Camera is
                   S := S + C (K, Y) * Tmp (Y, L);
                end loop;
                --  The quantization: the coefficient kept to a whole number of its step.
-               Coef (K, L) := Real'Rounding (S / Q (K, L)) * Q (K, L);
+               Coef (K, L) := Fake_Rounding.Round (S / Q (K, L)) * Q (K, L);
             end;
          end loop;
       end loop;
@@ -119,11 +121,13 @@ package body Fake_Camera is
       end loop;
    end Code_Block;
 
-   --  A plane of W x H samples, row by row, through the codec in 8x8 blocks, the picture's edge repeated past it.
+   --  A plane of W x H samples, row by row, through the codec in 8x8 blocks, the picture's edge repeated past it: its
+   --  rows of blocks at once, every block reading and writing its own samples only.
    procedure Code_Plane (Plane : in out Real_Array; W, H : Positive; Q : Table) is
-      Block : Table;
-   begin
-      for By in 0 .. (H + 7) / 8 - 1 loop
+      procedure Block_Row (Row : Positive) is
+         By    : constant Natural := Row - 1;
+         Block : Table;
+      begin
          for Bx in 0 .. (W + 7) / 8 - 1 loop
             for Y in 0 .. 7 loop
                for X in 0 .. 7 loop
@@ -139,7 +143,10 @@ package body Fake_Camera is
                end loop;
             end loop;
          end loop;
-      end loop;
+      end Block_Row;
+      procedure Block_Rows is new Driver.Parallel_For (Block_Row);
+   begin
+      Block_Rows (1, (H + 7) / 8);
    end Code_Plane;
 
    function Uniform (S : in out State) return Real is
@@ -149,6 +156,83 @@ package body Fake_Camera is
       S.Rng := S.Rng xor Shift_Left (S.Rng, 17);
       return Real (S.Rng mod 2 ** 24) / Real (2 ** 24);
    end Uniform;
+
+   --  One step of the sensors' noise generator (xorshift: 13, 7, 17).
+   function Next (X : Unsigned_64) return Unsigned_64 is
+      Y : constant Unsigned_64 := X xor Shift_Left (X, 13);
+      Z : constant Unsigned_64 := Y xor Shift_Right (Y, 7);
+   begin
+      return Z xor Shift_Left (Z, 17);
+   end Next;
+
+   --  The noise's Gaussian: four of the generator's uniforms summed, centred and scaled to a unit variance.
+   procedure Gauss (X : in out Unsigned_64; G : out Real) is
+      S : Real := 0.0;
+   begin
+      for I in 1 .. 4 loop
+         X := Next (X);
+         S := S + Real (X mod 2 ** 24) / Real (2 ** 24);
+      end loop;
+      G := (S - 2.0) * 1.7320508075688772;
+   end Gauss;
+
+   --  A map of the generator's state that is linear over the field of two elements, as each of its steps is: the
+   --  image of each of the state's bits. A picture's noise is drawn a row at a time on every processor at once, each
+   --  row from where the draws of the rows before it leave the generator (Steps of their length), so that every pixel
+   --  gets the noise the one stream drawn in order gives it.
+   type Linear is array (0 .. 63) of Unsigned_64;
+
+   function Apply (A : Linear; X : Unsigned_64) return Unsigned_64 is
+      R : Unsigned_64 := 0;
+      V : Unsigned_64 := X;
+      B : Natural := 0;
+   begin
+      while V /= 0 loop
+         if (V and 1) /= 0 then
+            R := R xor A (B);
+         end if;
+         V := Shift_Right (V, 1);
+         B := B + 1;
+      end loop;
+      return R;
+   end Apply;
+
+   --  B, then A.
+   function After (A, B : Linear) return Linear is
+      R : Linear;
+   begin
+      for I in R'Range loop
+         R (I) := Apply (A, B (I));
+      end loop;
+      return R;
+   end After;
+
+   --  N steps of the generator.
+   function Steps (N : Natural) return Linear is
+      Power  : Linear;
+      Result : Linear;
+      K      : Natural := N;
+   begin
+      for I in Power'Range loop
+         Power (I) := Next (Shift_Left (Unsigned_64'(1), I));
+         Result (I) := Shift_Left (Unsigned_64'(1), I);
+      end loop;
+      while K > 0 loop
+         if K mod 2 = 1 then
+            Result := After (Power, Result);
+         end if;
+         Power := After (Power, Power);
+         K := K / 2;
+      end loop;
+      return Result;
+   end Steps;
+
+   --  The steps a row of noise takes, kept for the row length they were made for.
+   Row_Length : Natural := 0;
+   Row_Steps  : Linear := [others => 0];
+
+   function Start_Noise (Seed : Natural) return Noise_Source is
+     ((State => Unsigned_64 (Seed) * 6364136223846793005 + 1442695040888963407));
 
    function Start (Seed : Natural; Index : Positive; Exposure, Mjpeg, Gaps : Boolean) return State is
       S : State;
@@ -188,23 +272,62 @@ package body Fake_Camera is
       Radiance      : Driver.Real_Array;
       Width, Height : Positive;
       Noise_Level   : Real;
-      Noise         : not null access function return Driver.Real;
+      Noise         : in out Noise_Source;
       Picture       : out Driver.Bytes.Byte_Array)
    is
-      N     : constant Positive := Width * Height;
+      N       : constant Positive := Width * Height;
       R, G, B : Real_Array (1 .. N);
-      Mean  : Real := 0.0;
+      Mean    : Real := 0.0;
+      Starts  : array (0 .. Height - 1) of Unsigned_64;   --  the generator where each row's noise begins
       function Clip (V : Real) return Real is (Real'Max (0.0, Real'Min (255.0, V)));
+
+      --  Each row of pixels on its own: the noise, the picture's sums and the bytes are a pixel's, and a row's.
+      procedure Exposed (Row : Positive) is
+         X : Unsigned_64 := Starts (Row - 1);
+         V : Real;
+      begin
+         for I in (Row - 1) * Width + 1 .. Row * Width loop
+            declare
+               K : constant Positive := Radiance'First + 3 * (I - 1);
+            begin
+               Gauss (X, V);
+               R (I) := Clip (Radiance (K) * S.Gain + Noise_Level * V);
+               Gauss (X, V);
+               G (I) := Clip (Radiance (K + 1) * S.Gain + Noise_Level * V);
+               Gauss (X, V);
+               B (I) := Clip (Radiance (K + 2) * S.Gain + Noise_Level * V);
+            end;
+         end loop;
+      end Exposed;
+      procedure Exposed_Rows is new Driver.Parallel_For (Exposed);
+
+      procedure Sent (Row : Positive) is
+      begin
+         for I in (Row - 1) * Width + 1 .. Row * Width loop
+            declare
+               use type Driver.Bytes.Offset;
+               K : constant Driver.Bytes.Offset := Picture'First + Driver.Bytes.Offset (3 * (I - 1));
+            begin
+               Picture (K) := Driver.Bytes.Byte (Integer (Fake_Rounding.Floor (Clip (R (I)) + 0.5)));
+               Picture (K + 1) := Driver.Bytes.Byte (Integer (Fake_Rounding.Floor (Clip (G (I)) + 0.5)));
+               Picture (K + 2) := Driver.Bytes.Byte (Integer (Fake_Rounding.Floor (Clip (B (I)) + 0.5)));
+            end;
+         end loop;
+      end Sent;
+      procedure Sent_Rows is new Driver.Parallel_For (Sent);
    begin
+      if Row_Length /= 12 * Width then
+         Row_Steps := Steps (12 * Width);   --  three channels' Gaussians of four uniforms each, a pixel
+         Row_Length := 12 * Width;
+      end if;
+      Starts (0) := Noise.State;
+      for Row in 1 .. Height - 1 loop
+         Starts (Row) := Apply (Row_Steps, Starts (Row - 1));
+      end loop;
+      Noise.State := Apply (Row_Steps, Starts (Height - 1));
+      Exposed_Rows (1, Height);
       for I in 1 .. N loop
-         declare
-            K : constant Positive := Radiance'First + 3 * (I - 1);
-         begin
-            R (I) := Clip (Radiance (K) * S.Gain + Noise_Level * Noise.all);
-            G (I) := Clip (Radiance (K + 1) * S.Gain + Noise_Level * Noise.all);
-            B (I) := Clip (Radiance (K + 2) * S.Gain + Noise_Level * Noise.all);
-            Mean := Mean + 0.299 * R (I) + 0.587 * G (I) + 0.114 * B (I);
-         end;
+         Mean := Mean + 0.299 * R (I) + 0.587 * G (I) + 0.114 * B (I);
       end loop;
       Mean := Mean / Real (N);
       --  The exposure for the next frame: towards a mid grey, a third of a stop at most, once off by a sixth.
@@ -224,29 +347,35 @@ package body Fake_Camera is
             Y  : Real_Array (1 .. N);
             Cb, Cr : Real_Array (1 .. Cw * Ch) := [others => 0.0];
             Count  : Real_Array (1 .. Cw * Ch) := [others => 0.0];
-         begin
-            --  JFIF's colour transform, the chroma averaged over 2 x 2 (4:2:0), every plane coded, and back.
-            for Row in 0 .. Height - 1 loop
-               for Col in 0 .. Width - 1 loop
-                  declare
-                     I : constant Positive := Row * Width + Col + 1;
-                     J : constant Positive := (Row / 2) * Cw + Col / 2 + 1;
-                  begin
-                     Y (I) := 0.299 * R (I) + 0.587 * G (I) + 0.114 * B (I);
-                     Cb (J) := Cb (J) + 128.0 - 0.168736 * R (I) - 0.331264 * G (I) + 0.5 * B (I);
-                     Cr (J) := Cr (J) + 128.0 + 0.5 * R (I) - 0.418688 * G (I) - 0.081312 * B (I);
-                     Count (J) := Count (J) + 1.0;
-                  end;
+
+            --  JFIF's colour transform, the chroma averaged over 2 x 2 (4:2:0): a row of the chroma at a time, its
+            --  rows of pixels in their order, as one pass over the picture sums them.
+            procedure Transformed (Chroma_Row : Positive) is
+            begin
+               for Row in 2 * (Chroma_Row - 1) .. Natural'Min (Height - 1, 2 * Chroma_Row - 1) loop
+                  for Col in 0 .. Width - 1 loop
+                     declare
+                        I : constant Positive := Row * Width + Col + 1;
+                        J : constant Positive := (Row / 2) * Cw + Col / 2 + 1;
+                     begin
+                        Y (I) := 0.299 * R (I) + 0.587 * G (I) + 0.114 * B (I);
+                        Cb (J) := Cb (J) + 128.0 - 0.168736 * R (I) - 0.331264 * G (I) + 0.5 * B (I);
+                        Cr (J) := Cr (J) + 128.0 + 0.5 * R (I) - 0.418688 * G (I) - 0.081312 * B (I);
+                        Count (J) := Count (J) + 1.0;
+                     end;
+                  end loop;
                end loop;
-            end loop;
-            for J in Cb'Range loop
-               Cb (J) := Cb (J) / Count (J);
-               Cr (J) := Cr (J) / Count (J);
-            end loop;
-            Code_Plane (Y, Width, Height, Scaled (Luma_Base, S.Quality));
-            Code_Plane (Cb, Cw, Ch, Scaled (Chroma_Base, S.Quality));
-            Code_Plane (Cr, Cw, Ch, Scaled (Chroma_Base, S.Quality));
-            for Row in 0 .. Height - 1 loop
+               for J in (Chroma_Row - 1) * Cw + 1 .. Chroma_Row * Cw loop
+                  Cb (J) := Cb (J) / Count (J);
+                  Cr (J) := Cr (J) / Count (J);
+               end loop;
+            end Transformed;
+            procedure Transformed_Rows is new Driver.Parallel_For (Transformed);
+
+            --  Every plane coded, and back.
+            procedure Decoded (Row_1 : Positive) is
+               Row : constant Natural := Row_1 - 1;
+            begin
                for Col in 0 .. Width - 1 loop
                   declare
                      I  : constant Positive := Row * Width + Col + 1;
@@ -259,19 +388,17 @@ package body Fake_Camera is
                      B (I) := Y (I) + 1.772 * Pb;
                   end;
                end loop;
-            end loop;
+            end Decoded;
+            procedure Decoded_Rows is new Driver.Parallel_For (Decoded);
+         begin
+            Transformed_Rows (1, Ch);
+            Code_Plane (Y, Width, Height, Scaled (Luma_Base, S.Quality));
+            Code_Plane (Cb, Cw, Ch, Scaled (Chroma_Base, S.Quality));
+            Code_Plane (Cr, Cw, Ch, Scaled (Chroma_Base, S.Quality));
+            Decoded_Rows (1, Height);
          end;
       end if;
-      for I in 1 .. N loop
-         declare
-            use type Driver.Bytes.Offset;
-            K : constant Driver.Bytes.Offset := Picture'First + Driver.Bytes.Offset (3 * (I - 1));
-         begin
-            Picture (K) := Driver.Bytes.Byte (Integer (Real'Floor (Clip (R (I)) + 0.5)));
-            Picture (K + 1) := Driver.Bytes.Byte (Integer (Real'Floor (Clip (G (I)) + 0.5)));
-            Picture (K + 2) := Driver.Bytes.Byte (Integer (Real'Floor (Clip (B (I)) + 0.5)));
-         end;
-      end loop;
+      Sent_Rows (1, Height);
    end Expose;
 
    procedure Next_Beat (S : in out State) is

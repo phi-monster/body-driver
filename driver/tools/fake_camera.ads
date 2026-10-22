@@ -15,6 +15,11 @@ package Fake_Camera is
 
    type State is private;
 
+   type Noise_Source is private;
+   --  The sensors' noise: one generator the cameras draw from in turn (xorshift, four of its uniforms to a Gaussian).
+
+   function Start_Noise (Seed : Natural) return Noise_Source;
+
    function Start (Seed : Natural; Index : Positive; Exposure, Mjpeg, Gaps : Boolean) return State;
    --  Camera Index of the body of Seed, with the quirks given.
 
@@ -23,7 +28,7 @@ package Fake_Camera is
       Radiance      : Driver.Real_Array;
       Width, Height : Positive;
       Noise_Level   : Real;
-      Noise         : not null access function return Driver.Real;
+      Noise         : in out Noise_Source;
       Picture       : out Driver.Bytes.Byte_Array)
      with Pre => Radiance'Length = 3 * Width * Height and then Picture'Length = Radiance'Length;
    --  Radiance is RGB in grey levels as the renderer gives it, rows top to bottom; Picture the bytes the camera
@@ -38,6 +43,10 @@ package Fake_Camera is
    function Describe (S : State) return String;
 
 private
+
+   type Noise_Source is record
+      State : Interfaces.Unsigned_64 := 1;
+   end record;
 
    type State is record
       Seed      : Natural := 0;

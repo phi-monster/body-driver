@@ -2,6 +2,7 @@ with Ada.Numerics;
 with Ada.Numerics.Long_Elementary_Functions;
 with Interfaces;
 with Driver.Numerics;
+with Fake_Rounding;
 
 package body Fake_Render is
 
@@ -40,6 +41,31 @@ package body Fake_Render is
    --  The rays' own mean place in a pixel, less its centre (Raw_Offset's over every sub-sample): taken off every
    --  ray, so that a pixel's light is about its centre. Set by Render before its workers start.
    Off_U, Off_V : Driver.Real := 0.0;
+
+   --  A camera's rays, made once for it: where each of its pixels' rays meets the plane a unit in front of it
+   --  (Fake_World.Ray at each sub-sample's place: undoing the lens takes Newton's steps, and they were made anew for
+   --  every pixel of every picture), and the extent there of each tile's rays. Kept for a camera by its picture's
+   --  size, its intrinsics and lens, and the rays a pixel takes with their places.
+   Tile : constant := 16;   --  a tile's side, in pixels
+
+   type Ray_Cache is record
+      Width, Height, Samples : Natural := 0;
+      Fx, Fy, Cx, Cy, K1, K2 : Real := 0.0;
+      Blur                   : Real := 0.0;
+      X, Y                   : Real_Access;   --  per pixel and sub-sample, rows top to bottom
+      Lo_X, Hi_X, Lo_Y, Hi_Y : Real_Access;   --  per tile, rows of tiles top to bottom
+   end record;
+   Caches     : array (1 .. 16) of Ray_Cache;
+   Cache      : Positive := 1;   --  the camera being rendered's
+   Next_Cache : Positive := 1;   --  the one the next camera not kept takes
+
+   --  Per tile of the picture being rendered, the solids its rays may meet, in their order (Render): tile after tile in
+   --  Tile_List, the K-th tile's from Tile_First (K) to Tile_First (K + 1) less one.
+   type Index_Array is array (Positive range <>) of Natural;
+   type Index_Access is access Index_Array;
+   Tile_List    : Index_Access;
+   Tile_First   : Index_Access;
+   Tiles_Across : Positive := 1;
 
    function Hash (X, Y : Integer) return Real;
    function Smooth (T : Real) return Real;
@@ -88,8 +114,8 @@ package body Fake_Render is
    function Smooth (T : Real) return Real is (T * T * T * (T * (T * 6.0 - 15.0) + 10.0));
 
    function Noise2 (X, Y : Real) return Real is
-      X0 : constant Integer := Integer (Real'Floor (X));
-      Y0 : constant Integer := Integer (Real'Floor (Y));
+      X0 : constant Integer := Integer (Fake_Rounding.Floor (X));
+      Y0 : constant Integer := Integer (Fake_Rounding.Floor (Y));
       Fx : constant Real := Smooth (X - Real (X0));
       Fy : constant Real := Smooth (Y - Real (Y0));
       A  : constant Real := Hash (X0, Y0);
@@ -188,7 +214,7 @@ package body Fake_Render is
    function Lattice (Sub : Natural; Axis : Positive) return Real is
       Place : constant Real := 0.5 + Real (Sub) / Plastic ** Axis;
    begin
-      return Place - Real'Floor (Place);
+      return Place - Fake_Rounding.Floor (Place);
    end Lattice;
 
    --  With a lens blur, the sub-sample's place carries the lens's spread on top: the four-dimensional R2 sequence (the
@@ -200,7 +226,7 @@ package body Fake_Render is
    function Spread (Sub : Natural; Axis : Positive) return Real is
       Place : constant Real := 0.5 + Real (Sub) / Quintic ** Axis;
    begin
-      return Place - Real'Floor (Place);
+      return Place - Fake_Rounding.Floor (Place);
    end Spread;
 
    function Raw_Offset (Sub : Natural; Axis : Positive) return Real is
@@ -236,11 +262,13 @@ package body Fake_Render is
       First_Row : constant Natural := (Band - 1) * C.Height / Bands;
       Last_Row  : constant Natural := Band * C.Height / Bands - 1;
       R         : Mat3 renames C.Pose.Rotation;
+      Rays      : Ray_Cache renames Caches (Cache);
    begin
       for Row in First_Row .. Last_Row loop
          for Col in 0 .. C.Width - 1 loop
             declare
                K   : constant Positive := Into'First + 3 * (Row * C.Width + Col);
+               Its_Tile : constant Positive := (Row / Tile) * Tiles_Across + Col / Tile + 1;
                Acc : array (1 .. 3) of Real := [others => 0.0];
             begin
                for Sub in 0 .. Supersample * Supersample - 1 loop
@@ -249,11 +277,11 @@ package body Fake_Render is
                      --  the places on the plastic number's lattice (Roberts' R2), every one of them at its own distance
                      --  along any line, so that an edge moving across the pixel changes it at as many places as there
                      --  are rays (a square grid of k by k crosses k of them at once when the edge lies along it). The
-                     --  lens's distortion undone (Fake_World.Ray): the light the place shows.
-                     Pr : constant Vec3 :=
-                       Fake_World.Ray (C, Real (Col) + Offset (Sub, 1), Real (Row) + Offset (Sub, 2));
-                     Px : constant Real := Pr (1);
-                     Py : constant Real := Pr (2);
+                     --  lens's distortion undone (Fake_World.Ray, made once for the camera: Caches): the light the
+                     --  place shows.
+                     N_Ray : constant Positive := (Row * C.Width + Col) * Rays.Samples + Sub + 1;
+                     Px : constant Real := Rays.X (N_Ray);
+                     Py : constant Real := Rays.Y (N_Ray);
                      Pn : constant Real := Sqrt (Px * Px + Py * Py + 1.0);
                      Cx : constant Real := Px / Pn;
                      Cy : constant Real := Py / Pn;
@@ -264,8 +292,9 @@ package body Fake_Render is
                      Best_T : Real := Real'Last;
                      Best_S : Natural := 0;
                   begin
-                     for I in Seen'Range loop
+                     for L in Tile_First (Its_Tile) .. Tile_First (Its_Tile + 1) - 1 loop
                         declare
+                           I : constant Positive := Tile_List (L);
                            T : constant Real := Distance (Solids (I), Seen (I), Dx, Dy, Dz);
                         begin
                            if T < Best_T then
@@ -413,6 +442,140 @@ package body Fake_Render is
       Into := Pixels'Unchecked_Access;
       Off_U := Raw_Shift (1);
       Off_V := Raw_Shift (2);
+      --  The camera's rays, from those kept or made now.
+      declare
+         Samples : constant Positive := Supersample * Supersample;
+         Found   : Natural := 0;
+      begin
+         for K in Caches'Range loop
+            if Caches (K).Width = C.Width and then Caches (K).Height = C.Height and then Caches (K).Samples = Samples
+              and then Caches (K).Fx = C.Fx and then Caches (K).Fy = C.Fy and then Caches (K).Cx = C.Cx
+              and then Caches (K).Cy = C.Cy and then Caches (K).K1 = C.K1 and then Caches (K).K2 = C.K2
+              and then Caches (K).Blur = Lens_Blur
+            then
+               Found := K;
+            end if;
+         end loop;
+         if Found = 0 then
+            Found := Next_Cache;
+            Next_Cache := (if Next_Cache = Caches'Last then Caches'First else Next_Cache + 1);
+            declare
+               E      : Ray_Cache renames Caches (Found);
+               Across : constant Positive := (C.Width + Tile - 1) / Tile;
+               Down   : constant Positive := (C.Height + Tile - 1) / Tile;
+            begin
+               E := (Width => C.Width, Height => C.Height, Samples => Samples,
+                     Fx => C.Fx, Fy => C.Fy, Cx => C.Cx, Cy => C.Cy, K1 => C.K1, K2 => C.K2, Blur => Lens_Blur,
+                     X => new Real_Array (1 .. C.Width * C.Height * Samples),
+                     Y => new Real_Array (1 .. C.Width * C.Height * Samples),
+                     Lo_X => new Real_Array'(1 .. Across * Down => Real'Last),
+                     Hi_X => new Real_Array'(1 .. Across * Down => Real'First),
+                     Lo_Y => new Real_Array'(1 .. Across * Down => Real'Last),
+                     Hi_Y => new Real_Array'(1 .. Across * Down => Real'First));
+               for Row in 0 .. C.Height - 1 loop
+                  for Col in 0 .. C.Width - 1 loop
+                     for Sub in 0 .. Samples - 1 loop
+                        declare
+                           Pr : constant Vec3 :=
+                             Fake_World.Ray (C, Real (Col) + Offset (Sub, 1), Real (Row) + Offset (Sub, 2));
+                           N  : constant Positive := (Row * C.Width + Col) * Samples + Sub + 1;
+                           T  : constant Positive := (Row / Tile) * Across + Col / Tile + 1;
+                        begin
+                           E.X (N) := Pr (1);
+                           E.Y (N) := Pr (2);
+                           E.Lo_X (T) := Real'Min (E.Lo_X (T), Pr (1));
+                           E.Hi_X (T) := Real'Max (E.Hi_X (T), Pr (1));
+                           E.Lo_Y (T) := Real'Min (E.Lo_Y (T), Pr (2));
+                           E.Hi_Y (T) := Real'Max (E.Hi_Y (T), Pr (2));
+                        end;
+                     end loop;
+                  end loop;
+               end loop;
+            end;
+         end if;
+         Cache := Found;
+      end;
+      --  Per tile, the solids its rays may meet: every plane; every box with a corner at or behind the plane of the
+      --  eye; and every box all in front of it whose picture on the plane a unit in front (the hull of its corners'
+      --  there: a perspective's image of a convex solid) meets the extent of the tile's rays there, widened by far
+      --  more than the rounding of either. In their order, so that the nearest of them, and the first of equals, is
+      --  the one the ray would meet among every solid.
+      declare
+         E      : Ray_Cache renames Caches (Cache);
+         Tiles  : constant Positive := E.Lo_X'Length;
+         Count  : Natural := 0;
+         R      : Mat3 renames C.Pose.Rotation;
+         Widen  : constant Real := 1.0e-9;   --  of the unit plane's extents, far beyond either's rounding
+         type Extent is record
+            Everywhere             : Boolean := True;
+            Lo_X, Hi_X, Lo_Y, Hi_Y : Real := 0.0;
+         end record;
+         Extents : array (Seen'Range) of Extent;
+      begin
+         Tiles_Across := (C.Width + Tile - 1) / Tile;
+         for I in Seen'Range loop
+            if Solids (I).Kind = Box then
+               declare
+                  X : Extent := (Everywhere => False, Lo_X | Lo_Y => Real'Last, Hi_X | Hi_Y => Real'First);
+               begin
+                  for Ix in 0 .. 1 loop
+                     for Iy in 0 .. 1 loop
+                        for Iz in 0 .. 1 loop
+                           declare
+                              P  : constant Vec3 := Solids (I).Pose
+                                * Vec3'[(if Ix = 0 then -Solids (I).Half (1) else Solids (I).Half (1)),
+                                        (if Iy = 0 then -Solids (I).Half (2) else Solids (I).Half (2)),
+                                        (if Iz = 0 then -Solids (I).Half (3) else Solids (I).Half (3))];
+                              Wx : constant Real := P (1) - Eye (1);
+                              Wy : constant Real := P (2) - Eye (2);
+                              Wz : constant Real := P (3) - Eye (3);
+                              --  The corner in the camera's frame (the rotation transposed).
+                              Qx : constant Real := R (1, 1) * Wx + R (2, 1) * Wy + R (3, 1) * Wz;
+                              Qy : constant Real := R (1, 2) * Wx + R (2, 2) * Wy + R (3, 2) * Wz;
+                              Qz : constant Real := R (1, 3) * Wx + R (2, 3) * Wy + R (3, 3) * Wz;
+                           begin
+                              if Qz <= 0.0 then
+                                 X.Everywhere := True;
+                              else
+                                 X.Lo_X := Real'Min (X.Lo_X, Qx / Qz);
+                                 X.Hi_X := Real'Max (X.Hi_X, Qx / Qz);
+                                 X.Lo_Y := Real'Min (X.Lo_Y, Qy / Qz);
+                                 X.Hi_Y := Real'Max (X.Hi_Y, Qy / Qz);
+                              end if;
+                           end;
+                        end loop;
+                     end loop;
+                  end loop;
+                  if not X.Everywhere then
+                     X.Lo_X := X.Lo_X - Widen * (1.0 + abs X.Lo_X);
+                     X.Hi_X := X.Hi_X + Widen * (1.0 + abs X.Hi_X);
+                     X.Lo_Y := X.Lo_Y - Widen * (1.0 + abs X.Lo_Y);
+                     X.Hi_Y := X.Hi_Y + Widen * (1.0 + abs X.Hi_Y);
+                  end if;
+                  Extents (I) := X;
+               end;
+            end if;
+         end loop;
+         if Tile_List = null or else Tile_List'Length < Tiles * Seen'Length then
+            Tile_List := new Index_Array (1 .. Tiles * Seen'Length);
+         end if;
+         if Tile_First = null or else Tile_First'Length < Tiles + 1 then
+            Tile_First := new Index_Array (1 .. Tiles + 1);
+         end if;
+         for T in 1 .. Tiles loop
+            Tile_First (T) := Count + 1;
+            for I in Seen'Range loop
+               if Extents (I).Everywhere
+                 or else (Extents (I).Lo_X <= E.Hi_X (T) and then Extents (I).Hi_X >= E.Lo_X (T)
+                          and then Extents (I).Lo_Y <= E.Hi_Y (T) and then Extents (I).Hi_Y >= E.Lo_Y (T))
+               then
+                  Count := Count + 1;
+                  Tile_List (Count) := I;
+               end if;
+            end loop;
+         end loop;
+         Tile_First (Tiles + 1) := Count + 1;
+      end;
       for B in Workers'Range loop
          Workers (B).Go (B);
       end loop;
