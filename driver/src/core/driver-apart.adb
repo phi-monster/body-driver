@@ -1,5 +1,6 @@
 with Ada.Containers.Doubly_Linked_Lists;
 with Driver.Beats;
+with Driver.Clock;
 with Driver.Log;
 with Driver.Memory;
 with Driver.Bytes;
@@ -148,6 +149,11 @@ package body Driver.Apart is
 
    end Backlog;
 
+   --  What the last time apart took, for the log as the models come back: the estimates themselves (each computing of
+   --  them, if they fell due again), and the messages kept back given to the models after. The latter the robot waits
+   --  on, its answers held back until the models have caught up.
+   Computing_Took, Catching_Up_Took : Duration := 0.0;
+
    task Estimator is
       entry Start;
    end Estimator;
@@ -165,24 +171,41 @@ package body Driver.Apart is
          or
             terminate;
          end select;
+         Computing_Took := 0.0;
+         Catching_Up_Took := 0.0;
          loop
             Backlog.Next_Work (W, M);
             exit when W = Done;
             case W is
                when Compute_Now =>
-                  Compute;
+                  declare
+                     Began : constant Duration := Driver.Clock.Seconds;
+                  begin
+                     Compute;
+                     Computing_Took := Computing_Took + (Driver.Clock.Seconds - Began);
+                  end;
                   Backlog.Computed;
                when Rest_Of =>
-                  Take_Step;
-                  Rest (M);
-               when Kept_Back =>
-                  Take_Step;
-                  Robot_Part (M);
-                  if Due then
-                     Backlog.Due_Again (M);
-                  else
+                  declare
+                     Began : constant Duration := Driver.Clock.Seconds;
+                  begin
+                     Take_Step;
                      Rest (M);
-                  end if;
+                     Catching_Up_Took := Catching_Up_Took + (Driver.Clock.Seconds - Began);
+                  end;
+               when Kept_Back =>
+                  declare
+                     Began : constant Duration := Driver.Clock.Seconds;
+                  begin
+                     Take_Step;
+                     Robot_Part (M);
+                     if Due then
+                        Backlog.Due_Again (M);
+                     else
+                        Rest (M);
+                     end if;
+                     Catching_Up_Took := Catching_Up_Took + (Driver.Clock.Seconds - Began);
+                  end;
                when Done =>
                   null;
             end case;
@@ -205,7 +228,9 @@ package body Driver.Apart is
             Driver.Log.Line (Driver.Log.Core, "apart: the models are back after" & Kept_Back'Image
                              & " messages kept back without their pictures, at most" & Longest'Image
                              & " waiting at once; resident" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)
-                             & " MB");
+                             & " MB"
+                             & "; the estimates took" & Driver.Log.Image (Driver.Real (Computing_Took), 2) & " s and the kept back"
+                             & Driver.Log.Image (Driver.Real (Catching_Up_Took), 2) & " s to take in");
          end;
          Note (Driver.Recording.Estimates_Back);
          Driver.Beats.Estimates_Adopted;

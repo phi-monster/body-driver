@@ -176,6 +176,37 @@ procedure Body_Driver is
    Holds    : Driver.Replies.State;
    Twins    : Driver.Twins.Watch;   --  which group of each command key's pair is its reading
 
+   --  Where the main loop's time goes, logged at every doubling of the beats: waiting for the robot's next message,
+   --  the message's decoding and parsing, its taking in by the models (or keeping back), the decider's command for its
+   --  beat, and the reply. A boot's speed is its beats a second, and these say which part holds them: the fake robot's
+   --  own clock of a beat could not tell them apart (the big machine, 10-22: 5 to 9 ms a beat, the driver's, of which
+   --  the Mac's samples put 2.4 in the handling).
+   type Phase is (Waiting, Arriving, Parsing, Keeping, Modelling, Deciding, Replying);
+   Spent       : array (Phase) of Duration := [others => 0.0];
+   Counted     : array (Phase) of Natural := [others => 0];   --  the messages each phase's time is over
+   Messages    : Natural := 0;
+   Kept_Count  : Natural := 0;
+   Next_Report : Positive := 1;
+   Mark        : Duration := 0.0;   --  when the phase under way began
+
+   procedure Account (P : Phase) is
+      Now : constant Duration := Driver.Clock.Seconds;
+   begin
+      Spent (P) := Spent (P) + (Now - Mark);
+      Counted (P) := Counted (P) + 1;
+      Mark := Now;
+   end Account;
+
+   procedure Report_Phases is
+      function Ms (P : Phase) return String is
+        (Driver.Log.Image (Driver.Real (Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Counted (P))), 3));
+   begin
+      Line (Core, "the main loop over" & Beat'Image & " beats," & Messages'Image & " messages (" & Kept_Count'Image
+            & " kept back), ms a message of each kind: waiting " & Ms (Waiting) & ", catching up " & Ms (Arriving) & ", parsing "
+            & Ms (Parsing) & ", kept back " & Ms (Keeping) & ", taken in " & Ms (Modelling) & ", decided " & Ms (Deciding)
+            & ", reply " & Ms (Replying));
+   end Report_Phases;
+
    --  What a robot message gives the models: a new episode, and an
    --  observation with the command in effect while it was captured (the last
    --  one sent before it arrived).
@@ -245,6 +276,7 @@ procedure Body_Driver is
       Place      : Positive;
    begin
       Apart.Arrive (Held);
+      Account (Arriving);
       Driver.Recording.Write_Shared (Driver.Recording.Robot_Message, Data, Place);
       Driver.Protocol.Decode (Data, Req, Ok);
       if not Ok then
@@ -275,14 +307,17 @@ procedure Body_Driver is
             Current := M.O;
             Have_Obs := True;
          end if;
+         Account (Parsing);
          if Held then
             --  The models are the estimator's: the robot holds, the message waits.
             Apart.Hold_Back (M);
             Pending := Driver.Commands.Hold;
+            Account (Keeping);
          else
             --  A step for the services' replies, begun with this message's record.
             Driver.Services.Step_Begins (Place);
             Apart.Take_In (M, Went_Apart);
+            Account (Modelling);
             if Went_Apart then
                Pending := Driver.Commands.Hold;
             elsif Observed then
@@ -293,6 +328,7 @@ procedure Body_Driver is
                   Pending := Driver.Commands.Hold;
                end if;
             end if;
+            Account (Deciding);
          end if;
          if Observed then
             Beat := Beat + 1;
@@ -313,6 +349,13 @@ procedure Body_Driver is
       Driver.Wire.Send (Connection, Reply.To_Array, Ok);
       if not Held and then not Went_Apart then
          Apart.After_Reply;
+      end if;
+      Account (Replying);
+      Messages := Messages + 1;
+      Kept_Count := Kept_Count + Boolean'Pos (Held);
+      if Beat >= Next_Report then
+         Report_Phases;
+         Next_Report := 2 * Next_Report;
       end if;
    end Handle;
 
@@ -346,8 +389,10 @@ begin
       if Ok then
          Line (Core, "the robot connected");
          Driver.Recording.Write_Shared (Driver.Recording.Connection, Driver.Bytes.To_Bytes (""));
+         Mark := Driver.Clock.Seconds;
          loop
             Driver.Wire.Receive (Connection, Kind, Message);
+            Account (Waiting);
             exit when Kind = Driver.Wire.Closed;
             Message.Query (Handle'Access);
          end loop;

@@ -1,5 +1,10 @@
 # file	line (comments and strings removed, blanks normalized)	literal (a " prefix: inside a string)	category	why
+body_driver.adb	(Driver.Log.Image (Driver.Real (Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Counted (P))), 3));	1	structure	no messages yet: an average over one, of nothing spent
+body_driver.adb	(Driver.Log.Image (Driver.Real (Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Counted (P))), 3));	1000.0	format	seconds to milliseconds
+body_driver.adb	(Driver.Log.Image (Driver.Real (Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Counted (P))), 3));	3	format	digits printed in a log line or a message
 body_driver.adb	Handed : Integer := -1;	1	structure	sentinel: no episode's sentence handed out yet
+body_driver.adb	Next_Report : Positive := 1;	1	structure	the first report at the first beat
+body_driver.adb	Next_Report := 2 * Next_Report;	2	structure	a report at every doubling of the beats: logarithmic in them, as the estimates are made again
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1	math	odd steps turn one way, even steps the other
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the negative sense of turning
 driver-action-contact-search.adb	((if Step mod 2 = 1 then 1.0 else -1.0) * 2.0 * Ada.Numerics.Pi * Real ((Step + 1) / 2) / Real (Steps));	1.0	math	the positive sense of turning
@@ -473,7 +478,9 @@ driver-alignment.ads	Identity_Part : constant Linear_Part := (UU => 1.0, UV => 0
 driver-alignment.ads	Quantization : constant Real := 1.0 / 12.0;	1.0	statistics	a uniform rounding to a whole unit has the variance one twelfth
 driver-alignment.ads	Quantization : constant Real := 1.0 / 12.0;	12.0	statistics	a uniform rounding to a whole unit has the variance one twelfth
 driver-alignment.ads	Window_Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place has two coordinates
+driver-apart.adb	& "" & Driver.Log.Image (Driver.Real (Computing_Took), 2) & ""	2	format	digits printed in a log line or a message
 driver-apart.adb	& "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
+driver-apart.adb	& Driver.Log.Image (Driver.Real (Catching_Up_Took), 2) & "");	2	format	digits printed in a log line or a message
 driver-base64.adb	B1 : constant Natural := (if Have > 1 then Natural (Data (I + 1)) else 0);	1	format	base64 takes three bytes at a time; the second may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
 driver-base64.adb	B2 : constant Natural := (if Have > 2 then Natural (Data (I + 2)) else 0);	2	format	base64 takes three bytes at a time; the third may be missing at the end
@@ -3628,9 +3635,6 @@ driver-robot-look.adb	Rows : constant Vec3 := [1.0, 0.0, 0.0] - Mid (1) * Mid;	1
 driver-robot-look.adb	Step := [for C in 1 .. Size => Step (C) / 2.0];	2.0	structure	halved until it brings the point nearer, as a step is halved elsewhere
 driver-robot-look.adb	Target : constant Vec3 := (1.0 / Scale) * (Inverse (Placement) * X);	1.0	math	from the world into the arm's frame: the inverse of its scale
 driver-robot-look.adb	Turn := (W / 4.0) / Shift;	4.0	structure	a quarter of the picture each way: the middle half of what the eye shows now stays in each view, as the sweep moves the picture by half of it
-driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	1	structure	no wait before the first: told from its second beat
-driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	2	structure	a wait twice the longest before it is told
-driver-robot-motion.adb	Tell_At := 2 * Tell_At;	2	structure	told again at every doubling of the wait
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
@@ -3696,6 +3700,9 @@ driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 els
 driver-robot-motion.adb	Signs : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];	1.0	math	the two directions of a push
 driver-robot-motion.adb	Signs : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];	1.0	math	the two directions of a push
 driver-robot-motion.adb	Start : Real_Array (1 .. 1);	1	structure	one channel
+driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	1	structure	no wait before the first: told from its second beat
+driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	2	structure	a wait twice the longest before it is told
+driver-robot-motion.adb	Tell_At := 2 * Tell_At;	2	structure	told again at every doubling of the wait
 driver-robot-motion.adb	Translation => (1.0 / Scale) * (Back * (Goal.Pose.Translation - Placement.Translation))),	1.0	math	the placement undone: X_arm = Placement' (X_world - centre) / Scale
 driver-robot-motion.adb	Usable : Flag_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Wait : Natural := 1;	1	structure	the beat the move shows in the readings
@@ -3725,8 +3732,8 @@ driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, 
 driver-robot-regression.adb	S := S - 2.0 * B (J) * C (J);	2.0	math	the residual's squares expanded: (y - X b)'(y - X b) = y'y - 2 b'X'y + b'X'X b
 driver-robot-regression.adb	Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);	1.0	math	a zero diagonal entry belongs to a zero row and column, which scaling leaves as it is
 driver-robot-regression.adb	W : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);	1.0	math	the iteration starts from ordinary least squares, every weight one
-driver-robot-regression.adb	if W (I) < 1.0 then	1.0	math	a weight below one took something from its observation: Huber's weights are one within the cut
 driver-robot-regression.adb	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is	1	structure	a count that is no best of many is one test
+driver-robot-regression.adb	if W (I) < 1.0 then	1.0	math	a weight below one took something from its observation: Huber's weights are one within the cut
 driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with a zero scale only exact fits keep their weight
 driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test

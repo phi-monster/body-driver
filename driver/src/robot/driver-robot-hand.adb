@@ -1620,19 +1620,23 @@ package body Driver.Robot.Hand is
          return False;
       end if;
       declare
-         Before : Observation;
-         Now_At, Then_At : Pose_Estimate;
          Least : constant Real := Driver.Robot.Hand.Pressing.Least_Push (M, A, O);
       begin
-         Before.Readings := O.Readings;
-         Before.Readings.Replace_Element
-           (G, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Reading (M, G, Natural (O.Beat) - 1, C)]);
-         Now_At := Tool_In_Arm (M, A, O);
-         Then_At := Tool_In_Arm (M, A, Before);
-         return Least < Real'Last
-           and then abs (Now_At.Pose.Translation - Then_At.Pose.Translation) < Least
-           and then Driver.Numerics.Angle (Transpose (Then_At.Pose.Rotation) * Now_At.Pose.Rotation)
-                      < Driver.Conventions.Z * Driver.Robot.Kinematics.Angle_Sigma (M, A);
+         --  Unknown where the tool's place is not measured; the poses alone otherwise, as Tool_In_Arm gives them (its
+         --  covariances, two a beat for every hand, were a tenth of a kiwi's handling of a beat in its sweeps: the Mac,
+         --  10-22).
+         if Least = Real'Last then
+            return False;
+         end if;
+         declare
+            Now_At  : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference (M, A, O.Readings.Element (G));
+            Then_At : constant Rigid := Driver.Robot.Kinematics.Eye_In_Reference
+              (M, A, [for C in 1 .. Group_Size (M, G) => Driver.Robot.Channels.Reading (M, G, Natural (O.Beat) - 1, C)]);
+         begin
+            return abs (Now_At.Translation - Then_At.Translation) < Least
+              and then Driver.Numerics.Angle (Transpose (Then_At.Rotation) * Now_At.Rotation)
+                         < Driver.Conventions.Z * Driver.Robot.Kinematics.Angle_Sigma (M, A);
+         end;
       end;
    end Arm_At_Rest;
    --  The tool stood still at the beat as far as its pose is known: it moved since the beat before by less than
