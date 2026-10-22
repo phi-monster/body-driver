@@ -787,8 +787,13 @@ package body Driver.Robot.Boot is
                            --  rested there) is tried again at half its shares, as long as some
                            --  share is still a turn the fit counts: a cell need not move every
                            --  joint, and one that always meets something gives no frame at all
-                           --  (A99's arm 1 had no keyframe of several joints for that).
-                           exit when Report.Outcome = Driver.Robot.Motion.Reached;
+                           --  (A99's arm 1 had no keyframe of several joints for that). One that
+                           --  went part of the way is a cell it went to, as a push's level is: a
+                           --  servo stops short of its target by its dead band, and the readings
+                           --  say where. Tried again at half when short, the fake's seed 20
+                           --  (10-22, default options) had 116 of its 120 cells end short and its
+                           --  pairs turned at a quarter of the turns its fit named for them.
+                           exit when Report.Outcome /= Driver.Robot.Motion.Blocked;
                            Scale := Scale / 2.0;
                            exit when (for all K in 1 .. N => Scale * Share (Swept (K)) < Least (Swept (K)));
                         end loop;
@@ -800,12 +805,12 @@ package body Driver.Robot.Boot is
                         --  f16b's cells turned every joint about 4 degrees, a pair's difference under a pixel, and its
                         --  arm 1 was fitted in the wrong order in every pass (4, 1, 5, 2, 6, 3 where it is 5, 4, 1, 2,
                         --  6, 3), its median residual twice the right order's.
-                        if Climb and then Fitted_Now and then Report.Outcome = Driver.Robot.Motion.Reached then
+                        if Climb and then Fitted_Now and then Report.Outcome /= Driver.Robot.Motion.Blocked then
                            loop
                               exit when Cell_Motion (2.0 * Scale) > Half;
                               Scale := 2.0 * Scale;
                               Take_Cell (Scale);
-                              exit when Report.Outcome /= Driver.Robot.Motion.Reached;
+                              exit when Report.Outcome = Driver.Robot.Motion.Blocked;
                            end loop;
                         end if;
                      end;
