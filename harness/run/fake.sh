@@ -32,8 +32,10 @@ LIM=${FAKE_MINUTES:-60}
 # FAKE_RECORD=0: the driver records nothing (a run mined from its log and its dumps keeps no recording; five runs at once
 # wrote 0.75 GB a minute, 10-19), and the run has no replay or score after it. Recorded into a pipe and thrown away, the
 # writes and their flushes were a fifth of the driver's beat (the Mac, 10-22: 588 of 2593 samples of the beat's handling).
-RECORD=(); ZST=
-if [ "${FAKE_RECORD:-1}" = 0 ]; then FAKE_REPLAY=0
+# Nor does the fake write a line of its truth every beat (--truth no): no replay scores against them, and they were 300 MB
+# a humanoid boot.
+RECORD=(); TRUTH=(); ZST=
+if [ "${FAKE_RECORD:-1}" = 0 ]; then FAKE_REPLAY=0; TRUTH=(--truth no)
 else mkfifo "$R/run.rec.fifo"; zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" & ZST=$!; RECORD=(--record "$R/run.rec.fifo")
 fi
 BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING='{"temperature":1.0,"top_p":1.0,"top_k":20,"min_p":0,"presence_penalty":2.0,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'; fi
@@ -42,7 +44,7 @@ INST=(); [ -n "${FAKE_INST:-}" ] && INST=(--inst "$FAKE_INST")
 "$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" ${RECORD[@]+"${RECORD[@]}"} ${BRAIN[@]+"${BRAIN[@]}"} ${INST[@]+"${INST[@]}"} > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -q "listening on port" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
-"$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &
+"$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" ${TRUTH[@]+"${TRUTH[@]}"} "$@" > "$R/fake.log" 2>&1 &
 FAKE=$!
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt "$end" ]; do

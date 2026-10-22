@@ -79,6 +79,7 @@ procedure Fake_Robot is
    Width      : Positive := 320;
    Height     : Positive := 240;
    Beat_Limit : Natural := 100_000;
+   Truth_Lines : Boolean := True;   --  a line of the truth every beat (--truth no: none, for a run that keeps no recording)
    Stop_File  : Unbounded_String;
    Scrambled  : Boolean := True;
    Dump_Every : Natural := 0;
@@ -963,6 +964,9 @@ begin
    --  Beats before the run ends unless given: past any boot the harness lets run (FAKE_MINUTES ends it first), now that a
    --  beat takes milliseconds (k206 on the big machine, 10-22: 100000 beats in 622 s, its arms' sweeps cut short).
    Beat_Limit := Natural'Value (Option ("--beats", "3000000"));
+   --  A run that keeps no recording has no replay to score against the truth's beats: their lines, every pose and
+   --  reading of every beat as text, were 300 MB a humanoid boot of 38000 beats (h403 on the big machine, 10-22).
+   Truth_Lines := Option ("--truth", "yes") /= "no";
    Stop_File := To_Unbounded_String (Option ("--stop"));
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
@@ -1062,7 +1066,9 @@ begin
             Step_Time := Step_Time + (T1 - T0);
             Render_Time := Render_Time + (T2 - T1);
          end if;
-         Write_Truth_Line;
+         if Truth_Lines then
+            Write_Truth_Line;
+         end if;
          Send_Call ("update_obs", True, R);
          if W.Beat = 1 and then Scrambled then
             Write_Scramble_Map;
