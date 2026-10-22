@@ -1666,11 +1666,23 @@ package body Driver.Robot.Hand.Lobes is
                   end Sizes_Of;
                   Large_Here  : constant Real := Large_From (Sizes_Of (Here_Parts));
                   Large_There : constant Real := Large_From (Sizes_Of (There_Parts));
+                  Large_Both  : constant Real := Large_From (Sizes_Of (Here_Parts) & Sizes_Of (There_Parts));
+                  Many_Here   : constant Boolean := Sizes_Of (Here_Parts)'Length > Sizes_Of (There_Parts)'Length;
+                  Many_There  : constant Boolean := Sizes_Of (There_Parts)'Length > Sizes_Of (Here_Parts)'Length;
                begin
                   --  An end with too few parts to part, or none to part, has the other end's size: the fingers
-                  --  are the same at both ends.
-                  Keep_Large (Here_Parts, (if Large_Here > 0.0 then Large_Here else Large_There));
-                  Keep_Large (There_Parts, (if Large_There > 0.0 then Large_There else Large_Here));
+                  --  are the same at both ends. When neither end has parts enough, the two ends' parts are parted
+                  --  together, and only at the end with more of them, whose parts make the lobes: the fewer parts
+                  --  of the other end tell whether its extra part is a finger, as large as theirs, or a piece. A
+                  --  jaw seen from its wrist eye was one part at its low end and, at its high end, one of 11 000
+                  --  pixels beside a piece of 60 on the picture's border; kept as a finger, the piece halved the
+                  --  jaw at the low end between two lobes, and one tip went 86 pixels off (the step 4 bench, seed
+                  --  6, 10-23). The end with fewer parts is not parted: a finger that leaves the picture at one end
+                  --  is a smaller part there than at the other.
+                  Keep_Large (Here_Parts, (if Large_Here > 0.0 then Large_Here elsif Large_There > 0.0 then Large_There
+                                           elsif Many_Here then Large_Both else 0.0));
+                  Keep_Large (There_Parts, (if Large_There > 0.0 then Large_There elsif Large_Here > 0.0 then Large_Here
+                                            elsif Many_There then Large_Both else 0.0));
                end;
                for P of Here_Parts.all loop
                   Kept_Here := Kept_Here + Boolean'Pos (P.Kept > 0);
@@ -1911,6 +1923,13 @@ package body Driver.Robot.Hand.Lobes is
             --  Did not change, still over the poses, of the robot's brightness as given; and of the world's.
             Robot_Like : Mask := Create (W, H);
             World_Like : Mask := Create (W, H);
+            --  Every pixel that did not change and that the poses call still, the robot's and the world's plain
+            --  stretches alike: what a finger is attached to when the caller gives nothing, besides the picture's border.
+            --  Attached to the border alone, a finger that stands on the palm in its eye's picture, as the fingers of a
+            --  pair, a thumb or a five-fingered hand do behind a wrist eye over the palm, was attached to nothing and
+            --  never placed (the step 4 bench, seeds 1-6 of the fake robot, 10-23: 2 of 18 channels placed, 4 tips
+            --  within a pixel of their end faces, the worst 112 px off; attached also to these pixels, 11, 27 and 25 px).
+            Still_Any  : Mask := Create (W, H);
          begin
             for J in 1 .. Total loop
                declare
@@ -1971,6 +1990,7 @@ package body Driver.Robot.Hand.Lobes is
                      if not Contains (Changed, C, R)
                        and then 0.5 * Log (Driver.Pixels.Variance (Anchor, C, R)) < Cut
                      then
+                        Include (Still_Any, C, R);
                         declare
                            Level : constant Natural :=
                              Bin (if Anchored_At_Here then Here_Mean (Index (W, C, R) + 1)
@@ -1989,7 +2009,9 @@ package body Driver.Robot.Hand.Lobes is
                end loop;
             end;
             Release;
-            Result.Lobes := Lobes_Of_Sets (Here_Set, There_Set, Attached, Result.Doubt, Result.Parts_Here, Result.Parts_There);
+            Result.Lobes := Lobes_Of_Sets
+              (Here_Set, There_Set, (if Width (Attached) = W and then Height (Attached) = H then Attached else Still_Any),
+               Result.Doubt, Result.Parts_Here, Result.Parts_There);
             --  The way each lobe goes from Here to There against the way the closer moves the picture there, the
             --  lobes weighed by their pixels: against it, the ends were given each other's pixels.
             if Motion /= null and then not Result.Lobes.Is_Empty then

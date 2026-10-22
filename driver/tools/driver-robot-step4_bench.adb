@@ -361,13 +361,17 @@ procedure Driver.Robot.Step4_Bench is
               Lobes.From_Change (Compared.Changed, Low_View, High_View, Anchor, Anchored_Low, Compared.Spread,
                                  (if Ada.Environment_Variables.Exists ("BENCH_ATTACH_TRUTH") then Own_Still
                                   elsif Ada.Environment_Variables.Exists ("BENCH_ATTACH_STILL") then Still_Attached
+                                  --  BENCH_ATTACH_NONE: attached to the picture's border alone, as before 10-23.
+                                  elsif Ada.Environment_Variables.Exists ("BENCH_ATTACH_NONE")
+                                  then Driver.Images.Create (Width, Height)
                                   else Driver.Images.Create (0, 0)));
          begin
             Put_Line (Prefix & ": " & Located.How'Image & "," & Natural (Located.Lobes.Length)'Image & " lobes for"
                       & Seen (1)'Image & " fingers seen low," & Seen (2)'Image & " high;"
                       & Driver.Images.Count (Compared.Changed)'Image & " px changed (spread "
                       & Image (Compared.Spread) & "), seeds" & Located.Seeds'Image & ", unassigned"
-                      & Located.Unassigned'Image & ", doubt " & Image (Located.Doubt, 1) & ", the "
+                      & Located.Unassigned'Image & ", doubt " & Image (Located.Doubt, 1) & ", parts"
+                      & Located.Parts_Here'Image & " and" & Located.Parts_There'Image & ", the "
                       & (if Anchored_Low then "low" else "high") & " end anchored");
             if Ada.Environment_Variables.Exists ("BENCH_DUMP") then
                declare
@@ -387,6 +391,32 @@ procedure Driver.Robot.Step4_Bench is
                   end loop;
                   Close (F);
                end;
+            end if;
+            --  BENCH_DUMP: each lobe's pixels at each end, as pictures.
+            if Ada.Environment_Variables.Exists ("BENCH_DUMP") then
+               for N in Located.Lobes.First_Index .. Located.Lobes.Last_Index loop
+                  for E in 1 .. 2 loop
+                     declare
+                        M : constant Driver.Images.Mask :=
+                          (if E = 1 then Located.Lobes (N).Here else Located.Lobes (N).There);
+                        F : File_Type;
+                     begin
+                        Create (F, Out_File, Ada.Environment_Variables.Value ("BENCH_DUMP") & "/s" & Trim (Seed) & "_a"
+                                & Trim (A) & "_c" & Trim (K) & "_lobe" & Trim (N) & (if E = 1 then "_low" else "_high")
+                                & ".pgm");
+                        Put_Line (F, "P2");
+                        Put_Line (F, Trim (Width) & " " & Trim (Height));
+                        Put_Line (F, "255");
+                        for Row in 0 .. Height - 1 loop
+                           for Column in 0 .. Width - 1 loop
+                              Put (F, (if Driver.Images.Contains (M, Column, Row) then "255 " else "0 "));
+                           end loop;
+                           New_Line (F);
+                        end loop;
+                        Close (F);
+                     end;
+                  end loop;
+               end loop;
             end if;
             if Located.How /= Lobes.Placed then
                return;

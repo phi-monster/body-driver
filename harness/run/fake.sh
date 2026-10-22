@@ -20,25 +20,35 @@ BIN=${BIN:-$ROOT/driver/bin}
 RUNS=${FAKE_RUNS:-$HOME/fakeruns}
 R=$RUNS/$NAME
 [ -e "$R" ] && { echo "$R already exists; pick another name"; exit 5; }
-mkdir -p "$R/bin"
+mkdir -p "$R"
 # FAKE_BODY: a body file the driver starts from (what an earlier run of the same seed measured), copied in.
 [ -n "${FAKE_BODY:-}" ] && cp "$FAKE_BODY" "$R/body.json"
 # The run keeps its own copies of the tools, so a build during the run changes nothing it runs or scores with.
-cp -p "$BIN/body_driver" "$BIN/fake_robot" "$BIN/replay" "$BIN/score" "$R/bin/"
+# FAKE_BIN_FROZEN=1: BIN is a build no one builds into again (the race's, harness/race), linked instead: 129 MB a run
+# copied filled the big machine's 59 GB free in 18 minutes of the race (10-23).
+if [ "${FAKE_BIN_FROZEN:-0}" = 1 ]; then ln -s "$(cd "$BIN" && pwd -P)" "$R/bin"
+else mkdir -p "$R/bin"; cp -p "$BIN/body_driver" "$BIN/fake_robot" "$BIN/replay" "$BIN/score" "$R/bin/"
+fi
 PORT=${FAKE_PORT:-$((9500 + SEED % 400))}
 LIM=${FAKE_MINUTES:-60}
 { echo "seed $SEED"; echo "port $PORT"; echo "driver $(md5 -q "$BIN/body_driver" 2>/dev/null || md5sum "$BIN/body_driver" | cut -d' ' -f1)";
   echo "options $*"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
+# FAKE_TRUTH=1: with FAKE_RECORD=0, the fake writes its truth every beat all the same (a task's lift is judged on it).
 # FAKE_RECORD=0: the driver records nothing (a run mined from its log and its dumps keeps no recording; five runs at once
 # wrote 0.75 GB a minute, 10-19), and the run has no replay or score after it. Recorded into a pipe and thrown away, the
 # writes and their flushes were a fifth of the driver's beat (the Mac, 10-22: 588 of 2593 samples of the beat's handling).
 # Nor does the fake write a line of its truth every beat (--truth no): no replay scores against them, and they were 300 MB
 # a humanoid boot.
 RECORD=(); TRUTH=(); ZST=
-if [ "${FAKE_RECORD:-1}" = 0 ]; then FAKE_REPLAY=0; TRUTH=(--truth no)
+if [ "${FAKE_RECORD:-1}" = 0 ]; then FAKE_REPLAY=0; [ "${FAKE_TRUTH:-0}" = 1 ] || TRUTH=(--truth no)
 else mkfifo "$R/run.rec.fifo"; zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" & ZST=$!; RECORD=(--record "$R/run.rec.fifo")
 fi
-BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING='{"temperature":1.0,"top_p":1.0,"top_k":20,"min_p":0,"presence_penalty":2.0,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'; fi
+# The brain samples by the model card's settings for Qwen3.5 without thinking, general tasks (docs/brain-service.md;
+# huggingface.co/Qwen/Qwen3.5-9B, read 10-23): 1.0, 1.0 and a presence penalty of 2.0 (from 10-15, no reason kept) are
+# no set the card gives, and the 9B wrote words broken apart and ran away at line 65 of its first program with a hand
+# (k204sb of the race, 10-23). FAKE_SAMPLING replaces them.
+CARD='{"temperature":0.7,"top_p":0.8,"top_k":20,"min_p":0,"presence_penalty":1.5,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'
+BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING="${FAKE_SAMPLING:-$CARD}"; fi
 # FAKE_INST=HOST:PORT: the instrument service (harness/instruments/serve.py; segmentation only by default), as the kiwi runs it.
 INST=(); [ -n "${FAKE_INST:-}" ] && INST=(--inst "$FAKE_INST")
 "$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" ${RECORD[@]+"${RECORD[@]}"} ${BRAIN[@]+"${BRAIN[@]}"} ${INST[@]+"${INST[@]}"} > "$R/driver.log" 2>&1 &

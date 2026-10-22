@@ -4130,39 +4130,49 @@ package body Driver.Robot.Tests is
          return;
       end if;
       GNAT.OS_Lib.Close (FD);
-      GNAT.OS_Lib.Delete_File (Name.all, Gone);   --  the boot finds no body file to reload
-      Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, File => Name.all, Stop_Once_Kept => True);
-      Check (not Done, "the boot finished before a body file was left to stop it at");
-      Check (GNAT.OS_Lib.Is_Regular_File (Name.all),
-             "a boot that died during the arms' sweeps left no body file, though it had recognized the body");
-      if GNAT.OS_Lib.Is_Regular_File (Name.all) then
-         Load_Body (Back, Name.all, Ok, Why);
-         Check (Ok, "the body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
-         Check (Reloaded (Back, Stored_Graph), "the recognized body was not reloaded");
-         Check (Role (Back, 1) = Arm and then Role (Back, 2) = Arm and then Role (Back, 4) = Part,
-                "the reloaded body has other roles than the boot recognized: " & Role (Back, 1)'Image & ", "
-                & Role (Back, 2)'Image & ", " & Role (Back, 4)'Image);
-         Check (Eye_Mount (Back, 1) = Eye_Mount (M, 1) and then Eye_Mount (Back, 2) = Eye_Mount (M, 2),
-                "the reloaded body mounts its eyes elsewhere");
-         --  And the turns at which the recognition saw each channel move an eye, from which the sweeps begin: a boot
-         --  begun from the file without them swept from the least turn a keyframe counts, which moved no view, and
-         --  left those joints as not moving the eye (f16e on 10-15).
-         Check ((for some G in 1 .. Group_Count (M) => (for some X of M.Groups (Group_Id (G)).Seen_At => X > 0.0)),
-                "the boot recognized no channel an eye saw move");
-         for G in 1 .. Group_Count (M) loop
-            declare
-               Was : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Seen_At;
-               Now : Real_Vectors.Vector renames Back.Groups (Group_Id (G)).Seen_At;
-            begin
-               Check (Natural (Now.Length) = Natural (Was.Length)
-                      and then (for all C in Was.First_Index .. Was.Last_Index =>
-                                  abs (Now (C) - Was (C)) <= 1.0E-9 * abs Was (C)),
-                      "group" & G'Image & "'s turns its recognition saw it move an eye at were not reloaded");
-            end;
-         end loop;
-         GNAT.OS_Lib.Delete_File (Name.all, Gone);
-      end if;
-      Check (not GNAT.OS_Lib.Is_Regular_File (Name.all & ".part"), "a write left its half behind");
+      --  The body file is the scratch file's name with a suffix, which no one has yet: the boot finds no body file to
+      --  reload. The scratch file stays, so that no other selftest makes one of its name meanwhile: the suite runs
+      --  them side by side in one folder, each counting its scratch names from the same first, and the scratch file
+      --  this test used to delete for its boot to find nothing was the next test's to make, and to write over this
+      --  boot's body file (the big machine's suite, 10-22 and 10-23: "not a body file: expected a value at
+      --  character 1"; alone it passes).
+      declare
+         Body_Name : constant String := Name.all & ".body";
+      begin
+         Boot_On_Rig (M, False, Done, Ok, Beats, Poses, Poses_2, File => Body_Name, Stop_Once_Kept => True);
+         Check (not Done, "the boot finished before a body file was left to stop it at");
+         Check (GNAT.OS_Lib.Is_Regular_File (Body_Name),
+                "a boot that died during the arms' sweeps left no body file, though it had recognized the body");
+         if GNAT.OS_Lib.Is_Regular_File (Body_Name) then
+            Load_Body (Back, Body_Name, Ok, Why);
+            Check (Ok, "the body file was not loaded: " & Ada.Strings.Unbounded.To_String (Why));
+            Check (Reloaded (Back, Stored_Graph), "the recognized body was not reloaded");
+            Check (Role (Back, 1) = Arm and then Role (Back, 2) = Arm and then Role (Back, 4) = Part,
+                   "the reloaded body has other roles than the boot recognized: " & Role (Back, 1)'Image & ", "
+                   & Role (Back, 2)'Image & ", " & Role (Back, 4)'Image);
+            Check (Eye_Mount (Back, 1) = Eye_Mount (M, 1) and then Eye_Mount (Back, 2) = Eye_Mount (M, 2),
+                   "the reloaded body mounts its eyes elsewhere");
+            --  And the turns at which the recognition saw each channel move an eye, from which the sweeps begin: a boot
+            --  begun from the file without them swept from the least turn a keyframe counts, which moved no view, and
+            --  left those joints as not moving the eye (f16e on 10-15).
+            Check ((for some G in 1 .. Group_Count (M) => (for some X of M.Groups (Group_Id (G)).Seen_At => X > 0.0)),
+                   "the boot recognized no channel an eye saw move");
+            for G in 1 .. Group_Count (M) loop
+               declare
+                  Was : Real_Vectors.Vector renames M.Groups (Group_Id (G)).Seen_At;
+                  Now : Real_Vectors.Vector renames Back.Groups (Group_Id (G)).Seen_At;
+               begin
+                  Check (Natural (Now.Length) = Natural (Was.Length)
+                         and then (for all C in Was.First_Index .. Was.Last_Index =>
+                                     abs (Now (C) - Was (C)) <= 1.0E-9 * abs Was (C)),
+                         "group" & G'Image & "'s turns its recognition saw it move an eye at were not reloaded");
+               end;
+            end loop;
+            GNAT.OS_Lib.Delete_File (Body_Name, Gone);
+         end if;
+         Check (not GNAT.OS_Lib.Is_Regular_File (Body_Name & ".part"), "a write left its half behind");
+      end;
+      GNAT.OS_Lib.Delete_File (Name.all, Gone);
    end Boot_Keeps_What_It_Measured;
 
    --  The rig of a joint read exactly (noise 1e-13) whose reading settles a

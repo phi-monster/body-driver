@@ -551,6 +551,10 @@ package body Driver.Robot.Boot is
                type Stop is (Climbing, Not_Followed, Blocked, Widest, Unseen);
                Offset  : Real_Array (1 .. 2 * Size) := [others => 0.0];
                State   : array (1 .. 2 * Size) of Stop := [others => Blocked];
+               --  Per push: the farthest a level of it asked, and the farthest along the push its channel's reading stood
+               --  after one, from Start: what tells a level that took the joint no farther than one before it (Take).
+               Asked_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
+               Along_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
                --  A ladder that went down from a lost first level to the least turn and followed nothing on the way is tried
@@ -668,7 +672,32 @@ package body Driver.Robot.Boot is
                      --  default options) ended its push: 0.48 to 0.75 of each delivered, the arm swept in one
                      --  pass and never fitted. A step that moved it no way along its ask is where something
                      --  stops it.
-                     Mark.Short := Report.Outcome = Driver.Robot.Motion.Blocked;
+                     --  Where the channel stands along the push now, by its reading: a level asked farther than any before
+                     --  it that left the channel no farther along than one before it did, by a change the one test of
+                     --  motion sees, met the joint's end from this pose, however the step judged itself: a servo stopped
+                     --  at its end delivers part of the ask and reads Short, as one its dead band stops short of a level
+                     --  it can reach does. t502 of the race (10-23): channel 4's ladder doubled once a pass from pass 4
+                     --  to pass 63, its asks to 1.1E19 units, no level of it framed, the view's motion per unit of the
+                     --  joint never measured, so no level was the widest either.
+                     declare
+                        Further : Boolean := False;
+                        Along   : Real := 0.0;
+                        procedure Read_Along is
+                           D : Real_Array (1 .. Size) := [others => 0.0];
+                        begin
+                           if M.Beats > 0 then
+                              Along := P.Sign * (Channels.Reading (M, G, M.Beats - 1, P.Channel) - Start (P.Channel));
+                              D (P.Channel) := Along - Along_Most (I);
+                              Further := Along > Along_Most (I) and then Channels.Visible (M, G, D);
+                           end if;
+                        end Read_Along;
+                     begin
+                        Driver.Beats.Within_A_Beat (Read_Along'Access);
+                        Mark.Short := Report.Outcome = Driver.Robot.Motion.Blocked
+                          or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further);
+                        Asked_Most (I) := Real'Max (Asked_Most (I), Off);
+                        Along_Most (I) := Real'Max (Along_Most (I), Along);
+                     end;
                      if Report.Outcome /= Driver.Robot.Motion.Reached then
                         Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " push c"
                                          & Driver.Log.Image (P.Channel)
@@ -1177,9 +1206,23 @@ package body Driver.Robot.Boot is
                      declare
                         Stops : Ada.Strings.Unbounded.Unbounded_String;
                      begin
+                        --  A push still climbing says where its next level stands: t502 of the race (10-23) climbed
+                        --  two pushes through 55 passes that followed nothing, and the log said only "climbing".
                         for I in 1 .. Count loop
                            Ada.Strings.Unbounded.Append
                              (Stops, " " & Ada.Characters.Handling.To_Lower (State (I)'Image));
+                           if State (I) = Climbing then
+                              Ada.Strings.Unbounded.Append
+                                (Stops, " (c" & Driver.Log.Image (Order (I).Channel)
+                                        & (if Order (I).Sign > 0.0 then "+" else "-") & " next at "
+                                        & Driver.Log.Image (Offset (I), 4) & ", "
+                                        & Driver.Log.Image (Natural (Levels (I).Length)) & " levels this pass, the last "
+                                        & (if Levels (I).Is_Empty then "none"
+                                           elsif Levels (I).Last_Element.Followed then "followed"
+                                           elsif Levels (I).Last_Element.Framed then "framed, not followed"
+                                           else "not framed")
+                                        & ")");
+                           end if;
                         end loop;
                         Driver.Log.Line
                           (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image & " followed"

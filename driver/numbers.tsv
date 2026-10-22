@@ -1077,6 +1077,7 @@ driver-robot-boot.adb	& (if P.Sign > 0.0 then "" else "") & "" & Driver.Log.Imag
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Unswept.Length = 1 then "" else "" & Unswept.Length'Image	1	structure	one arm left to sweep: nothing to say of the others
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3)	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Offset (I), 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Pose (Swept (Turned (J))) - Start (Swept (Turned (J))), 3));	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Later), 3) & "");	3	format	digits printed in a log line or a message
@@ -1092,7 +1093,9 @@ driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Shar
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	2	math	the parity of the bits two indices share (Sylvester-Hadamard)
 driver-robot-boot.adb	/ 2.0;	2.0	structure	a view keeps half of itself in sight while turning by half
 driver-robot-boot.adb	Ada.Strings.Unbounded.Append (Text, "" & Driver.Log.Image (V, 3));	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	Along_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Arm : Arm_Id := 1;	1	structure	the default of a record field, overwritten where a pair is found
+driver-robot-boot.adb	Asked_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Descending : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	two pushes per joint, one each way
