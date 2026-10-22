@@ -960,7 +960,9 @@ begin
    Out_Dir := To_Unbounded_String (Option ("--out"));
    Width := Positive'Value (Option ("--width", "320"));
    Height := Positive'Value (Option ("--height", "240"));
-   Beat_Limit := Natural'Value (Option ("--beats", "100000"));
+   --  Beats before the run ends unless given: past any boot the harness lets run (FAKE_MINUTES ends it first), now that a
+   --  beat takes milliseconds (k206 on the big machine, 10-22: 100000 beats in 622 s, its arms' sweeps cut short).
+   Beat_Limit := Natural'Value (Option ("--beats", "3000000"));
    Stop_File := To_Unbounded_String (Option ("--stop"));
    Scrambled := Option ("--scramble", "1") /= "0";
    Dump_Every := Natural'Value (Option ("--dump", "0"));
