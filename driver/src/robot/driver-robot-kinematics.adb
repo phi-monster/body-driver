@@ -905,11 +905,14 @@ package body Driver.Robot.Kinematics is
       Step      : constant Real := Ada.Numerics.Long_Elementary_Functions."**" (Real'Model_Epsilon, 1.0 / 3.0);
 
       --  Where the eye stands at the readings under each order of the joints the fit does not tell from its own
-      --  (Arm_Fit.Untold_Orders), its joints as fitted: a point is as uncertain as the farthest of them puts it.
+      --  (Arm_Fit.Untold_Orders), its joints as fitted: a point is as uncertain as the farthest of them puts it. None
+      --  where the arm is not fitted: its joints are what a fit that failed left, and taken at a keyframe they stopped
+      --  the estimates (t103, seed 103 of the default fake robot on the big machine, 10-22: arm 1 not fitted, its
+      --  focal length 53 +- 38 px, six orders untold; the next keyframe's offer raised ARGUMENT_ERROR in Eye_At).
       Size      : constant Natural := Readings'Length;
       Orders    : constant Natural :=
-        (if not R.Result.Order_Told and then Size > 0 and then Natural (R.Result.Joints.Length) = Size
-           and then Natural (R.Result.Reference.Length) = Size
+        (if R.Result.Fitted and then not R.Result.Order_Told and then Size > 0
+           and then Natural (R.Result.Joints.Length) = Size and then Natural (R.Result.Reference.Length) = Size
          then Natural (R.Result.Untold_Orders.Length) / Size else 0);
       type Pose_List is array (Positive range <>) of Rigid;
       function Untold_Poses return Pose_List is
