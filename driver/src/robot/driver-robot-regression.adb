@@ -3,6 +3,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
+with Driver.Numerics.Dense;
 with Driver.Stats;
 
 package body Driver.Robot.Regression is
@@ -28,7 +29,9 @@ package body Driver.Robot.Regression is
    --  scaled to a unit diagonal (D^-1 A D^-1, inverted back with D^-1 on both
    --  sides), so what counts as round-off does not depend on the units of the
    --  regressors: a column a billion times larger than another must not make
-   --  the other one look like zero.
+   --  the other one look like zero. Its eigensystem is Small_Eigensystem's, the standard one's arrays on the secondary
+   --  stack and its software square root spared: a lock-in of a humanoid's 30 channels took 8.3 s an eye over its 766
+   --  weighted solves (h401 on the big machine, 10-22: 608 rows, 255 cells).
    procedure Pseudo_Inverse (A : Real_Matrix; Inverse : out Real_Matrix; Rank : out Natural) is
       N       : constant Natural := A'Length (1);
       Scale   : Real_Vector (1 .. N);
@@ -54,7 +57,8 @@ package body Driver.Robot.Regression is
             S (I, J) := A (A'First (1) + I - 1, A'First (2) + J - 1) / (Scale (I) * Scale (J));
          end loop;
       end loop;
-      Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);
+      --  S is symmetric to the bit: A is, and so are the scales' products.
+      Driver.Numerics.Dense.Small_Eigensystem (S, Values, Vectors);
       for V of Values loop
          Largest := Real'Max (Largest, abs V);
       end loop;
@@ -429,35 +433,52 @@ package body Driver.Robot.Regression is
       return Result;
    end Explained_Nonnegative;
 
-   function Coefficient_Variances (F : Fit) return Real_Array is
+   function Covariance_Of (F : Fit) return Real_Matrix is
       Inv    : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
       Rank   : Natural;
-      Result : Real_Array (1 .. F.Columns);
+      Result : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
    begin
       Pseudo_Inverse (F.Normal, Inv, Rank);
+      for I in Result'Range (1) loop
+         for J in Result'Range (2) loop
+            Result (I, J) := F.Scale * F.Scale * Inv (I, J);
+         end loop;
+      end loop;
+      return Result;
+   end Covariance_Of;
+
+   function Coefficient_Variances (F : Fit; Cov : Real_Matrix) return Real_Array is
+      Result : Real_Array (1 .. F.Columns);
+   begin
       for J in Result'Range loop
-         Result (J) := F.Scale * F.Scale * Inv (J, J);
+         Result (J) := Cov (Cov'First (1) + J - 1, Cov'First (2) + J - 1);
       end loop;
       return Result;
    end Coefficient_Variances;
 
-   procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural) is
-      K    : constant Natural := Last - First + 1;
-      Inv  : Real_Matrix (1 .. F.Columns, 1 .. F.Columns);
-      Rank : Natural;
-      Cov  : Real_Matrix (1 .. K, 1 .. K);
-      Cinv : Real_Matrix (1 .. K, 1 .. K);
-      Beta : Real_Vector (1 .. K);
+   function Coefficient_Variances (F : Fit) return Real_Array is (Coefficient_Variances (F, Covariance_Of (F)));
+
+   procedure Test_Block
+     (F : Fit; Cov : Real_Matrix; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
+   is
+      K     : constant Natural := Last - First + 1;
+      Block : Real_Matrix (1 .. K, 1 .. K);
+      Cinv  : Real_Matrix (1 .. K, 1 .. K);
+      Beta  : Real_Vector (1 .. K);
    begin
-      Pseudo_Inverse (F.Normal, Inv, Rank);
       for I in 1 .. K loop
          Beta (I) := F.Beta (First + I - 1);
          for J in 1 .. K loop
-            Cov (I, J) := F.Scale * F.Scale * Inv (First + I - 1, First + J - 1);
+            Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);
          end loop;
       end loop;
-      Pseudo_Inverse (Cov, Cinv, Freedom);
+      Pseudo_Inverse (Block, Cinv, Freedom);
       Statistic := (if Freedom = 0 then 0.0 else Beta * (Cinv * Beta));
+   end Test_Block;
+
+   procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural) is
+   begin
+      Test_Block (F, Covariance_Of (F), First, Last, Statistic, Freedom);
    end Test_Block;
 
 end Driver.Robot.Regression;

@@ -49,12 +49,23 @@ private package Driver.Robot.Regression is
    --  many of the b came out positive: R squared, for an F test of a fit in
    --  which every regressor can only add to Y.
 
+   function Covariance_Of (F : Fit) return Real_Matrix
+     with Post => Covariance_Of'Result'Length (1) = F.Columns and then Covariance_Of'Result'Length (2) = F.Columns;
+   --  The coefficients' covariance: Scale ** 2 times the pseudo-inverse of Normal. Made once for a fit and given to
+   --  each of its tests below: each made it anew, and the lock-in tests every group and every column of each cell's
+   --  two fits (a humanoid's 30 channels: some 64 pseudo-inverses of 31 by 31 a cell, 510 cells an estimate).
+
    function Coefficient_Variances (F : Fit) return Real_Array;
-   --  The variance of each coefficient: Scale ** 2 times the diagonal of the
-   --  pseudo-inverse of Normal.
+   function Coefficient_Variances (F : Fit; Cov : Real_Matrix) return Real_Array
+     with Pre => Cov'Length (1) = F.Columns and then Cov'Length (2) = F.Columns;
+   --  The variance of each coefficient: the diagonal of the covariance (Covariance_Of, or Cov made by it).
 
    procedure Test_Block (F : Fit; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
      with Pre => First <= Last and then Last <= F.Columns;
+   procedure Test_Block
+     (F : Fit; Cov : Real_Matrix; First, Last : Positive; Statistic : out Real; Freedom : out Natural)
+     with Pre => First <= Last and then Last <= F.Columns
+                 and then Cov'Length (1) = F.Columns and then Cov'Length (2) = F.Columns;
    --  The Wald statistic of coefficients First .. Last against zero, with
    --  the covariance Scale ** 2 times the pseudo-inverse of Normal, and its
    --  degrees of freedom (the numerical rank of that block). Statistics of

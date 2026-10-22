@@ -772,6 +772,9 @@ package body Driver.Robot.Lockin is
                               Floor : constant Real := Driver.Stats.Median (Floors.all);
                               Fu    : constant Regression.Fit := Regression.Solve (Xc.all, U.all, Floor);
                               Fv    : constant Regression.Fit := Regression.Solve (Xc.all, V.all, Floor);
+                              --  Each fit's covariance, made once for all its tests below (Regression.Covariance_Of).
+                              Cov_U : constant Real_Matrix := Regression.Covariance_Of (Fu);
+                              Cov_V : constant Real_Matrix := Regression.Covariance_Of (Fv);
                            begin
                               Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);
                               Passes_Of (Cell) := Fu.Passes + Fv.Passes;
@@ -794,8 +797,8 @@ package body Driver.Robot.Lockin is
                                           Su, Sv : Real;
                                           Ku, Kv : Natural;
                                        begin
-                                          Regression.Test_Block (Fu, First, Last, Su, Ku);
-                                          Regression.Test_Block (Fv, First, Last, Sv, Kv);
+                                          Regression.Test_Block (Fu, Cov_U, First, Last, Su, Ku);
+                                          Regression.Test_Block (Fv, Cov_V, First, Last, Sv, Kv);
                                           Responding (Cell, G) :=
                                             Ku + Kv > 0
                                             and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv)
@@ -816,8 +819,8 @@ package body Driver.Robot.Lockin is
                                     Ku, Kv : Natural;
                                     Col    : constant Group_Id := Group_Id (K);
                                  begin
-                                    Regression.Test_Block (Fu, K + 1, K + 1, Su, Ku);
-                                    Regression.Test_Block (Fv, K + 1, K + 1, Sv, Kv);
+                                    Regression.Test_Block (Fu, Cov_U, K + 1, K + 1, Su, Ku);
+                                    Regression.Test_Block (Fv, Cov_V, K + 1, K + 1, Sv, Kv);
                                     Col_Responding (Cell, Col) :=
                                       Ku + Kv > 0
                                       and then Driver.Distributions.Chi_Square_Deviate (Su + Sv, Ku + Kv) > Driver.Conventions.Z;
@@ -830,8 +833,8 @@ package body Driver.Robot.Lockin is
                               --  what estimating it adds on average (its own variance in
                               --  those units), where the cell responds to its group.
                               declare
-                                 Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
-                                 Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
+                                 Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu, Cov_U);
+                                 Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv, Cov_V);
                               begin
                                  for K in 1 .. Kept loop
                                     if Var_U (K + 1) > 0.0 and then Var_V (K + 1) > 0.0

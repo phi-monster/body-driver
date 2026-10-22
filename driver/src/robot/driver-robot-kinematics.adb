@@ -1419,12 +1419,13 @@ package body Driver.Robot.Kinematics is
                            declare
                               Fu    : constant Regression.Fit := Regression.Solve (X, Yu, 1.0);
                               Fv    : constant Regression.Fit := Regression.Solve (X, Yv, 1.0);
-                              Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu);
+                              Cov_U : constant Real_Matrix := Regression.Covariance_Of (Fu);
+                              Var_U : constant Real_Array := Regression.Coefficient_Variances (Fu, Cov_U);
                               Var_V : constant Real_Array := Regression.Coefficient_Variances (Fv);
                               Stat  : Real;
                               Rank  : Natural;
                            begin
-                              Regression.Test_Block (Fu, 1, Kp, Stat, Rank);
+                              Regression.Test_Block (Fu, Cov_U, 1, Kp, Stat, Rank);
                               if Rank = Kp then
                                  for Row in 1 .. Rows loop
                                     declare

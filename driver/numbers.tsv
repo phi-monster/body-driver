@@ -3408,7 +3408,7 @@ driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the f
 driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured yet
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	1.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	2.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
-driver-robot-kinematics.adb	Regression.Test_Block (Fu, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
+driver-robot-kinematics.adb	Regression.Test_Block (Fu, Cov_U, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Res_N : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Res_Sq : Real_Access := new Real_Array'(1 .. Natural'Max (1, Frame_Count) => 0.0);	1	format	digits printed in a log line or a message
@@ -3716,7 +3716,8 @@ driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Coun
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));	2	math	P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p))) for F with 2 k and 2 (n - k + 1) degrees of freedom
 driver-robot-regression.adb	Alpha : Real := 1.0;	1.0	math	the whole step to the restricted least-squares solution, cut back where a coefficient would turn negative
-driver-robot-regression.adb	Eigensystem ((S + Transpose (S)) / 2.0, Values, Vectors);	2.0	numerics	symmetrizing removes round-off asymmetry before the eigendecomposition
+driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);	2	structure	the block's rows and the fit's coefficients both counted from one: the block's I-th is the covariance's First + I - 1, its first one less
+driver-robot-regression.adb	Block (I, J) := Cov (Cov'First (1) + First + I - 2, Cov'First (2) + First + J - 2);	2	structure	the block's columns and the fit's coefficients both counted from one: the block's J-th is the covariance's First + J - 1, its first one less
 driver-robot-regression.adb	Scale (J) := (if D > 0.0 then Sqrt (D) else 1.0);	1.0	math	a zero diagonal entry belongs to a zero row and column, which scaling leaves as it is
 driver-robot-regression.adb	W : Real_Access := new Real_Array'(1 .. X'Length (1) => 1.0);	1.0	math	the iteration starts from ordinary least squares, every weight one
 driver-robot-regression.adb	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean is	1	structure	a count that is no best of many is one test
