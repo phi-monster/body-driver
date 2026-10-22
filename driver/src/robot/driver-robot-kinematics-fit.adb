@@ -1139,28 +1139,69 @@ package body Driver.Robot.Kinematics.Fit is
                   --  again changed them by no more than the unchanged fraction, the widest halvings, each holding the
                   --  joint's smaller turns alike, could end it before the slack: seed 26 (10-22) measured its wrist
                   --  pitch's half slack as none at 47 keyframes, the fake's 8.8.
-                  while H > Most (J) * Real'Model_Epsilon loop
+                  --  The ladder's squares as many at once as the workers take (Driver.Parallel_For, each halving's three
+                  --  places), then judged in its order, as one at a time judges them, until a halving cannot be told
+                  --  from no slack: the same slack whatever the workers, a batch's squares past the end unused. One at
+                  --  a time, the measure took half of a step 2 fit replayed (k202's arm 1 at 147 keyframes, the Mac,
+                  --  10-22: 5000 of the main task's 9400 samples).
+                  declare
+                     Levels : Natural := 0;
+                  begin
+                     while H > Most (J) * Real'Model_Epsilon loop
+                        Levels := Levels + 1;
+                        H := H / 2.0;
+                     end loop;
                      declare
-                        Least : Real := Real'Last;
+                        Heights : Real_Array (1 .. Levels);
+                        E       : array (1 .. Levels, -1 .. 1) of Real := [others => [others => Real'Last]];
+                        Judged  : Natural := 0;
+                        Ended   : Boolean := False;
+                        procedure Evaluate (Item : Positive) is
+                           Level : constant Positive := Judged + (Item - 1) / 3 + 1;
+                           Side  : constant Integer := (Item - 1) mod 3 - 1;
+                           Trial : Real_Array := Slack;
+                        begin
+                           Trial (2 * J - 1) := Heights (Level);
+                           Trial (2 * J) := Real (Side) * Heights (Level);
+                           E (Level, Side) := Squares (Trial);
+                        end Evaluate;
+                        procedure Evaluate_All is new Driver.Parallel_For (Evaluate);
                      begin
-                        for Side in -1 .. 1 loop
-                           Slack (2 * J - 1) := H;
-                           Slack (2 * J) := Real (Side) * H;
+                        if Levels > 0 then
+                           Heights (1) := Most (J);
+                           for K in 2 .. Levels loop
+                              Heights (K) := Heights (K - 1) / 2.0;
+                           end loop;
+                        end if;
+                        while Judged < Levels and then not Ended loop
                            declare
-                              E : constant Real := Squares (Slack);
+                              Take : constant Positive :=
+                                Natural'Min (Levels - Judged, (Driver.Workers.Size + 2) / 3);
                            begin
-                              Least := Real'Min (Least, E);
-                              if E < Here then
-                                 Here := E;
-                                 Best_H := H;
-                                 Best_P := Real (Side) * H;
-                              end if;
+                              Evaluate_All (1, 3 * Take);
+                              for Level in Judged + 1 .. Judged + Take loop
+                                 declare
+                                    Least : Real := Real'Last;
+                                 begin
+                                    for Side in -1 .. 1 loop
+                                       Least := Real'Min (Least, E (Level, Side));
+                                       if E (Level, Side) < Here then
+                                          Here := E (Level, Side);
+                                          Best_H := Heights (Level);
+                                          Best_P := Real (Side) * Heights (Level);
+                                       end if;
+                                    end loop;
+                                    if abs (Least - None) <= Tells then
+                                       Ended := True;
+                                       exit;
+                                    end if;
+                                 end;
+                              end loop;
+                              Judged := Judged + Take;
                            end;
                         end loop;
-                        exit when abs (Least - None) <= Tells;
                      end;
-                     H := H / 2.0;
-                  end loop;
+                  end;
                   if Best - Here > Tells then
                      Slack (2 * J - 1) := Best_H;
                      Slack (2 * J) := Best_P;
@@ -1193,8 +1234,8 @@ package body Driver.Robot.Kinematics.Fit is
       Slack_From   : Real_Array := No_Slack)
    is
       N         : constant Natural := Joints'Length;
-      --  The joints' gears' slack is fitted where Play gives the readings' way between the keyframes (Fit): a half
-      --  slack a joint and where its slack stood at the reference, the seventh and eighth of its parameters.
+      --  The joints' gears' slack is fitted where Play gives the readings' way between the keyframes (Fit): a joint's
+      --  slack's room above where it stood at the reference and below it, the seventh and eighth of its parameters.
       Slacked   : constant Boolean :=
         Play.Frames > 0 and then Play.Frames = Changes'Length (1) and then Play.Joints = N;
       --  The focal lengths the fit is given are the focal search's (stage 1), told within Focal_Within in the
@@ -1209,8 +1250,8 @@ package body Driver.Robot.Kinematics.Fit is
       S         : constant Natural := Sight'Length;
       Per_Joint : constant Positive := (if Slacked then 8 else 6);
       --  A joint's terms in the reduced set the covariance is made in: its tilt (2), its point across its axis (2), its
-      --  reading scale (1) and, slacked, its half slack and where its slack stood at the reference (2), which the
-      --  covariance reported leaves out (marginal).
+      --  reading scale (1) and, slacked, its slack's room above and below where it stood at the reference (2), which
+      --  the covariance reported leaves out (marginal).
       Per_Reduced : constant Positive := (if Slacked then 7 else 5);
       --  Whether the reduced set's term P is one the covariance reports: every term but the slack's.
       function Reported (P : Positive) return Boolean is
@@ -1299,11 +1340,29 @@ package body Driver.Robot.Kinematics.Fit is
          return Out_J;
       end Joints_Of;
 
-      --  The joints' half slacks and places at the reference among the parameters X, two a joint; nought where not
-      --  slacked.
+      --  The joints' half slacks and places at the reference, two a joint, from the parameters X; nought where not
+      --  slacked. A joint's two parameters are its slack's room above its place at the reference and below it, each
+      --  no less than nought: bounds a step can hold each on apart (Refine's damped solve). Fitted as the half slack
+      --  and the place within it, the place stood on its bound at every joint of k202's arm 1 (the big machine's r19,
+      --  10-22), every step across it was cut back to it, and the descent crept: its damping climbed to 64, and every
+      --  pass after the fourth ended at its 53 rounds still lowering the cost by a tenth a round, 742 rounds in all.
       function Slack_Of (X : Real_Array) return Real_Array is
-        ([for K in 1 .. 2 * N =>
-           (if Slacked then X (X'First + 6 + Per_Joint * ((K - 1) / 2) + 6 + (K - 1) mod 2) else 0.0)]);
+         Result : Real_Array (1 .. 2 * N) := [others => 0.0];
+      begin
+         if Slacked then
+            for J in 1 .. N loop
+               declare
+                  O     : constant Natural := X'First + 6 + Per_Joint * (J - 1) + 6;
+                  Above : constant Real := Real'Max (0.0, X (O));
+                  Below : constant Real := Real'Max (0.0, X (O + 1));
+               begin
+                  Result (2 * J - 1) := (Above + Below) / 2.0;
+                  Result (2 * J) := (Below - Above) / 2.0;
+               end;
+            end loop;
+         end if;
+         return Result;
+      end Slack_Of;
 
       procedure To_X (Lx : Lens; Jx : Joint_Array; Slack : Real_Array; X : out Real_Array) is
       begin
@@ -1319,8 +1378,14 @@ package body Driver.Robot.Kinematics.Fit is
                X (O + 4) := Jx (Jx'First + J - 1).P (3);
                X (O + 5) := Jx (Jx'First + J - 1).C;
                if Slacked then
-                  X (O + 6) := Slack (Slack'First + 2 * J - 2);
-                  X (O + 7) := Slack (Slack'First + 2 * J - 1);
+                  --  The room above the place and below it (Slack_Of).
+                  declare
+                     Half  : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));
+                     Place : constant Real := Real'Max (-Half, Real'Min (Half, Slack (Slack'First + 2 * J - 1)));
+                  begin
+                     X (O + 6) := Half - Place;
+                     X (O + 7) := Half + Place;
+                  end;
                end if;
             end;
          end loop;
@@ -1357,6 +1422,23 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
       end if;
       declare
+         --  Per track, the reference pixel of its first sighting: its point is made along that pixel's line of sight
+         --  once a call (Residuals) and once a round for every column (the Jacobian), and a sighting of it whose
+         --  reference pixel is another makes its own.
+         function Firsts_Of (Of_U : Boolean) return Real_Array is
+            Result : Real_Array (1 .. Tracks) := [others => 0.0];
+            Seen   : Flags (1 .. Tracks) := [others => False];
+         begin
+            for X of Sight loop
+               if not Seen (X.Track) then
+                  Seen (X.Track) := True;
+                  Result (X.Track) := (if Of_U then X.U0 else X.V0);
+               end if;
+            end loop;
+            return Result;
+         end Firsts_Of;
+         Ref_U0 : constant Real_Array (1 .. Tracks) := Firsts_Of (True);
+         Ref_V0 : constant Real_Array (1 .. Tracks) := Firsts_Of (False);
          Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  the log of each track's depth
          --  How uncertain each log depth is at the solution, the other
          --  parameters held: the root of the inverse of its own information.
@@ -1414,7 +1496,7 @@ package body Driver.Robot.Kinematics.Fit is
             Lx    : constant Lens := Lens_Of (Xv);
             Jx    : constant Joint_Array := Joints_Of (Xv);
             Views : Rigid_Access := new Rigid_Array (1 .. Frames);
-            --  Per track, its point at its depth along the line of sight of a reference pixel, and that pixel: the
+            --  Per track, its point at its depth along the line of sight of its reference pixel (Ref_U0, Ref_V0): the
             --  sightings of a track share its reference pixel, and its line of sight (Ray, Newton's method through
             --  the lens's distortion) and depth were made again for every sighting, a third of the time of every
             --  residual (the fit's profile, 10-15). A sighting whose reference pixel is another makes its own.
@@ -1422,56 +1504,59 @@ package body Driver.Robot.Kinematics.Fit is
             type Point_Access is access Point_Array;
             procedure Free is new Ada.Unchecked_Deallocation (Point_Array, Point_Access);
             Points : Point_Access := new Point_Array;
-            Made   : Flags_Access := new Flags'(1 .. Tracks => False);
-            Made_U : Real_Access := new Real_Array (1 .. Tracks);
-            Made_V : Real_Access := new Real_Array (1 .. Tracks);
             Turned : Flags_Access := new Flags'(1 .. Frames => True);
+            Parts  : constant Parts_Matrix := Parts_Of (Slack_Of (Xv));
+            --  The keyframes' views, the tracks' points and the sightings' residuals, each set at once
+            --  (Driver.Parallel_For): each writes only its own. One task made them all, the processors waiting on
+            --  it between the Jacobian's columns (the big machine, 10-22: a step 2 fit as fast with 63 workers as
+            --  with 15).
+            procedure View_Of (F : Positive) is
+            begin
+               if Turned (F) then
+                  Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F, Parts)));
+               end if;
+            end View_Of;
+            procedure Point_Of (T : Positive) is
+               D0 : constant Real := Exp (Dv (T));
+               H0 : constant Vec3 := Ray (Lx, Ref_U0 (T), Ref_V0 (T));
+            begin
+               Points (T) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+            end Point_Of;
+            procedure Residual_Of (K : Positive) is
+               Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
+               U, V : Real;
+               Ahead : Boolean;
+            begin
+               if Turned (Sg.Frame) then
+                  if Sg.U0 = Ref_U0 (Sg.Track) and then Sg.V0 = Ref_V0 (Sg.Track) then
+                     Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
+                  else
+                     declare
+                        D0 : constant Real := Exp (Dv (Sg.Track));
+                        H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
+                     begin
+                        Project (Lx, Views (Sg.Frame) * [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)], U, V, Ahead);
+                     end;
+                  end if;
+                  R (2 * K - 1) := U - Sg.U;
+                  R (2 * K) := V - Sg.V;
+               end if;
+            end Residual_Of;
+            procedure Every_View is new Driver.Parallel_For (View_Of);
+            procedure Every_Point is new Driver.Parallel_For (Point_Of);
+            procedure Every_Residual is new Driver.Parallel_For (Residual_Of);
          begin
             if Joint > 0 then
                for F in 1 .. Frames loop
                   Turned (F) := Moves_Frame (F, Joint);
                end loop;
             end if;
-            declare
-               Parts : constant Parts_Matrix := Parts_Of (Slack_Of (Xv));
-            begin
-               for F in 1 .. Frames loop
-                  if Turned (F) then
-                     Views (F) := Inverse (Eye_At (Jx, Chain, Changes_Of (F, Parts)));
-                  end if;
-               end loop;
-            end;
-            for K in 1 .. Index'Length loop
-               declare
-                  Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
-                  U, V : Real;
-                  Ahead : Boolean;
-               begin
-                  if Turned (Sg.Frame) then
-                     if not Made (Sg.Track) or else Made_U (Sg.Track) /= Sg.U0 or else Made_V (Sg.Track) /= Sg.V0
-                     then
-                        declare
-                           D0 : constant Real := Exp (Dv (Sg.Track));
-                           H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
-                        begin
-                           Points (Sg.Track) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
-                           Made (Sg.Track) := True;
-                           Made_U (Sg.Track) := Sg.U0;
-                           Made_V (Sg.Track) := Sg.V0;
-                        end;
-                     end if;
-                     Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
-                     R (2 * K - 1) := U - Sg.U;
-                     R (2 * K) := V - Sg.V;
-                  end if;
-               end;
-            end loop;
+            Every_View (1, Frames);
+            Every_Point (1, Tracks);
+            Every_Residual (1, Index'Length);
             Free (Turned);
             Free (Views);
             Free (Points);
-            Free (Made);
-            Free (Made_U);
-            Free (Made_V);
          end Residuals;
 
          --  What the rotations leave of the sightings, found in one linear solve: a depth along every track's reference
@@ -1934,60 +2019,141 @@ package body Driver.Robot.Kinematics.Fit is
                   --  undetermined).
                   for Round in 1 .. Real'Machine_Mantissa loop
                      Rounds := Rounds + 1;
-                     --  The Jacobian: the parameters one by one; the depths all at
-                     --  once, since each residual has one depth of its own.
-                     --  The columns at once (Driver.Parallel_For): each moves its own
-                     --  parameter, takes every residual again into its own array and
-                     --  writes only its own column.
+                     --  The Jacobian: each parameter's column by its own step, and the depths' all at once, since each
+                     --  residual has one depth of its own. What a column's step moves is made once for every sighting:
+                     --  a lens term's step moves the tracks' lines of sight and not the keyframes' views, a joint
+                     --  term's the views of the keyframes whose joint went and not the lines of sight, the depths'
+                     --  the points along the same lines. Then every sighting's residuals under every step at once
+                     --  (Driver.Parallel_For over the sightings), each sighting writing only its own rows: the same
+                     --  sums as a column's residuals made one column at a time. A column at a time, its residuals
+                     --  made again whole, the columns ran as many at once as there are parameters and each its
+                     --  sightings in a row: a step 2 fit took as long with 63 workers as with 15 (the big machine,
+                     --  k202's 15380 sightings, 10-22).
                      declare
-                        procedure Column (P : Positive) is
-                           Xp : Real_Array := X;
-                           H  : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
-                           Rp : Real_Access := new Real_Array (1 .. 2 * Used);
+                        type Vec3_Grid is array (Positive range <>, Positive range <>) of Vec3;
+                        type Vec3_Grid_Access is access Vec3_Grid;
+                        type Rigid_Grid is array (Positive range <>, Positive range <>) of Rigid;
+                        type Rigid_Grid_Access is access Rigid_Grid;
+                        procedure Free is new Ada.Unchecked_Deallocation (Vec3_Grid, Vec3_Grid_Access);
+                        procedure Free is new Ada.Unchecked_Deallocation (Rigid_Grid, Rigid_Grid_Access);
+                        Lx    : constant Lens := Lens_Of (X);
+                        Jx    : constant Joint_Array := Joints_Of (X);
+                        Parts : constant Parts_Matrix := Parts_Of (Slack_Of (X));
+                        Steps : array (1 .. Count) of Real;
+                        Depth_Steps : array (1 .. Tracks) of Real;
+                        --  The terms a pinhole with square pixels has not, the lens's second focal length and its two
+                        --  distortion terms, have no column, and a term with none stays where it is (a sliding joint's
+                        --  axis point's).
+                        function Has_Column (P : Positive) return Boolean is (not (Pinhole and then P in 2 | 5 | 6));
+                        Lenses      : array (1 .. 6) of Lens;
+                        Lens_Rays   : Vec3_Grid_Access := new Vec3_Grid (1 .. 6, 1 .. Tracks);
+                        Joint_Views : Rigid_Grid_Access := new Rigid_Grid (7 .. Count, 1 .. Frames);
+                        Base_Views  : Rigid_Access := new Rigid_Array (1 .. Frames);
+                        Base_Rays   : Vec3_Grid_Access := new Vec3_Grid (1 .. 1, 1 .. Tracks);
+                        --  What the steps move, at once: each parameter's own (its lens's lines of sight, or its views),
+                        --  then the keyframes' views and the tracks' lines of sight at the parameters as they stand.
+                        procedure Prepare (Item : Positive) is
                         begin
-                           --  The terms a pinhole with square pixels has not, the lens's second focal length and its two
-                           --  distortion terms, have no column, and a term with none stays where it is (a sliding joint's
-                           --  axis point's).
-                           if Pinhole and then P in 2 | 5 | 6 then
-                              for I in 1 .. 2 * Used loop
-                                 Jp (I, P) := 0.0;
-                              end loop;
+                           if Item <= Count then
+                              declare
+                                 P  : constant Positive := Item;
+                                 Xp : Real_Array := X;
+                              begin
+                                 Xp (P) := Xp (P) + Steps (P);
+                                 if P <= 6 then
+                                    if Has_Column (P) then
+                                       Lenses (P) := Lens_Of (Xp);
+                                       for T in 1 .. Tracks loop
+                                          Lens_Rays (P, T) := Ray (Lenses (P), Ref_U0 (T), Ref_V0 (T));
+                                       end loop;
+                                    end if;
+                                 else
+                                    declare
+                                       J       : constant Positive := (P - 7) / Per_Joint + 1;
+                                       Jx_P    : constant Joint_Array := Joints_Of (Xp);
+                                       Parts_P : constant Parts_Matrix := Parts_Of (Slack_Of (Xp));
+                                    begin
+                                       for F in 1 .. Frames loop
+                                          if Moves_Frame (F, J) then
+                                             Joint_Views (P, F) :=
+                                               Inverse (Eye_At (Jx_P, Chain, Changes_Of (F, Parts_P)));
+                                          end if;
+                                       end loop;
+                                    end;
+                                 end if;
+                              end;
+                           elsif Item <= Count + Frames then
+                              Base_Views (Item - Count) :=
+                                Inverse (Eye_At (Jx, Chain, Changes_Of (Item - Count, Parts)));
                            else
-                              Xp (P) := Xp (P) + H;
-                              if P <= 6 then
-                                 Residuals (Xp, Depth.all, Index, Rp.all);
-                                 for I in 1 .. 2 * Used loop
-                                    Jp (I, P) := (Rp (I) - R0 (I)) / H;
-                                 end loop;
+                              Base_Rays (1, Item - Count - Frames) :=
+                                Ray (Lx, Ref_U0 (Item - Count - Frames), Ref_V0 (Item - Count - Frames));
+                           end if;
+                        end Prepare;
+                        --  A sighting's residuals under every step, into its rows of every column.
+                        procedure Columns_Of (K : Positive) is
+                           Sg  : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
+                           F   : constant Positive := Sg.Frame;
+                           T   : constant Positive := Sg.Track;
+                           Own : constant Boolean := not (Sg.U0 = Ref_U0 (T) and then Sg.V0 = Ref_V0 (T));
+                           D0  : constant Real := Exp (Depth (T));
+                           H0  : constant Vec3 := (if Own then Ray (Lx, Sg.U0, Sg.V0) else Base_Rays (1, T));
+                           P0  : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                           I1  : constant Positive := 2 * K - 1;
+                           I2  : constant Positive := 2 * K;
+                           U, V  : Real;
+                           Ahead : Boolean;
+                        begin
+                           for P in 1 .. 6 loop
+                              if Has_Column (P) then
+                                 declare
+                                    Hp : constant Vec3 :=
+                                      (if Own then Ray (Lenses (P), Sg.U0, Sg.V0) else Lens_Rays (P, T));
+                                 begin
+                                    Project (Lenses (P), Base_Views (F) * [D0 * Hp (1), D0 * Hp (2), D0 * Hp (3)], U, V,
+                                             Ahead);
+                                    Jp (I1, P) := ((U - Sg.U) - R0 (I1)) / Steps (P);
+                                    Jp (I2, P) := ((V - Sg.V) - R0 (I2)) / Steps (P);
+                                 end;
                               else
-                                 Residuals (Xp, Depth.all, Index, Rp.all, Joint => (P - 7) / Per_Joint + 1);
-                                 for I of Moved_Rows ((P - 7) / Per_Joint + 1).all loop
-                                    Jp (I, P) := (Rp (I) - R0 (I)) / H;
+                                 Jp (I1, P) := 0.0;
+                                 Jp (I2, P) := 0.0;
+                              end if;
+                           end loop;
+                           for J in 1 .. N loop
+                              if Moves_Frame (F, J) then
+                                 for P in 7 + Per_Joint * (J - 1) .. 6 + Per_Joint * J loop
+                                    Project (Lx, Joint_Views (P, F) * P0, U, V, Ahead);
+                                    Jp (I1, P) := ((U - Sg.U) - R0 (I1)) / Steps (P);
+                                    Jp (I2, P) := ((V - Sg.V) - R0 (I2)) / Steps (P);
                                  end loop;
                               end if;
-                           end if;
-                           Free (Rp);
-                        end Column;
-                        procedure Columns is new Driver.Parallel_For (Column);
-                     begin
-                        Columns (1, Count);
-                     end;
-                     declare
-                        Dp : Real_Access := new Real_Array'(Depth.all);
-                        H  : constant Real := Sqrt (Real'Model_Epsilon);
-                     begin
-                        for T in 1 .. Tracks loop
-                           Dp (T) := Dp (T) + H * Real'Max (1.0, abs Depth (T));
-                        end loop;
-                        Residuals (X, Dp.all, Index, Rn.all);
-                        Free (Dp);
-                        for I in 1 .. 2 * Used loop
+                           end loop;
                            declare
-                              T : constant Positive := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
+                              Dd : constant Real := Exp (Depth (T) + Depth_Steps (T));
                            begin
-                              Jd (I) := (Rn (I) - R0 (I)) / (H * Real'Max (1.0, abs Depth (T)));
+                              Project (Lx, Base_Views (F) * [Dd * H0 (1), Dd * H0 (2), Dd * H0 (3)], U, V, Ahead);
+                              Rn (I1) := U - Sg.U;
+                              Rn (I2) := V - Sg.V;
+                              Jd (I1) := (Rn (I1) - R0 (I1)) / Depth_Steps (T);
+                              Jd (I2) := (Rn (I2) - R0 (I2)) / Depth_Steps (T);
                            end;
+                        end Columns_Of;
+                        procedure Prepare_All is new Driver.Parallel_For (Prepare);
+                        procedure Every_Sighting is new Driver.Parallel_For (Columns_Of);
+                     begin
+                        for P in 1 .. Count loop
+                           Steps (P) := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));
                         end loop;
+                        for T in 1 .. Tracks loop
+                           Depth_Steps (T) := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Depth (T));
+                        end loop;
+                        Prepare_All (1, Count + Frames + Tracks);
+                        Every_Sighting (1, Used);
+                        Free (Lens_Rays);
+                        Free (Joint_Views);
+                        Free (Base_Views);
+                        Free (Base_Rays);
                      end;
                      declare
                         A  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count) := [others => [others => 0.0]];
@@ -2008,38 +2174,36 @@ package body Driver.Robot.Kinematics.Fit is
                         declare
                            Weights  : Real_Access := new Real_Array (1 .. 2 * Used);
                            Track_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
-                           Frame_Of : Natural_Access := new Natural_Array (1 .. 2 * Used);
-                           Moved_In : Flag_Grid_Access := new Flag_Grid (1 .. Frames, 1 .. N);
-                           procedure Row (P : Positive) is
+                           --  Each row's sums in parts (Part_Row, Part_Block): its gradient and its depths' cross terms
+                           --  (Block 0), its terms with the lens's (Block -1, a lens term's row) and with each joint's
+                           --  from its own on (Block J): every sum over the residuals that move both terms, in their
+                           --  order, whichever task makes it, the sum the row made whole to the bit. Made a row a task,
+                           --  a lens term's row summed every residual into every column, five times a joint's, and the
+                           --  rows' task waited on its six slowest (k202's step 2 fit replayed and sampled on the Mac,
+                           --  10-22: 830 of the main task's 4400 samples in the fit).
+                           Parts_Count : Natural := 0;
+                           Part_Row    : Natural_Access := new Natural_Array (1 .. Count * (N + 2) + 1);
+                           Part_Block  : array (1 .. Count * (N + 2) + 1) of Integer := [others => 0];
+                           procedure Row_Part (K : Positive) is
+                              P     : constant Natural := Part_Row (K);
+                              Block : constant Integer := Part_Block (K);
                            begin
                               if P > Count then
                                  for I in 1 .. 2 * Used loop
                                     C (Track_Of (I)) := C (Track_Of (I)) + Weights (I) * Jd (I) ** 2;
                                     Gd (Track_Of (I)) := Gd (Track_Of (I)) - Weights (I) * Jd (I) * R0 (I);
                                  end loop;
-                              else
+                              elsif Block = 0 then
                                  declare
                                     Sum_G : Real := 0.0;
-                                    Sum_A : Real_Array (P .. Count) := [others => 0.0];
                                     procedure Add (I : Positive) is
                                     begin
                                        if Jp (I, P) /= 0.0 then
                                           declare
                                              W : constant Real := Weights (I);
-                                             F : constant Positive := Frame_Of (I);
                                           begin
                                              Sum_G := Sum_G - W * Jp (I, P) * R0 (I);
                                              Bm (P, Track_Of (I)) := Bm (P, Track_Of (I)) + W * Jp (I, P) * Jd (I);
-                                             for Q in P .. Natural'Min (6, Count) loop
-                                                Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
-                                             end loop;
-                                             for J in 1 .. N loop
-                                                if Moved_In (F, J) and then 6 + Per_Joint * J >= P then
-                                                   for Q in Natural'Max (P, 7 + Per_Joint * (J - 1)) .. 6 + Per_Joint * J loop
-                                                      Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
-                                                   end loop;
-                                                end if;
-                                             end loop;
                                           end;
                                        end if;
                                     end Add;
@@ -2054,29 +2218,78 @@ package body Driver.Robot.Kinematics.Fit is
                                        end loop;
                                     end if;
                                     Gp (P) := Sum_G;
-                                    for Q in P .. Count loop
+                                 end;
+                              elsif Block < 0 then
+                                 declare
+                                    Sum_A : Real_Array (P .. Natural'Min (6, Count)) := [others => 0.0];
+                                 begin
+                                    for I in 1 .. 2 * Used loop
+                                       if Jp (I, P) /= 0.0 then
+                                          declare
+                                             W : constant Real := Weights (I);
+                                          begin
+                                             for Q in Sum_A'Range loop
+                                                Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                             end loop;
+                                          end;
+                                       end if;
+                                    end loop;
+                                    for Q in Sum_A'Range loop
+                                       A (P, Q) := Sum_A (Q);
+                                    end loop;
+                                 end;
+                              else
+                                 declare
+                                    J     : constant Positive := Block;
+                                    Sum_A : Real_Array (Natural'Max (P, 7 + Per_Joint * (J - 1)) .. 6 + Per_Joint * J) :=
+                                      [others => 0.0];
+                                 begin
+                                    for I of Moved_Rows (J).all loop
+                                       if Jp (I, P) /= 0.0 then
+                                          declare
+                                             W : constant Real := Weights (I);
+                                          begin
+                                             for Q in Sum_A'Range loop
+                                                Sum_A (Q) := Sum_A (Q) + W * Jp (I, P) * Jp (I, Q);
+                                             end loop;
+                                          end;
+                                       end if;
+                                    end loop;
+                                    for Q in Sum_A'Range loop
                                        A (P, Q) := Sum_A (Q);
                                     end loop;
                                  end;
                               end if;
-                           end Row;
-                           procedure Rows is new Driver.Parallel_For (Row);
+                           end Row_Part;
+                           procedure Rows is new Driver.Parallel_For (Row_Part);
                         begin
                            for I in 1 .. 2 * Used loop
                               Weights (I) := Huber (R0 (I) / Scales (I)) / Scales (I) ** 2;
                               Track_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;
-                              Frame_Of (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Frame;
                            end loop;
-                           for F in 1 .. Frames loop
+                           for P in 1 .. Count loop
+                              Parts_Count := Parts_Count + 1;
+                              Part_Row (Parts_Count) := P;
+                              Part_Block (Parts_Count) := 0;
+                              if P <= 6 then
+                                 Parts_Count := Parts_Count + 1;
+                                 Part_Row (Parts_Count) := P;
+                                 Part_Block (Parts_Count) := -1;
+                              end if;
                               for J in 1 .. N loop
-                                 Moved_In (F, J) := Moves_Frame (F, J);
+                                 if 6 + Per_Joint * J >= P then
+                                    Parts_Count := Parts_Count + 1;
+                                    Part_Row (Parts_Count) := P;
+                                    Part_Block (Parts_Count) := J;
+                                 end if;
                               end loop;
                            end loop;
-                           Rows (1, Count + 1);
+                           Parts_Count := Parts_Count + 1;
+                           Part_Row (Parts_Count) := Count + 1;
+                           Rows (1, Parts_Count);
+                           Free (Part_Row);
                            Free (Weights);
                            Free (Track_Of);
-                           Free (Frame_Of);
-                           Free (Moved_In);
                         end;
                         --  The focal search's measurement of the two focal lengths (Prior_W, the header).
                         if Prior_W > 0.0 then
@@ -2098,6 +2311,9 @@ package body Driver.Robot.Kinematics.Fit is
                               Lf    : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count);
                               Pd    : Boolean;
                               Moves : Boolean := False;
+                              Held  : array (1 .. Count) of Boolean := [others => False];
+                              Sh    : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count);
+                              Rh    : Real_Vector (1 .. Count);
                            begin
                               for P in 1 .. Count loop
                                  Sm (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;
@@ -2123,10 +2339,43 @@ package body Driver.Robot.Kinematics.Fit is
                               begin
                                  Eliminate_All (1, Count);
                               end;
-                              Driver.Numerics.Dense.Cholesky (Sm, Lf, Pd);
+                              --  A slack's room on its bound that the step would take below it is held there, out
+                              --  of the solve, and the rest solved again, until the step takes none held below its
+                              --  bound (each pass holds one more, so they end): the step the bounds allow, whose
+                              --  cost the damping then answers for, not one cut back after it was taken.
+                              loop
+                                 Sh := Sm;
+                                 Rh := Rhs;
+                                 for P in 1 .. Count loop
+                                    if Held (P) then
+                                       for Q in 1 .. Count loop
+                                          Sh (P, Q) := 0.0;
+                                          Sh (Q, P) := 0.0;
+                                       end loop;
+                                       Sh (P, P) := 1.0;
+                                       Rh (P) := 0.0;
+                                    end if;
+                                 end loop;
+                                 Driver.Numerics.Dense.Cholesky (Sh, Lf, Pd);
+                                 exit when not Pd or else not Slacked;
+                                 declare
+                                    Trial : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, Rh);
+                                    More  : Boolean := False;
+                                 begin
+                                    for J in 1 .. N loop
+                                       for P in 6 + Per_Joint * (J - 1) + 7 .. 6 + Per_Joint * J loop
+                                          if not Held (P) and then X (P) <= 0.0 and then Trial (P) < 0.0 then
+                                             Held (P) := True;
+                                             More := True;
+                                          end if;
+                                       end loop;
+                                    end loop;
+                                    exit when not More;
+                                 end;
+                              end loop;
                               if Pd then
                                  declare
-                                    Dx : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, Rhs);
+                                    Dx : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Lf, Rh);
                                     Xn : Real_Array := X;
                                     Dn : Real_Access := new Real_Array'(Depth.all);
                                  begin
@@ -2134,16 +2383,17 @@ package body Driver.Robot.Kinematics.Fit is
                                        Xn (P) := X (P) + Dx (P);
                                        Moves := Moves or else Xn (P) /= X (P);
                                     end loop;
-                                    --  A half slack is no less than nought, and the slack stood within it at
-                                    --  the reference. Unbounded, one of the fake's seed 20 (10-22) ran to -773
-                                    --  units, the fit undetermined.
+                                    --  A slack's room either way is no less than nought (Slack_Of). Unbounded, a
+                                    --  half slack of one of the fake's seed 20 (10-22) ran to -773 units, the fit
+                                    --  undetermined. A step that crosses a bound stops on it, and the solve holds
+                                    --  it there from the next round on while the step would take it further.
                                     if Slacked then
                                        for J in 1 .. N loop
                                           declare
                                              O : constant Natural := 6 + Per_Joint * (J - 1);
                                           begin
                                              Xn (O + 7) := Real'Max (0.0, Xn (O + 7));
-                                             Xn (O + 8) := Real'Max (-Xn (O + 7), Real'Min (Xn (O + 7), Xn (O + 8)));
+                                             Xn (O + 8) := Real'Max (0.0, Xn (O + 8));
                                           end;
                                        end loop;
                                     end if;
@@ -2284,9 +2534,9 @@ package body Driver.Robot.Kinematics.Fit is
                                           Ar (P, P) := 1.0;
                                        end loop;
                                     end if;
-                                    --  Nor has a slack's term that no keyframe tells (a half slack of nought leaves
-                                    --  the place within it nothing to tell): kept out of the others alike, and out of
-                                    --  the covariance reported.
+                                    --  Nor has a slack's term that no keyframe tells (a room the readings' way never
+                                    --  crosses tells nothing): kept out of the others alike, and out of the covariance
+                                    --  reported.
                                     if Slacked then
                                        for P in 6 + Per_Reduced * J - 1 .. 6 + Per_Reduced * J loop
                                           if Ar (P, P) = 0.0 then
@@ -2344,8 +2594,8 @@ package body Driver.Robot.Kinematics.Fit is
                                              else "j" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / Per_Reduced + 1), Ada.Strings.Left)
                                                   & (case (P - 7) mod Per_Reduced is
                                                        when 0 => " axis a", when 1 => " axis b", when 2 => " point a",
-                                                       when 3 => " point b", when 4 => " scale", when 5 => " half slack",
-                                                       when others => " slack's place"));
+                                                       when 3 => " point b", when 4 => " scale", when 5 => " slack above",
+                                                       when others => " slack below"));
                                        begin
                                           for P in 1 .. Reduced loop
                                              if Equal (P) = 0.0 then

@@ -294,6 +294,12 @@ package body Driver.Robot.Motion is
    --  targets, not a sending again of them. Where a channel reads its target when the sending has ended, the
    --  command less the reading is the servo's steady error there, kept for the next step's first sending
    --  (Group_Stream.Landing).
+   --  The longest a step's push took to end so far (One_Step): a wait twice as long is told in the log as it goes, and at
+   --  every doubling after, with each pushed group's push, as Settle tells its own. A fixed eye's capture on the big
+   --  machine (k201, a kiwi from its swept body, 10-22) sent a step at beat 2434 that ended at 15289, and another that
+   --  had not ended at 39441, with nothing in the log.
+   Longest_Step : Natural := 0;
+
    procedure One_Step
      (M       : in out Model;
       Sent    : Driver.Commands.Command;
@@ -314,6 +320,7 @@ package body Driver.Robot.Motion is
          --  step is the one after them.
          Before : Count_Array (1 .. Groups) := [others => 0];
          Waited : Natural := 0;
+         Tell_At : Positive := 2 * Natural'Max (1, Longest_Step);   --  the push's wait at which it is told next
          Started : constant Natural := M.Beats;
 
          function Targeted (G : Group_Id) return Boolean is
@@ -367,6 +374,27 @@ package body Driver.Robot.Motion is
          loop
             Driver.Beats.Next (B);
             Waited := Waited + 1;
+            if Waited >= Tell_At then
+               declare
+                  Text : Unbounded_String;
+               begin
+                  for G in 1 .. Groups loop
+                     if Driver.Commands.Has_Target (Sent, Group_Id (G)) and then Steps.Episodes (M, Group_Id (G)) > 0 then
+                        declare
+                           E : constant Episode := Steps.Latest (M, Group_Id (G));
+                        begin
+                           Append (Text, " group" & G'Image & (if E.Ended then " ended" elsif E.Moved then " moving" else " not yet moved")
+                                   & " from" & E.Start'Image & ", farther or nearer last at" & E.Progress_At'Image
+                                   & ", nearest" & Real'Image (E.Nearest.Value) & ", farthest"
+                                   & Real'Image (E.Farthest.Value) & ";");
+                        end;
+                     end if;
+                  end loop;
+                  Driver.Log.Line (Driver.Log.Robot, "motion: a step still under way after" & Waited'Image & " beats:"
+                                   & To_String (Text));
+               end;
+               Tell_At := 2 * Tell_At;
+            end if;
             declare
                Finished : constant Boolean := Done;
                Halt     : constant Boolean := not Finished and then not Stopped and then Stop /= null and then Stop.all;
@@ -421,6 +449,7 @@ package body Driver.Robot.Motion is
             end;
          end loop;
          M.Stepping := False;
+         Longest_Step := Natural'Max (Longest_Step, Waited);
       end;
    end One_Step;
 

@@ -1,15 +1,10 @@
 with Ada.Numerics.Long_Elementary_Functions;
-with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
+with Driver.Parallel_For;
 
 package body Driver.Robot.Flow is
 
    use Ada.Numerics.Long_Elementary_Functions;
-
-   --  Everything sized by pixels lives on the heap: no stack needs to hold
-   --  a cell of any camera.
-   type Real_Access is access Real_Array;
-   procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
 
    function Grid_Of (Width, Height : Natural) return Cell_Grid is
      ((Width   => Width,
@@ -71,17 +66,20 @@ package body Driver.Robot.Flow is
       --  time: every cell's bounds differ from it by at most one pixel.
       Most_X : constant Natural := (if G.Columns = 0 then 0 else W / G.Columns + 1);
       Most_Y : constant Natural := (if G.Rows = 0 then 0 else H / G.Rows + 1);
-      Gx     : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
-      Gy     : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
       type Index_Array is array (Natural range <>) of Natural;
-      type Index_Access is access Index_Array;
-      procedure Free is new Ada.Unchecked_Deallocation (Index_Array, Index_Access);
-      Px     : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_X));
-      Py     : Index_Access := new Index_Array (0 .. Natural'Max (1, Most_Y));
-      Fx     : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_X) + 1);
-      Fy     : Real_Access := new Real_Array (1 .. Natural'Max (1, Most_Y) + 1);
-   begin
-      for Cell in 1 .. Cells (G) loop
+
+      --  Every cell at once (Driver.Parallel_For), each with its gradients and placements its own, on its task's
+      --  stack (a cell of a 3840 by 2160 picture holds some 3000 pixels: 48 KB of gradients): a cell reads the two
+      --  frames and writes only its own answers. The cells one after another took most of an eye's beat (a
+      --  kiwi's step 3 alone on the big machine, 10-22: 2.6 to 2.9 ms of the 7 an eye took, a cell in a row).
+      procedure One_Cell (Cell : Positive) is
+         Gx : Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
+         Gy : Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
+         Px : Index_Array (0 .. Natural'Max (1, Most_X));
+         Py : Index_Array (0 .. Natural'Max (1, Most_Y));
+         Fx : Real_Array (1 .. Natural'Max (1, Most_X) + 1);
+         Fy : Real_Array (1 .. Natural'Max (1, Most_Y) + 1);
+      begin
          declare
             X0, X1, Y0, Y1 : Natural;
             Sxx, Sxy, Syy : Real := 0.0;
@@ -240,13 +238,10 @@ package body Driver.Robot.Flow is
                end if;
             end;
          end;
-      end loop;
-      Free (Gx);
-      Free (Gy);
-      Free (Px);
-      Free (Py);
-      Free (Fx);
-      Free (Fy);
+      end One_Cell;
+      procedure Every_Cell is new Driver.Parallel_For (One_Cell);
+   begin
+      Every_Cell (1, Cells (G));
    end Displacements;
 
    function Noise_Floor (Condition, Luma_Variance : Real) return Real is

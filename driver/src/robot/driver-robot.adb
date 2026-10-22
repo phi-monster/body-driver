@@ -65,6 +65,27 @@ package body Driver.Robot is
       Free (Resolved);
    end Measure_Displacement;
 
+   --  Where an eye's pictured beat goes, by stage, summed over the eyes (measured at once, each adds its own): told with
+   --  the observe line (Observe). The eyes took 6.6 to 7.7 ms of every pictured beat of a kiwi's step 3 run alone on
+   --  the big machine (10-22), three eyes at once.
+   type Eye_Stage is (Luma_Stage, Flow_Stage, Still_Stage, Watch_Stage);
+   type Stage_Sums is array (Eye_Stage) of Duration;
+   protected Eye_Times is
+      procedure Add (Stage : Eye_Stage; Spent : Duration);
+      function Spent (Stage : Eye_Stage) return Duration;
+   private
+      Sums : Stage_Sums := [others => 0.0];
+   end Eye_Times;
+
+   protected body Eye_Times is
+      procedure Add (Stage : Eye_Stage; Spent : Duration) is
+      begin
+         Sums (Stage) := Sums (Stage) + Spent;
+      end Add;
+
+      function Spent (Stage : Eye_Stage) return Duration is (Sums (Stage));
+   end Eye_Times;
+
    procedure Observe_Eyes (M : in out Model; O : Observation) is
       --  Some commandable group began to move at this beat: each picture's
       --  settle watch starts afresh when its frames show that beat, its lag
@@ -85,6 +106,13 @@ package body Driver.Robot is
             --  from a frame of a still scene by a camera without noise (the rig, a renderer), so it takes every
             --  frame it is given as one.
             Fresh : constant Boolean := Have;
+            Mark  : Duration := Driver.Clock.Seconds;
+            procedure Stage_Done (Stage : Eye_Stage) is
+               Now : constant Duration := Driver.Clock.Seconds;
+            begin
+               Eye_Times.Add (Stage, Now - Mark);
+               Mark := Now;
+            end Stage_Done;
          begin
             if Have then
                declare
@@ -95,6 +123,7 @@ package body Driver.Robot is
                      S.Current := new Real_Array (1 .. Size);
                   end if;
                   Driver.Images.Luma (O.Images (E), S.Current.all);
+                  Stage_Done (Luma_Stage);
                end;
                if S.Grid.Width = 0 then
                   S.Grid := Flow.Grid_Of (Driver.Images.Width (O.Images (E)), Driver.Images.Height (O.Images (E)));
@@ -126,12 +155,14 @@ package body Driver.Robot is
                   S.Resolved.Append (False, Ada.Containers.Count_Type (N));
                   S.Measured.Append (False);
                end if;
+               Stage_Done (Flow_Stage);
                if Fresh then
                   Stillness.Judge_Eye (S, O.Images (E), S.Current.all);
                   if S.Luma_Variance.Is_Empty then
                      Stillness.Measure_Luma_Noise (S);
                   end if;
                end if;
+               Stage_Done (Still_Stage);
                --  An eye's first two frames start its noise and are not judged.
                S.Judged.Append (Fresh and then S.Has_Judged);
                S.Still_At.Append (Fresh and then S.Is_Still);
@@ -160,6 +191,7 @@ package body Driver.Robot is
                   end loop;
                   S.Settled_At.Append (S.Watch_Done);
                end;
+               Stage_Done (Watch_Stage);
                --  This frame is the next one's previous, and the previous one
                --  the next one's before; a missing frame, or one of another
                --  size, breaks the chain: the next displacement would span two
@@ -345,14 +377,57 @@ package body Driver.Robot is
       M.Due := False;
    end Compute_Estimates;
 
+   --  Where the observation of a beat goes, by part, logged at every doubling of the beats: the main loop's own
+   --  account put 6.5 ms of a humanoid's observed beat in the robot's models on the big machine (10-22), and 10 with no
+   --  workers, so that its three eyes, measured at once, left most of it elsewhere. Only the models' owner observes,
+   --  one task at a time.
+   type Observe_Part is (Channels_Part, Steps_Part, Eyes_Part, Kinematics_Part);
+   Observe_Spent : array (Observe_Part) of Duration := [others => 0.0];
+   Observed      : Natural := 0;
+   Pictured      : Natural := 0;   --  of them, those with a picture (the kept back have none: Apart.Lighten)
+   Next_Told     : Positive := 1;
+
    procedure Observe (M : in out Model; O : Observation; Sent : Driver.Commands.Command) is
    begin
-      Channels.Append (M, O, Sent);
-      Steps.Track (M, M.Beats);
-      Observe_Eyes (M, O);
-      if not M.From_File (Stored_Kinematics) then
-         Kinematics.Observe (M, O);
-      end if;
+      declare
+         Mark : Duration := Driver.Clock.Seconds;
+         procedure Took (P : Observe_Part) is
+            Now : constant Duration := Driver.Clock.Seconds;
+         begin
+            Observe_Spent (P) := Observe_Spent (P) + (Now - Mark);
+            Mark := Now;
+         end Took;
+         function Ms (P : Observe_Part) return String is
+           (Driver.Log.Image (Real (Observe_Spent (P)) * 1000.0 / Real (Natural'Max (1, Observed)), 3));
+         function Stage_Ms (Stage : Eye_Stage) return String is
+           (Driver.Log.Image (Real (Eye_Times.Spent (Stage)) * 1000.0 / Real (Natural'Max (1, Pictured)), 3));
+      begin
+         Channels.Append (M, O, Sent);
+         Took (Channels_Part);
+         Steps.Track (M, M.Beats);
+         Took (Steps_Part);
+         Observe_Eyes (M, O);
+         Took (Eyes_Part);
+         if not M.From_File (Stored_Kinematics) then
+            Kinematics.Observe (M, O);
+         end if;
+         Took (Kinematics_Part);
+         Observed := Observed + 1;
+         if (for some E in O.Images.First_Index .. O.Images.Last_Index => Driver.Observations.Has_Image (O, E)) then
+            Pictured := Pictured + 1;
+         end if;
+         if Observed >= Next_Told then
+            Driver.Log.Line (Driver.Log.Robot, "observe: ms a beat over" & Observed'Image & " beats: readings "
+                             & Ms (Channels_Part) & ", pushes " & Ms (Steps_Part) & ", eyes " & Ms (Eyes_Part)
+                             & ", kinematics " & Ms (Kinematics_Part) & "; eyes a beat with pictures"
+                             & Pictured'Image & " of them: "
+                             & Driver.Log.Image (Real (Observe_Spent (Eyes_Part)) * 1000.0 / Real (Natural'Max (1, Pictured)), 3)
+                             & ", the eyes' own by stage, summed over them: luma " & Stage_Ms (Luma_Stage)
+                             & ", flow " & Stage_Ms (Flow_Stage) & ", stillness " & Stage_Ms (Still_Stage)
+                             & ", watch " & Stage_Ms (Watch_Stage));
+            Next_Told := 2 * Next_Told;
+         end if;
+      end;
       M.Beats := M.Beats + 1;
       --  The estimates are redone whenever the evidence behind them has
       --  doubled: a logarithmic number of times over any stream.

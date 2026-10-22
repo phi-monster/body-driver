@@ -570,6 +570,8 @@ private
       Watch_Rest_Counted : Natural := 0;    --  how many those rest on; taken again as they double
       Watch_Run     : Natural := 0;         --  stationary beats in a row, now
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
+      Run_Moved     : Boolean := False;      --  the still view holds frames the noise called changed, after the
+                                             --  picture stopped (Stillness.Judge_Eye): it measures no noise
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
       Condition     : Real_Vectors.Vector;   --  Cells values per beat
       Resolved      : Flag_Vectors.Vector;   --  Cells values per beat: the displacement was measured (Flow)

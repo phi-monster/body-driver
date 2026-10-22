@@ -336,8 +336,15 @@ package body Driver.Robot.Boot is
          function Still_There return Boolean is (Natural (A) <= Arm_Count (M) and then Arm_Group (M, A) = G);
          procedure Read_Size is
          begin
-            G := Arm_Group (M, A);
-            Size := Group_Size (M, G);
+            --  Gone before its sweep began: an estimate while the arm before it was swept derived the graph again
+            --  without it (k208, seed 208 of the kiwi on the big machine, 10-22: arm 2 no longer an arm of group 8,
+            --  and the boot failed on Arm_Group's precondition for the arm after it).
+            if Natural (A) > Arm_Count (M) then
+               Gone := True;
+            else
+               G := Arm_Group (M, A);
+               Size := Group_Size (M, G);
+            end if;
          end Read_Size;
          --  The reference of the arm's kinematics is the pose it is swept from (Kinematics.Begin_Anew): the
          --  recognition rounds left it where they found it.
@@ -347,6 +354,11 @@ package body Driver.Robot.Boot is
          end Begin_Anew;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
+         if Gone then
+            Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " is no longer an arm in the graph: its sweep does not"
+                             & " begin");
+            return;
+         end if;
          --  The arm is brought to its hold before the reference is taken. A servo holding a load stands off the
          --  hold's target by its steady error, and every push and every return lands on its target (Motion.Step
          --  sends a step again by its landing's error): a reference taken where the arm merely stood would lie off

@@ -29,6 +29,7 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Task_Identification;
 with Driver.Action;
 with Driver.Apart;
 with Driver.Beats;
@@ -197,14 +198,34 @@ procedure Body_Driver is
       Mark := Now;
    end Account;
 
+   --  And of a beat taken in by the main loop, the robot's models, the hands' and the world's (the estimator takes the
+   --  messages kept back in as well, and is not timed here).
+   type Model_Part is (Robot_Model, Hands_Model, World_Model);
+   Part_Spent : array (Model_Part) of Duration := [others => 0.0];
+   Part_Count : array (Model_Part) of Natural := [others => 0];
+   Main_Loop  : constant Ada.Task_Identification.Task_Id := Ada.Task_Identification.Current_Task;
+
+   procedure Timed (P : Model_Part; Began : Duration) is
+      use type Ada.Task_Identification.Task_Id;
+   begin
+      if Ada.Task_Identification.Current_Task = Main_Loop then
+         Part_Spent (P) := Part_Spent (P) + (Driver.Clock.Seconds - Began);
+         Part_Count (P) := Part_Count (P) + 1;
+      end if;
+   end Timed;
+
    procedure Report_Phases is
       function Ms (P : Phase) return String is
         (Driver.Log.Image (Driver.Real (Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Counted (P))), 3));
+      function Part_Ms (P : Model_Part) return String is
+        (Driver.Log.Image (Driver.Real (Part_Spent (P)) * 1000.0 / Driver.Real (Natural'Max (1, Part_Count (P))), 3));
    begin
       Line (Core, "the main loop over" & Beat'Image & " beats," & Messages'Image & " messages (" & Kept_Count'Image
             & " kept back), ms a message of each kind: waiting " & Ms (Waiting) & ", catching up " & Ms (Arriving) & ", parsing "
             & Ms (Parsing) & ", kept back " & Ms (Keeping) & ", taken in " & Ms (Modelling) & ", decided " & Ms (Deciding)
             & ", reply " & Ms (Replying));
+      Line (Core, "a beat the main loop took in, ms: the robot's models " & Part_Ms (Robot_Model) & ", the hands' "
+            & Part_Ms (Hands_Model) & ", the world's " & Part_Ms (World_Model));
    end Report_Phases;
 
    --  What a robot message gives the models: a new episode, and an
@@ -226,15 +247,27 @@ procedure Body_Driver is
          Driver.Beats.New_Episode;
       end if;
       if M.Observed then
-         Driver.Robot.Observe (Robot, M.O, M.Sent);
+         declare
+            Began : constant Duration := Driver.Clock.Seconds;
+         begin
+            Driver.Robot.Observe (Robot, M.O, M.Sent);
+            Timed (Robot_Model, Began);
+         end;
       end if;
    end Robot_Part;
 
    procedure Rest (M : Input) is
    begin
       if M.Observed then
-         Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
-         Driver.World.Observe (Scene, Robot, Hands, M.O, M.Sent);
+         declare
+            Began : Duration := Driver.Clock.Seconds;
+         begin
+            Driver.Robot.Hand.Observe (Hands, Robot, M.O, M.Sent);
+            Timed (Hands_Model, Began);
+            Began := Driver.Clock.Seconds;
+            Driver.World.Observe (Scene, Robot, Hands, M.O, M.Sent);
+            Timed (World_Model, Began);
+         end;
          Driver.Beats.Hear (To_String (M.O.Instruction));
          Tasks.Offer (To_String (M.O.Instruction), Driver.Beats.Episode);
       end if;

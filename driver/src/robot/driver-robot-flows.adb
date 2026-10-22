@@ -357,6 +357,9 @@ package body Driver.Robot.Flows is
       return Result;
    end Means_Of;
 
+   --  The longest wait for the eyes' still views in a capture so far (Place.Take).
+   Longest_Take : Natural := 0;
+
    procedure Place (M : in out Model) is
       Arms  : Arm_Info_Vectors.Vector;
       Eyes  : Count_Vectors.Vector;   --  the fixed eyes that see a fitted arm and lack a place
@@ -484,15 +487,50 @@ package body Driver.Robot.Flows is
 
             --  The body still and every eye that sees the arm, and the arm's own, with two frames or more since its
             --  picture last changed: every fixed eye's view (those that do not see the arm too, unused).
+            --  A wait for the eyes' still views twice as long as the longest before it is told in the log, and at every
+            --  doubling after, with each eye's view: k201 (a kiwi from its swept body on the big machine, 10-22) waited
+            --  here from beat 2434 to 15289 and again from 15289 to its run's end, with nothing in the log.
             procedure Take (Views : out View_Vectors.Vector) is
+               Held_For : Natural := 0;
+               Tell_At  : Positive := 2 * Natural'Max (1, Longest_Take);
+               procedure Tell is
+                  Text : Ada.Strings.Unbounded.Unbounded_String;
+                  procedure Describe (E : Eye_Id; What : String) is
+                     S : Eye_Stream renames M.Eyes (E);
+                  begin
+                     Ada.Strings.Unbounded.Append
+                       (Text, " eye" & E'Image & What & ", still view of" & Driver.Pixels.Frames (S.Settled)'Image
+                              & " frames" & (if S.Is_Still then ", still" else ", changing")
+                              & (if S.Watch_Done then ", settled" else ", settling") & ";");
+                  end Describe;
+               begin
+                  for K in 1 .. Count_E loop
+                     Describe (Eye_Of (K), (if Sees_It (K, A) then " sees the arm" else ""));
+                  end loop;
+                  if Info.Eye > 0 then
+                     Describe (Info.Eye, " (the arm's own)");
+                  end if;
+                  Driver.Log.Line (Driver.Log.Robot, "flows: the still views still awaited after" & Held_For'Image
+                                   & " beats:" & Ada.Strings.Unbounded.To_String (Text));
+               end Tell;
+               procedure Hold_One is
+               begin
+                  Driver.Robot.Motion.Hold (M, 1);
+                  Held_For := Held_For + 1;
+               end Hold_One;
             begin
                Driver.Robot.Motion.Settle (M, Waited);
                while (for some K in 1 .. Count_E =>
                         Sees_It (K, A) and then Driver.Pixels.Frames (M.Eyes (Eye_Of (K)).Settled) < 2)
                  or else (Info.Eye > 0 and then Driver.Pixels.Frames (M.Eyes (Info.Eye).Settled) < 2)
                loop
-                  Driver.Robot.Motion.Hold (M, 1);
+                  Hold_One;
+                  if Held_For >= Tell_At then
+                     Tell;
+                     Tell_At := 2 * Tell_At;
+                  end if;
                end loop;
+               Longest_Take := Natural'Max (Longest_Take, Held_For);
                Views.Clear;
                for K in 1 .. Count_E loop
                   Views.Append (M.Eyes (Eye_Of (K)).Settled);

@@ -51,6 +51,7 @@ package body Driver.Robot.Stillness is
          Driver.Pixels.Add (S.Settled, Frame);
          S.Noise_Is_Settled := True;
          S.Has_Settled := True;
+         S.Run_Moved := False;
          S.Is_Still := False;
          S.Has_Judged := False;
          return;
@@ -81,8 +82,11 @@ package body Driver.Robot.Stillness is
       end;
       if S.Is_Still then
          Driver.Pixels.Add (S.Settled, Frame);
-         --  The longest still run is the best measure of the eye's noise.
-         if not S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) > Driver.Pixels.Frames (S.Noise_View) then
+         --  The longest still run is the best measure of the eye's noise; a run that holds frames the noise called
+         --  changed measures none.
+         if not S.Noise_Is_Settled and then not S.Run_Moved
+           and then Driver.Pixels.Frames (S.Settled) > Driver.Pixels.Frames (S.Noise_View)
+         then
             S.Noise_Is_Settled := True;
          end if;
       else
@@ -90,8 +94,21 @@ package body Driver.Robot.Stillness is
             S.Noise_View := S.Settled;
             S.Noise_Is_Settled := False;
          end if;
-         S.Settled := Driver.Pixels.Empty (W, H);
-         Driver.Pixels.Add (S.Settled, Frame);
+         --  After the picture stopped (Watch, by the beats before this one) a frame the noise calls changed joins
+         --  the still view all the same: a flicker that lasts after a move never comes back to the noise at rest
+         --  (robot.settle.tail), and the still view is then the mean of the frames since the stop, the flicker
+         --  averaged in it. Started again at every such frame, the still views of k201, k203 and k208 (kiwis from
+         --  their swept bodies on the big machine, 10-22, an eye each whose content changed with the arm's move and
+         --  whose MJPEG blocks then jumped by more than the noise measured on the content before) never held two
+         --  frames, and their step 3 captures waited for them until their runs ended.
+         if S.Watch_Done then
+            Driver.Pixels.Add (S.Settled, Frame);
+            S.Run_Moved := True;
+         else
+            S.Settled := Driver.Pixels.Empty (W, H);
+            Driver.Pixels.Add (S.Settled, Frame);
+            S.Run_Moved := False;
+         end if;
       end if;
    end Judge_Eye;
 
