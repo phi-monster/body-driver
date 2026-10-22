@@ -20,6 +20,11 @@ package body Driver.Robot.Motion is
 
    type Count_Array is array (Positive range <>) of Natural;
 
+   --  The longest wait for the body to settle so far (Settle): a wait twice as long is told in the log as it goes, and at
+   --  every doubling after, which group or eye it waits on. A wait that never ended left nothing in the log at all
+   --  (h406 on the big machine, 10-22: from beat 20461 to an estimate at 43146, and from 46635 to the run's end).
+   Longest_Wait : Natural := 0;
+
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
       B : Driver.Clock.Beat;
       --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
@@ -149,6 +154,24 @@ package body Driver.Robot.Motion is
 
       Still_Now   : array (1 .. Groups) of Boolean := [others => False];
       Ended_There : array (1 .. Groups) of Boolean := [others => False];   --  the group ended the wait going nowhere
+      Tell_At     : Positive := 2 * Natural'Max (1, Longest_Wait);   --  the wait's length at which it is told next
+
+      procedure Tell is
+         Text : Unbounded_String;
+      begin
+         for G in 1 .. Groups loop
+            if not Still_Now (G) then
+               Append (Text, " group" & G'Image & (if Nowhere (Group_Id (G)) then " going nowhere" else " moving")
+                       & " (farther or nearer last at" & Progress_At (G)'Image & ")");
+            end if;
+         end loop;
+         for E in 1 .. Eyes loop
+            if not Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)) then
+               Append (Text, " eye" & E'Image & " unsettled");
+            end if;
+         end loop;
+         Driver.Log.Line (Driver.Log.Robot, "motion: still waiting after" & Beats_Waited'Image & " beats:" & To_String (Text));
+      end Tell;
    begin
       Beats_Waited := 0;
       Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
@@ -161,9 +184,17 @@ package body Driver.Robot.Motion is
             end loop;
          end if;
          declare
+            --  An eye settles as its watch tells (Stillness.Eye_Settled). A group going nowhere restarts that watch at
+            --  every beat it jitters back into motion (the body beginning to move, by the one test of motion), and the
+            --  watch of an eye that sees nothing of the jitter then never ends: h406 on the big machine (10-22) waited
+            --  from beat 46635 to the run's end, and another humanoid 54 beats, its group going nowhere from the third
+            --  and eye 1 unsettled all 54. While a group still moves and every such group goes nowhere, an eye whose
+            --  picture shows nothing new against its still view (Stillness.Eye_Still) is as settled as it will be.
+            Jittering : constant Boolean := (for some G in 1 .. Groups => not Still_Now (G));
             Done : constant Boolean :=
               M.Beats > 0 and then (for all G in 1 .. Groups => Still_Now (G) or else Nowhere (Group_Id (G)))
-              and then (for all E in 1 .. Eyes => Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)));
+              and then (for all E in 1 .. Eyes => Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E))
+                          or else (Jittering and then Driver.Robot.Stillness.Eye_Still (M, Eye_Id (E))));
          begin
             if not Done and then M.Beats > 0 then
                for G in 1 .. Groups loop
@@ -186,7 +217,12 @@ package body Driver.Robot.Motion is
             exit when Done;
          end;
          Beats_Waited := Beats_Waited + 1;
+         if Beats_Waited >= Tell_At then
+            Tell;
+            Tell_At := 2 * Tell_At;
+         end if;
       end loop;
+      Longest_Wait := Natural'Max (Longest_Wait, Beats_Waited);
       if Beats_Waited > 0 then
          declare
             Text : Unbounded_String;

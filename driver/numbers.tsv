@@ -3628,6 +3628,9 @@ driver-robot-look.adb	Rows : constant Vec3 := [1.0, 0.0, 0.0] - Mid (1) * Mid;	1
 driver-robot-look.adb	Step := [for C in 1 .. Size => Step (C) / 2.0];	2.0	structure	halved until it brings the point nearer, as a step is halved elsewhere
 driver-robot-look.adb	Target : constant Vec3 := (1.0 / Scale) * (Inverse (Placement) * X);	1.0	math	from the world into the arm's frame: the inverse of its scale
 driver-robot-look.adb	Turn := (W / 4.0) / Shift;	4.0	structure	a quarter of the picture each way: the middle half of what the eye shows now stays in each view, as the sweep moves the picture by half of it
+driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	1	structure	no wait before the first: told from its second beat
+driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	2	structure	a wait twice the longest before it is told
+driver-robot-motion.adb	Tell_At := 2 * Tell_At;	2	structure	told again at every doubling of the wait
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
