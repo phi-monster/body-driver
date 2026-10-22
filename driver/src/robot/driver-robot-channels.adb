@@ -778,7 +778,12 @@ package body Driver.Robot.Channels is
          D : Real_Array (1 .. M.Groups (G).Size);
       begin
          for C in D'Range loop
-            D (C) := Change (M, G, Beat, C);
+            --  Less the channel's creep a beat (Drift): a reading that creeps at rest moves by it every beat, exactly, so
+            --  the noise its changes show is next to nought and every beat of it was motion. A group of creeping
+            --  readings was waited on to settle for thousands of beats: h401 (seed 401 of the default fake robot on the
+            --  big machine, 10-22, a humanoid whose 30 channels' visible steps were not measured yet) 8213 beats,
+            --  "group 1 moving 8213"; t101 (seed 101) 22200, its group 3 moving 22198 of them.
+            D (C) := Change (M, G, Beat, C) - Drift (M, G, C);
          end loop;
          return Visible (M, G, D, Steps);
       end;
