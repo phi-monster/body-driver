@@ -392,7 +392,12 @@ package body Driver.Robot.Flows is
                      Info.Steps := new Real_Array'(1 .. Size => 0.0);
                      for J in 1 .. Size loop
                         declare
-                           F : constant Joint_Fit := R.Joints (R.Chain (J - 1) - 1);
+                           --  The chain names its joints by their readings' places from 1, as the fit keeps its
+                           --  joints (Kinematics.Chain_Of): taken one before, the first joint was the joints' index 0
+                           --  and every other the joint before it. On the big machine's first round (10-22, 40
+                           --  default-option fakes of every class), all seven cold boots that reached the placing
+                           --  with a fitted arm failed there on the range check (d508, seed 508, among them).
+                           F : constant Joint_Fit := R.Joints (R.Chain (J - 1));
                         begin
                            Info.Joints (J) := (W => F.W, P => F.P, C => F.C, Slide => F.Slide);
                         end;
