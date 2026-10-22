@@ -327,6 +327,13 @@ package body Driver.Robot.Boot is
       procedure Sweep (A : Arm_Id) is
          G    : Group_Id := 1;
          Size : Natural := 0;
+         --  The graph no longer has arm A of group G: an estimate made apart derived it again while the arm was swept
+         --  (its eyes no longer told it the group carrying one). Its sweep ends there; Sweep_Every_Arm reads the body
+         --  again. Read on as arm A, the drone's motors (d501, seed 501 of the default fake robot on the big machine,
+         --  10-22) had their least turns asked of an arm the graph no longer had, and the boot failed on Arm_Group's
+         --  precondition.
+         Gone : Boolean := False;
+         function Still_There return Boolean is (Natural (A) <= Arm_Count (M) and then Arm_Group (M, A) = G);
          procedure Read_Size is
          begin
             G := Arm_Group (M, A);
@@ -479,6 +486,13 @@ package body Driver.Robot.Boot is
             Untold_Now   : Natural := 0;              --  how many orders the fit does not tell from its own
             procedure Read_Followed is
             begin
+               if not Still_There then
+                  Gone := True;
+                  Fitted_Now := False;
+                  Told_Now := False;
+                  Contested.Clear;
+                  return;
+               end if;
                Fitted_Now := Driver.Robot.Kinematics.Fitted (M, A);
                Told_Now := Driver.Robot.Kinematics.Order_Told (M, A);
                Contested := Driver.Robot.Kinematics.Contested_Pairs (M, A);
@@ -573,6 +587,10 @@ package body Driver.Robot.Boot is
                --  the fake robot, 10-17), its sweep 2946 beats.
                procedure Read_Round is
                begin
+                  if not Still_There then
+                     Gone := True;
+                     return;
+                  end if;
                   Read_Shifts;
                   Read_Unseen;
                   for I in 1 .. Count loop
@@ -998,6 +1016,7 @@ package body Driver.Robot.Boot is
                         end if;
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Round'Access);
+                        exit when Gone;
                         for I in 1 .. Count loop
                            if State (I) = Climbing then
                               declare
@@ -1197,9 +1216,10 @@ package body Driver.Robot.Boot is
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
-                     exit when (for all I in 1 .. Count => State (I) /= Climbing)
+                     exit when Gone
+                       or else ((for all I in 1 .. Count => State (I) /= Climbing)
                        and then (New_In_Pass = 0 or else not Fitted_Now
-                                 or else (for all I in 1 .. Count => State (I) /= Not_Followed));
+                                 or else (for all I in 1 .. Count => State (I) /= Not_Followed)));
                      --  The fitted arm predicts: the pushes that stopped unfollowed climb again.
                      if (for all I in 1 .. Count => State (I) /= Climbing) then
                         for I in 1 .. Count loop
@@ -1274,7 +1294,8 @@ package body Driver.Robot.Boot is
                end if;
                Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " swept in" & Passes'Image & " passes of"
                                 & Rounds'Image & " rounds, "
-                                & (if not Fitted_Now then "not fitted" elsif Told_Now then "fitted"
+                                & (if Gone then "no longer an arm of group" & G'Image & " in the graph: its sweep ends"
+                                   elsif not Fitted_Now then "not fitted" elsif Told_Now then "fitted"
                                    else "fitted, its joints' order not told"));
             end;
             declare
