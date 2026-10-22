@@ -29,17 +29,17 @@ PORT=${FAKE_PORT:-$((9500 + SEED % 400))}
 LIM=${FAKE_MINUTES:-60}
 { echo "seed $SEED"; echo "port $PORT"; echo "driver $(md5 -q "$BIN/body_driver" 2>/dev/null || md5sum "$BIN/body_driver" | cut -d' ' -f1)";
   echo "options $*"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
-mkfifo "$R/run.rec.fifo"
-# FAKE_RECORD=0: the recording is read and thrown away (a run mined from its log and its dumps keeps no recording; five
-# runs at once wrote 0.75 GB a minute, 10-19), and the run has no replay or score after it.
-if [ "${FAKE_RECORD:-1}" = 0 ]; then cat < "$R/run.rec.fifo" > /dev/null & FAKE_REPLAY=0
-else zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" &
+# FAKE_RECORD=0: the driver records nothing (a run mined from its log and its dumps keeps no recording; five runs at once
+# wrote 0.75 GB a minute, 10-19), and the run has no replay or score after it. Recorded into a pipe and thrown away, the
+# writes and their flushes were a fifth of the driver's beat (the Mac, 10-22: 588 of 2593 samples of the beat's handling).
+RECORD=(); ZST=
+if [ "${FAKE_RECORD:-1}" = 0 ]; then FAKE_REPLAY=0
+else mkfifo "$R/run.rec.fifo"; zstd -q -T2 -3 -o "$R/run.rec.zst" < "$R/run.rec.fifo" & ZST=$!; RECORD=(--record "$R/run.rec.fifo")
 fi
-ZST=$!
 BRAIN=(); if [ -n "${FAKE_BRAIN:-}" ]; then BRAIN=(--eye "$FAKE_BRAIN"); export BL_BRAIN_SAMPLING='{"temperature":1.0,"top_p":1.0,"top_k":20,"min_p":0,"presence_penalty":2.0,"repetition_penalty":1.0,"chat_template_kwargs":{"enable_thinking":false}}'; fi
 # FAKE_INST=HOST:PORT: the instrument service (harness/instruments/serve.py; segmentation only by default), as the kiwi runs it.
 INST=(); [ -n "${FAKE_INST:-}" ] && INST=(--inst "$FAKE_INST")
-"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" --record "$R/run.rec.fifo" ${BRAIN[@]+"${BRAIN[@]}"} ${INST[@]+"${INST[@]}"} > "$R/driver.log" 2>&1 &
+"$R/bin/body_driver" --listen "$PORT" --body "$R/body.json" ${RECORD[@]+"${RECORD[@]}"} ${BRAIN[@]+"${BRAIN[@]}"} ${INST[@]+"${INST[@]}"} > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -q "listening on port" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
 "$R/bin/fake_robot" --connect "127.0.0.1:$PORT" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/fake.log" 2>&1 &
@@ -61,7 +61,7 @@ kill "$FAKE" 2>/dev/null
 kill "$DRV" 2>/dev/null
 sleep 1
 kill -9 "$DRV" 2>/dev/null
-wait "$ZST" 2>/dev/null
+[ -n "$ZST" ] && wait "$ZST" 2>/dev/null
 rm -f "$R/run.rec.fifo" "$R/stop"
 { echo "end $(date +%FT%T)"; echo "stop $why"; } >> "$R/meta.txt"
 echo "$NAME: $why ($(grep -c "" "$R/truth.jsonl") truth lines)"
