@@ -33,7 +33,7 @@ procedure Truth_Points is
    Truth_Path : constant String := Ada.Command_Line.Argument (2);
    Cam_Name   : constant String := Ada.Command_Line.Argument (3);
    Dump_Path  : constant String := Ada.Command_Line.Argument (4);
-   T          : constant Template := (Hands => [Jaw, Jaw], Dead_Arm => 2, Ticks => 4096, Servo => True, others => <>);
+   T          : constant Template := (Hands => [Jaw, Jaw], Ticks => 4096, Servo => True, others => <>);
    W          : World;
    Cam        : Natural := 0;
 

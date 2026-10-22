@@ -845,14 +845,6 @@ package body Fake_World is
          Build_Arm (W, 2, 1.0, Width, Height, Kinds (2), T.Eyeless /= 2, T.Eye_Up = 2, T.Ticks, T.Servo);
       end;
       end if;
-      --  An arm whose bus is dead stands at rest where it was built, seen and never heard from.
-      if T.Dead_Arm > 0 then
-         for G of W.Groups loop
-            if Ada.Strings.Fixed.Index (To_String (G.Name), "arm" & Trim (T.Dead_Arm) & "_") = 1 then
-               G.Silent := True;
-            end if;
-         end loop;
-      end if;
       --  The fixed eye above and behind the arms, looking down at the table between them.
       declare
          Px  : constant Real := Random (W, -0.05, 0.05);
@@ -1106,7 +1098,7 @@ package body Fake_World is
    procedure Command (W : in out World; G : Positive; Values : Real_Array) is
       Grp : Group renames W.Groups (G);
    begin
-      if not Grp.Commandable or else Grp.Silent or else Values'Length /= Natural (Grp.Joints.Length) then
+      if not Grp.Commandable or else Values'Length /= Natural (Grp.Joints.Length) then
          return;
       end if;
       for I in 1 .. Natural (Grp.Joints.Length) loop

@@ -30,7 +30,7 @@ procedure Probe_Study is
    Poses  : constant Positive := Positive'Value (Ada.Command_Line.Argument (2));
    Spread : constant Real := Real'Value (Ada.Command_Line.Argument (3));
    W      : World;
-   T      : constant Template := (Hands => [Jaw, Jaw], Dead_Arm => 2, Ticks => 4096, Servo => True, others => <>);
+   T      : constant Template := (Hands => [Jaw, Jaw], Ticks => 4096, Servo => True, others => <>);
    Gen    : Ada.Numerics.Float_Random.Generator;
    Fixed  : Natural := 0;
    Tool   : Positive := 1;

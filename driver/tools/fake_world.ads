@@ -109,7 +109,6 @@ package Fake_World is
       Integers    : Boolean := False;      --  read in whole units and sent as integers (a servo bus's ticks)
       Echoed      : Real_Vectors.Vector;   --  the last command received, in reading units
       Reported    : Real_Vectors.Vector;   --  this beat's readings, noise and all, drawn once a beat (Step)
-      Silent      : Boolean := False;      --  its servos do not answer: not reported, commands not taken (a dead bus)
    end record;
 
    package Group_Vectors is new Ada.Containers.Vectors (Positive, Group);
@@ -189,7 +188,6 @@ package Fake_World is
       Eye_Up      : Natural := 0;        --  the arm whose eye looks ahead at the wall, not down at the table; 0 for none
       Plain_Table : Boolean := False;    --  a table with no texture at all
       White_Room  : Boolean := False;    --  a white table and white walls, faint broad veins their only texture
-      Dead_Arm    : Natural := 0;        --  the arm whose servos never answer (it stands at rest, seen); 0 for none
       Ticks       : Natural := 0;        --  the ticks a turn of every arm whose unit is a servo bus's; 0: drawn (1024 to 16384)
       Servo       : Boolean := False;    --  every arm reads in a servo bus's ticks, whatever its unit was drawn
    end record;

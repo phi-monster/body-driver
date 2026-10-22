@@ -635,7 +635,7 @@ procedure Fake_Robot is
             Put_Keys (B, "vision", Keys, Cam_Value'Access);
          elsif Key = "state" or else Key = "action" then
             for G of W.Groups loop
-               if not G.Joints.Is_Empty and then not G.Silent and then (Key = "state" or else G.Commandable) then
+               if not G.Joints.Is_Empty and then (Key = "state" or else G.Commandable) then
                   Keys.Append (To_String (G.Name));
                end if;
             end loop;
@@ -981,7 +981,6 @@ begin
       Shape.Eye_Up := Natural'Value (Option ("--eye-up", "0"));
       Shape.Plain_Table := Option ("--table", "grain") = "plain";
       Shape.White_Room := Option ("--room", "drawn") = "white";
-      Shape.Dead_Arm := Natural'Value (Option ("--dead-arm", "0"));
       Shape.Ticks := Natural'Value (Option ("--ticks", "0"));
       Shape.Servo := Option ("--servo", "no") = "yes";
       Shape.Class := (if Option ("--class") = "humanoid" then Humanoid elsif Option ("--class") = "base" then Base_And_Arm
