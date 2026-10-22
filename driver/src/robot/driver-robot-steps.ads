@@ -83,6 +83,13 @@ private package Driver.Robot.Steps is
    --  measured (Channels.Measure_Pushes): a command travels one path to every group. Known is False before any
    --  push of the body was answered.
 
+   procedure Note (X : in out Extreme; Value : Real; Back : Boolean);
+   --  Counts the quantity at the beat among those since its extreme, and whether it went back the way it had come
+   --  since the beat before (Back): a push's progress, or a wait's (Motion.Settle).
+
+   function Beyond_Chatter (X : Extreme; Gain : Real) return Boolean;
+   --  Whether a quantity went past its extreme by Gain by more than its own chatter since the extreme makes.
+
    function First_Push (M : Model) return Natural;
    --  The beat the body's first push started at: the stream's age then, the wait an unanswered push is given
    --  before any push was answered (the same for every push: no wait is longer than all the waiting so far). 0

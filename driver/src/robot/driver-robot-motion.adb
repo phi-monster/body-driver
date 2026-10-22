@@ -28,69 +28,146 @@ package body Driver.Robot.Motion is
       Eyes   : constant Natural := Eye_Count (M);
       Group_Beats : array (1 .. Groups) of Natural := [others => 0];
       Eye_Beats   : array (1 .. Eyes) of Natural := [others => 0];
-      Period      : Natural := 0;   --  the beats of the cycle the body goes round, once one is seen
 
-      --  Whether the readings went round a cycle of P beats: each of the last P beats read where the beat P before
-      --  it read, every channel within what two readings of its noise tell apart, and some channel moved within
-      --  the P beats (a body whose readings stand still while an eye settles is waited for). A body that goes round
-      --  a cycle about where it was sent settles no further however long it is held: s31 (servo seed 7 of the fake
-      --  robot, 10-17), its hand pressed on the table, arm 1 and its closer went round four poses a beat apart from
-      --  beat 6409, and the boot held in Settle five thousand beats with nothing in its log.
-      function Cycle_Of (P : Positive) return Boolean is
-         Now   : constant Natural := M.Beats - 1;
-         Moved : Boolean := False;
+      --  A group whose readings still move but go nowhere is as settled as it will be, held where it was sent: it
+      --  goes nowhere as a push that moves about does (Steps.Follow), when it has come neither nearer its target nor
+      --  farther from where it stood as the wait began, by a step the one test of motion sees and by more than its
+      --  own chatter makes, for as long as it took it to come as near or as far as it did, nor for less than the
+      --  body's delay. A body may go round a cycle of poses where it was sent (s31, servo seed 7 of the fake robot,
+      --  10-17: its hand pressed on the table, arm 1 and its closer went round four poses a beat apart from beat
+      --  6409, and the boot held here five thousand beats with nothing in its log), or jitter about where it stands:
+      --  h401, h404 and h408 (humanoids of the default fake robot on the big machine, 10-22), a hand resting on the
+      --  table, its joints a millionth of a radian either way at every beat against the 1e-12 their readings' noise
+      --  had measured with nothing touched, waited here 27800, 52000 and 33000 beats. Each beat of a jitter was
+      --  motion, and no cycle repeats a jitter. A cycle comes no nearer and goes no farther either, after its first
+      --  round.
+      From        : array (1 .. Groups) of Real_Vectors.Vector;   --  the readings as the wait began, once read
+      From_Beat   : array (1 .. Groups) of Natural := [others => 0];
+      Nearest     : array (1 .. Groups) of Extreme;
+      Farthest    : array (1 .. Groups) of Extreme;
+      Progress_At : array (1 .. Groups) of Natural := [others => 0];   --  the beat of the wait it last came nearer
+                                                                     --  or went farther at
+      Delay_Beats : Natural;
+      Delay_Known : Boolean;
+
+      --  The distance of the group's readings at Beat from its target in effect and from where the wait began
+      --  (less the creep of the beats between, Channels.Drift), and the change of each channel from there.
+      procedure Distances (G : Group_Id; Beat : Natural; Near, Far : out Real; To_Target, Away : out Real_Array) is
+         Aimed : constant Boolean := Is_Commandable (M, G) and then Driver.Robot.Channels.Has_Target (M, G, Beat);
       begin
-         for K in 0 .. P - 1 loop
-            for G in 1 .. Groups loop
-               declare
-                  Gid : constant Group_Id := Group_Id (G);
-               begin
-                  if Driver.Robot.Channels.Has_Reading (M, Gid, Now - K)
-                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - K - P)
-                    and then Driver.Robot.Channels.Has_Reading (M, Gid, Now - P + 1)
-                  then
-                     for C in 1 .. Group_Size (M, Gid) loop
-                        declare
-                           Noise : constant Real := Driver.Robot.Channels.Noise (M, Gid, C);
-                        begin
-                           if Noise >= Real'Last then
-                              return False;
-                           end if;
-                           if Driver.Uncertain.Significant
-                                (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
-                                 - Driver.Robot.Channels.Reading (M, Gid, Now - K - P, C), Noise * Sqrt (2.0))
-                           then
-                              return False;
-                           end if;
-                           Moved := Moved or else Driver.Uncertain.Significant
-                             (Driver.Robot.Channels.Reading (M, Gid, Now - K, C)
-                              - Driver.Robot.Channels.Reading (M, Gid, Now - P + 1, C), Noise * Sqrt (2.0));
-                        end;
-                     end loop;
-                  end if;
-               end;
-            end loop;
+         Near := 0.0;
+         Far := 0.0;
+         for C in Away'Range loop
+            Away (C) := Driver.Robot.Channels.Reading (M, G, Beat, C) - From (Positive (G)) (C - 1)
+              - Driver.Robot.Channels.Drift (M, G, C) * Real (Beat - From_Beat (Positive (G)));
+            To_Target (C) := (if Aimed then Driver.Robot.Channels.Target (M, G, Beat, C)
+                                             - Driver.Robot.Channels.Reading (M, G, Beat, C) else 0.0);
+            Near := Near + To_Target (C) ** 2;
+            Far := Far + Away (C) ** 2;
          end loop;
-         return Moved;
-      end Cycle_Of;
+         Near := Sqrt (Near);
+         Far := Sqrt (Far);
+      end Distances;
+
+      --  Follows the group through the beat just read, as Steps.Follow a push.
+      procedure Follow (G : Group_Id) is
+         Beat : constant Natural := M.Beats - 1;
+         Size : constant Natural := Group_Size (M, G);
+         I    : constant Positive := Positive (G);
+      begin
+         if not Driver.Robot.Channels.Has_Reading (M, G, Beat) then
+            return;
+         end if;
+         if From (I).Is_Empty then
+            for C in 1 .. Size loop
+               From (I).Append (Driver.Robot.Channels.Reading (M, G, Beat, C));
+            end loop;
+            From_Beat (I) := Beat;
+            declare
+               Near, Far : Real;
+               To_Target, Away : Real_Array (1 .. Size);
+            begin
+               Distances (G, Beat, Near, Far, To_Target, Away);
+               Nearest (I) := (Value => Near, others => <>);
+               Farthest (I) := (Value => 0.0, others => <>);
+               Driver.Robot.Steps.Note (Nearest (I), Near, Back => False);
+               Driver.Robot.Steps.Note (Farthest (I), Far, Back => False);
+            end;
+            Progress_At (I) := Beats_Waited;
+            return;
+         end if;
+         declare
+            Near, Far : Real;
+            To_Target, Away : Real_Array (1 .. Size);
+            Steps : Real_Array (1 .. Size);
+            Stepped : Boolean := False;
+            --  The change along the given direction, D scaled to a length, as the one test of motion sees it: the
+            --  channels' visible steps made once a beat, at the first that needs them.
+            function Seen (D : Real_Array; Length, Norm : Real) return Boolean is
+            begin
+               if not Stepped then
+                  Steps := Driver.Robot.Channels.Steps_Of (M, G);
+                  Stepped := True;
+               end if;
+               return Norm > 0.0
+                 and then Driver.Robot.Channels.Visible (M, G, [for C in D'Range => D (C) * Length / Norm], Steps);
+            end Seen;
+         begin
+            Distances (G, Beat, Near, Far, To_Target, Away);
+            declare
+               N : Extreme renames Nearest (I);
+               F : Extreme renames Farthest (I);
+               --  Back the way it had come since the beat before, by a step the one test of motion sees: farther from
+               --  its target, or nearer to where the wait began.
+               Back_Near : constant Boolean :=
+                 N.Followed > 0 and then Near > N.Last and then Seen (To_Target, Near - N.Last, Near);
+               Back_Far  : constant Boolean :=
+                 F.Followed > 0 and then Far < F.Last and then Seen (Away, F.Last - Far, Far);
+               Nearer    : constant Boolean := Near < N.Value and then Seen (To_Target, N.Value - Near, Near)
+                 and then Driver.Robot.Steps.Beyond_Chatter (N, N.Value - Near);
+               Farther   : constant Boolean := Far > F.Value and then Seen (Away, Far - F.Value, Far)
+                 and then Driver.Robot.Steps.Beyond_Chatter (F, Far - F.Value);
+            begin
+               if Nearer then
+                  N := (Value => Near, others => <>);
+               end if;
+               if Farther then
+                  F := (Value => Far, others => <>);
+               end if;
+               Driver.Robot.Steps.Note (N, Near, Back => not Nearer and then Back_Near);
+               Driver.Robot.Steps.Note (F, Far, Back => not Farther and then Back_Far);
+               if Nearer or else Farther then
+                  Progress_At (I) := Beats_Waited;
+               end if;
+            end;
+         end;
+      end Follow;
+
+      function Nowhere (G : Group_Id) return Boolean is
+        (not From (Positive (G)).Is_Empty
+         and then Beats_Waited - Progress_At (Positive (G)) > Natural'Max (Progress_At (Positive (G)), Delay_Beats));
+
+      Still_Now   : array (1 .. Groups) of Boolean := [others => False];
+      Ended_There : array (1 .. Groups) of Boolean := [others => False];   --  the group ended the wait going nowhere
    begin
       Beats_Waited := 0;
+      Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
       loop
          Driver.Beats.Next (B);
-         if not Still (M) and then M.Beats > 0 then
-            for P in 2 .. Beats_Waited / 2 loop
-               if M.Beats > 2 * P and then Cycle_Of (P) then
-                  Period := P;
-                  exit;
-               end if;
+         if M.Beats > 0 then
+            for G in 1 .. Groups loop
+               Still_Now (G) := Driver.Robot.Stillness.Group_Still (M, Group_Id (G), M.Beats - 1);
+               Follow (Group_Id (G));
             end loop;
          end if;
          declare
-            Done : constant Boolean := Still (M) or else Period > 0;
+            Done : constant Boolean :=
+              M.Beats > 0 and then (for all G in 1 .. Groups => Still_Now (G) or else Nowhere (Group_Id (G)))
+              and then (for all E in 1 .. Eyes => Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)));
          begin
             if not Done and then M.Beats > 0 then
                for G in 1 .. Groups loop
-                  if not Driver.Robot.Stillness.Group_Still (M, Group_Id (G), M.Beats - 1) then
+                  if not Still_Now (G) then
                      Group_Beats (G) := Group_Beats (G) + 1;
                   end if;
                end loop;
@@ -98,6 +175,11 @@ package body Driver.Robot.Motion is
                   if not Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E)) then
                      Eye_Beats (E) := Eye_Beats (E) + 1;
                   end if;
+               end loop;
+            end if;
+            if Done then
+               for G in 1 .. Groups loop
+                  Ended_There (G) := not Still_Now (G);
                end loop;
             end if;
             Driver.Beats.Send (Driver.Commands.Hold);
@@ -111,7 +193,8 @@ package body Driver.Robot.Motion is
          begin
             for G in 1 .. Groups loop
                if Group_Beats (G) > 0 then
-                  Append (Text, " group" & G'Image & " moving" & Group_Beats (G)'Image);
+                  Append (Text, " group" & G'Image & " moving" & Group_Beats (G)'Image
+                          & (if Ended_There (G) then " (going nowhere since" & Progress_At (G)'Image & ")" else ""));
                end if;
             end loop;
             for E in 1 .. Eyes loop
@@ -119,10 +202,7 @@ package body Driver.Robot.Motion is
                   Append (Text, " eye" & E'Image & " unsettled" & Eye_Beats (E)'Image);
                end if;
             end loop;
-            Driver.Log.Line (Driver.Log.Robot, "motion: " & (if Period > 0 then "held" else "settled") & " after"
-                             & Beats_Waited'Image & " beats:" & To_String (Text)
-                             & (if Period > 0 then "; the body goes round a cycle of" & Period'Image
-                                   & " beats about where it was sent and settles no further" else ""));
+            Driver.Log.Line (Driver.Log.Robot, "motion: settled after" & Beats_Waited'Image & " beats:" & To_String (Text));
          end;
       end if;
    end Settle;
