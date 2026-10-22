@@ -2341,10 +2341,11 @@ package body Driver.Robot.Kinematics.Fit is
                                                (case P is
                                                   when 1 => "fx", when 2 => "fy", when 3 => "cx",
                                                   when 4 => "cy", when 5 => "k1", when others => "k2")
-                                             else "j" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)
-                                                  & (case (P - 7) mod 5 is
+                                             else "j" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / Per_Reduced + 1), Ada.Strings.Left)
+                                                  & (case (P - 7) mod Per_Reduced is
                                                        when 0 => " axis a", when 1 => " axis b", when 2 => " point a",
-                                                       when 3 => " point b", when others => " scale"));
+                                                       when 3 => " point b", when 4 => " scale", when 5 => " half slack",
+                                                       when others => " slack's place"));
                                        begin
                                           for P in 1 .. Reduced loop
                                              if Equal (P) = 0.0 then
@@ -3007,9 +3008,9 @@ package body Driver.Robot.Kinematics.Fit is
       Start_Parts : constant Driver.Numerics.Arrays.Real_Matrix :=
         (if Started then Play_Parts (Play, Slack_Start) else [1 .. Frames => [1 .. N => 0.0]]);
       --  The joints' turns with the slack as measured: what the search of the orders (stage 4) refines, its slack held,
-      --  as every stage before it takes it; the last stage refines the slack with the rest. Refined with the slack free
-      --  from the start, seed 26 (10-22) took its focal length for 162 px of the true 207, 0.26 of the bend for 0.009,
-      --  and seed 20 down to 3 px.
+      --  as every stage before it takes it and the last stage too, which frees the slack only from its own fit (below).
+      --  Refined with the slack free from the start, seed 26 (10-22) took its focal length for 162 px of the true 207,
+      --  0.26 of the bend for 0.009, and seed 20 down to 3 px.
       Joint_Turns : constant Driver.Numerics.Arrays.Real_Matrix :=
         [for F in 1 .. Frames => [for J in 1 .. N => Changes (Changes'First (1) + F - 1, Changes'First (2) + J - 1)
                                                     - Start_Parts (F, J)]];
@@ -3472,17 +3473,15 @@ package body Driver.Robot.Kinematics.Fit is
             L_P      : Lens;
             Report_P : Fit_Report := Report;
          begin
-            Refine_Tracks (Changes, Sight, Joints, Order, L, Report, Focal_Within, Play => Play,
-                           Slack_From => Slack_Start);
+            Refine_Tracks (Joint_Turns, Sight, Joints, Order, L, Report, Focal_Within);
             --  The pinhole nearest the lens with them, refined from its joints (begun from the stage before, a wheeled
             --  base's head, bench seed 1 10-20, went from 166 px to 25, the truth 171, in 18 passes while the lens
             --  with them stayed at 166), and judged at the lens's error model: the lens with them holds it as its own
             --  special case. Its cost is all that is asked of it here, its covariance only where it is taken.
             Joints_P := Joints;
             L_P := (Fx | Fy => Sqrt (L.Fx * L.Fy), Cx => L.Cx, Cy => L.Cy, others => 0.0);
-            Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Spread => False,
-                           Pinhole => True, Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
-                           Slack_From => Slack_Start);
+            Refine_Tracks (Joint_Turns, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Spread => False,
+                           Pinhole => True, Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
             --  Where the pinhole's sightings cost less, the lens with them lies in a worse basin than its special
             --  case (the bench's drone 1:1, 10-21: at 118.7 by 151.0 px, its cost 2000 above the pinhole's at 170.7
             --  px, the truth 171.4): it is refitted from the pinhole's.
@@ -3493,9 +3492,8 @@ package body Driver.Robot.Kinematics.Fit is
                   L_E      : Lens := L_P;
                   Report_E : Fit_Report := Report;
                begin
-                  Refine_Tracks (Changes, Sight, Joints_E, Order, L_E, Report_E, Focal_Within,
-                                 Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
-                                 Slack_From => Slack_Start);
+                  Refine_Tracks (Joint_Turns, Sight, Joints_E, Order, L_E, Report_E, Focal_Within,
+                                 Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
                   if Report_E.All_Count > 0 and then Report_E.Cost_Judged < Report.Cost_Judged then
                      Joints := Joints_E;
                      L := L_E;
@@ -3508,8 +3506,7 @@ package body Driver.Robot.Kinematics.Fit is
             end if;
             if not Report.Determined and then Report_P.All_Count > 0 then
                Worse := Report.Cost_Judged - Report_P.Cost_Judged;
-               Refine_Tracks (Changes, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True, Play => Play,
-                              Slack_From => Slack_Start);
+               Refine_Tracks (Joint_Turns, Sight, Joints_P, Order, L_P, Report_P, Focal_Within, Pinhole => True);
                --  The pinhole taken where the lens with its extras is not (its covariance singular, or no account of
                --  them: Weigh_Extras) takes the step between them into its covariance, its profile walked (Take_Span,
                --  below): the sightings did not tell the extras, and held at nought they are in no covariance. Only
@@ -3613,9 +3610,9 @@ package body Driver.Robot.Kinematics.Fit is
                               end if;
                               Lp.Fx := L.Fx * Factor;
                               Lp.Fy := L.Fy * Factor;
-                              Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Held, Spread => False,
+                              Refine_Tracks (Joint_Turns, Sight, Jp, Order, Lp, Rp, Held, Spread => False,
                                              Pinhole => Report.Pinhole, Judge_Floor => Report.Judge_Floor,
-                                             Judge_Gain => Report.Judge_Gain, Play => Play, Slack_From => Slack_Start);
+                                             Judge_Gain => Report.Judge_Gain);
                               exit when Rp.All_Count = 0;
                               --  Where the step's focal length went, held within its own sigma: a profile is flat as far
                               --  as its steps went untold, not as far as they were asked (the sightings pulled a step at
@@ -3651,9 +3648,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  quick fits through the eyes, 56 % more steps than the told ending cost robot.kinematics
                                  --  3 % more time side by side (10-21).
                                  if Report.Cost_Judged - Rp.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0 then
-                                    Refine_Tracks (Changes, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
-                                                   Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
-                                                   Slack_From => Slack_Start);
+                                    Refine_Tracks (Joint_Turns, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
+                                                   Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
                                     if Rp.All_Count > 0 and then Rp.Cost_Judged < Report.Cost_Judged then
                                        Walked (Way) := (Moved => True, L => Lp, Report => Rp, others => <>);
                                        Walked_Joints (Way) := Jp;
@@ -3761,6 +3757,43 @@ package body Driver.Robot.Kinematics.Fit is
          --  searched, the fit was left undetermined and the next rounds wandered to 67 px for 173 (10-21).
          if Span_Due and then Report.Pinhole and then Report.All_Count > 0 then
             Take_Span (L, Joints, Extras_L, Extras_J, Worse, Report);
+         end if;
+         --  The slack freed at last, from the fit with it held: the joints, the lens and the slack refined together
+         --  where that lowers the sightings' cost at the fit's own error model and the fit stays determined, its focal
+         --  length's sigma no less than the held fit's (its profile's). Freed in the last stage from the order search's
+         --  fit, seed 20's boot of 10-22 (its fits at 87, 105 and 113 keyframes, replayed) went to 40, 0 and 2234 px for
+         --  the true 187, not one fitted, where held they came to 178 +- 13, 177 +- 12 and 179 +- 10; held alone, the
+         --  fits that the freed slack had fitted lost their precision (seed 26: 209.7 +- 2.0 to 223.9 +- 7.1 px, the
+         --  truth 207.4).
+         if Started and then Report.Determined and then Report.All_Count > 0 then
+            declare
+               Joints_S : Joint_Array := Joints;
+               L_S      : Lens := L;
+               Report_S : Fit_Report := Report;
+            begin
+               Refine_Tracks (Changes, Sight, Joints_S, Order, L_S, Report_S, Focal_Within, Pinhole => Report.Pinhole,
+                              Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain, Play => Play,
+                              Slack_From => Slack_Start);
+               if Report_S.Determined and then Report_S.All_Count > 0
+                 and then Report_S.Cost_Judged < Report.Cost_Judged
+               then
+                  Report_S.Focal_Sigma := Real'Max (Report_S.Focal_Sigma, Report.Focal_Sigma);
+                  Joints := Joints_S;
+                  L := L_S;
+                  Report := Report_S;
+               end if;
+            end;
+         end if;
+         --  The slack held: as it was measured.
+         if Started and then Report.Slacks.Is_Empty then
+            for J in 1 .. N loop
+               declare
+                  H : constant Real := Real'Max (0.0, Slack_Start (Slack_Start'First + 2 * J - 2));
+               begin
+                  Report.Slacks.Append (H);
+                  Report.Slack_Places.Append (Real'Max (-H, Real'Min (H, Slack_Start (Slack_Start'First + 2 * J - 1))));
+               end;
+            end loop;
          end if;
          declare
             Sum : Real := 0.0;

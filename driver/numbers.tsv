@@ -1062,12 +1062,14 @@ driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first ver
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& "" & Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if P.Sign > 0.0 then "" else "") & "" & Driver.Log.Image (Off, 4)	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Unswept.Length = 1 then "" else "" & Unswept.Length'Image	1	structure	one arm left to sweep: nothing to say of the others
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Pose (Swept (Turned (J))) - Start (Swept (Turned (J))), 3));	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Share (P.Later), 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Share (P.Later), 3) & "");	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Plan_Text & "" & Driver.Log.Image (Half, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (Driver.Robot.Motion.Increasing) - 1))	2.0	numerics	doubling search: each level asks twice the one before, so any amount is reached within a factor two in a number of levels logarithmic in it
@@ -2048,8 +2050,7 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Visible (Visible'First 
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
 driver-robot-kinematics-fit.adb	& "" & Real'Image (L.Fy * Sqrt (V (2, 2))) & "");	2	structure	the second focal length's logarithm, the second reduced term
 driver-robot-kinematics-fit.adb	& "" & Real'Image (L.Fy * Sqrt (V (2, 2))) & "");	2	structure	the second focal length's logarithm, the second reduced term
-driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
-driver-robot-kinematics-fit.adb	& (case (P - 7) mod 5 is	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	& (case (P - 7) mod Per_Reduced is	7	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Best_M, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Gm, 3) & "" & Driver.Log.Image (Mo, 3) & ""	3	format	digits printed in a log line or a message
@@ -2275,6 +2276,8 @@ driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack (Slack
 driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack (Slack'First + 2 * J - 2));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
+driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack_Start (Slack_Start'First + 2 * J - 2));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
+driver-robot-kinematics-fit.adb	H : constant Real := Real'Max (0.0, Slack_Start (Slack_Start'First + 2 * J - 2));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
 driver-robot-kinematics-fit.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (X'First + K - 1));	1.0	numerics	the scale floor of a finite difference and of a bracket width
 driver-robot-kinematics-fit.adb	H := H / 2.0;	2.0	structure	the halvings of the most a reading went: each candidate half slack half the one before
@@ -2413,6 +2416,7 @@ driver-robot-kinematics-fit.adb	Ray (Lx, Sight (I).U, Sight (I).V), (Lx.Fx + Lx.
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := 6 + Per_Reduced * N;	6	structure	the reduced terms' layout: six of the lens, then per joint its tilt (2), its point across the axis (2), its reading scale (1) and, slacked, its slack's two
 driver-robot-kinematics-fit.adb	Reduced : constant Positive := First_Of (N) + (if Slides (N) then 0 else 1);	1	structure	the last joint's unknowns after its first: none for a slide, one more for a turn
 driver-robot-kinematics-fit.adb	Refine_All (1, Kept_At);	1	structure	indexes start at one
+driver-robot-kinematics-fit.adb	Report.Slack_Places.Append (Real'Max (-H, Real'Min (H, Slack_Start (Slack_Start'First + 2 * J - 1))));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	Report.Slack_Places.Append (Two (2 * J));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	Report.Slacks.Append (Two (2 * J - 1));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	Residuals (K + 2) := (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);	2	structure	two residuals a sighting, across and down
@@ -2620,8 +2624,7 @@ driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	and then not Joint_Determined (Variance (O + 1), Variance (O + 2), Variance (O + 5), C)	2	structure	a joint's terms after the lens's: its axis's tilt along the two directions across it (1, 2), then its point's (3, 4), then its scale (5)
 driver-robot-kinematics-fit.adb	and then not Joint_Determined (Variance (O + 1), Variance (O + 2), Variance (O + 5), C)	5	structure	a joint's terms after the lens's: its axis's tilt along the two directions across it (1, 2), then its point's (3, 4), then its scale (5)
-driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
-driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / 5 + 1), Ada.Strings.Left)	7	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / Per_Reduced + 1), Ada.Strings.Left)	7	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
 driver-robot-kinematics-fit.adb	else "" & J.Telling'Image & "" & Driver.Log.Image (J.Gap, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	else "") & "" & Driver.Log.Image (L.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	else Driver.Conventions.Z * (abs Z_Value - 0.5 * Driver.Conventions.Z));	0.5	math	the Huber function
@@ -2796,7 +2799,9 @@ driver-robot-kinematics-fit.adb	when 0 => "", when 1 => "", when 2 => "",	2	stru
 driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	1	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	2	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 1 => "", when 2 => "", when 3 => "",	3	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
-driver-robot-kinematics-fit.adb	when 3 => "", when others => ""));	3	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
+driver-robot-kinematics-fit.adb	when 3 => "", when 4 => "", when 5 => "",	3	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
+driver-robot-kinematics-fit.adb	when 3 => "", when 4 => "", when 5 => "",	4	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
+driver-robot-kinematics-fit.adb	when 3 => "", when 4 => "", when 5 => "",	5	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
 driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	4	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	when 4 => "", when 5 => "", when others => "")	5	structure	the reduced terms' layout: six of the lens, then five a joint (two of its axis, two of its point, its scale)
 driver-robot-kinematics-fit.adb	while I >= 1 and then C (I) > C (I + 1) loop	1	structure	an insertion sort down to the first element

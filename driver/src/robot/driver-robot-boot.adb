@@ -1154,9 +1154,41 @@ package body Driver.Robot.Boot is
                      end;
                      --  A fitted arm ends the pass with the joints together at the
                      --  widest offsets followed (the rounds before the fit had their
-                     --  own); its predictions go into these frames.
+                     --  own); its predictions go into these frames. Where the fit
+                     --  names joints next to each other whose swap it cannot tell
+                     --  (Contested), the pass ends turning those two, a pair at a time
+                     --  (Pair_Shares), as the passes' end does, in place of every
+                     --  joint at once: the fake's seed 26 (10-22) was fitted at 39
+                     --  keyframes after its third pass, its order untold, and took its
+                     --  cells of every joint and its single turns for 12663 beats and
+                     --  four estimates more before its order was told, at 75.
                      if N > 1 and then New_In_Pass > 0 and then Fitted_Now then
-                        Together (Shares, Climb => True);
+                        if not Told_Now and then not Contested.Is_Empty then
+                           declare
+                              Said : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for K in Contested.First_Index .. Contested.Last_Index loop
+                                 declare
+                                    P     : constant Joint_Pair := Contested (K);
+                                    Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
+                                 begin
+                                    Ada.Strings.Unbounded.Append
+                                      (Said, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later)
+                                             & " by " & Driver.Log.Image (Share (P.Earlier), 3) & " and "
+                                             & Driver.Log.Image (Share (P.Later), 3) & " units");
+                                 end;
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
+                                               & " ends with its joints' order not told (" & Untold_Now'Image
+                                               & " orders untold); its cells turn the pairs whose turns tell its untold"
+                                               & " orders apart, a pair at a time:" & Ada.Strings.Unbounded.To_String (Said));
+                           end;
+                           for K in Contested.First_Index .. Contested.Last_Index loop
+                              Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
+                           end loop;
+                        else
+                           Together (Shares, Climb => True);
+                        end if;
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
