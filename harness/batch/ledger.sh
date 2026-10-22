@@ -12,7 +12,7 @@ for R in "$D"/*/; do
   kin=$(grep -oE "kinematics [0-9.]+\)" $L | grep -oE "[0-9.]+" | awk '{s+=$1} END {printf "%.0f", s}')
   aln=$(grep -oE "alignment [0-9.]+, graph" $L | awk '{s+=$2} END {printf "%.0f", s}')
   nest=$(grep -c "estimated from" $L)
-  fk=$(grep "a beat takes" $R/fake.log 2>/dev/null | tail -1 | grep -oE "render [0-9.E+-]+ ms, body [0-9.E+-]+ ms, driver [0-9.E+-]+" | awk '{printf "render %.1f driver %.1f", $2, $6}')
+  fk=$(grep "a beat takes" $R/fake.log 2>/dev/null | tail -1 | grep -oE "render [0-9.E+-]+ ms, body [0-9.E+-]+ ms, driver [0-9.E+-]+" | awk '{printf "render %.1f body %.1f driver %.1f", $2, $5, $8}')
   p1=$(grep -m1 -oE "^@[0-9]+ \[robot\] boot: the body is kept in .* after recognizing" $L | grep -oE "^@[0-9]+")
   p2=$(grep -m1 -oE "^@[0-9]+ \[robot\] boot: the body is kept in .* after sweeping" $L | grep -oE "^@[0-9]+")
   p3=$(grep -m1 -oE "^@[0-9]+ \[robot\] boot: the body is kept in .* after placing" $L | grep -oE "^@[0-9]+")

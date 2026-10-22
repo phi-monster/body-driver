@@ -6,6 +6,7 @@
 # own. Code: BIN (default /root/bd/driver/bin), runs under $RUNS/ROUND. STOP_AT, a regular expression: a boot is stopped
 # as soon as a line of its driver's log matches it (STOP_AT='boot: the groups as recognized' runs step 1 alone).
 # DUMP_FITS set: every fit's inputs go to $RUNS/ROUND/NAME.fits (BD_DUMP_FITS), for driver-robot-fit_replay.
+# RATE: the fake's beats a second at the most (default 0: as fast as the driver answers).
 ROUND=$1; JOBS=$2; LIST=$3
 export RUNS=${RUNS:-/root/runs}
 export FAKE_RUNS=$RUNS/$ROUND BIN=${BIN:-/root/bd/driver/bin} FAKE_RECORD=${FAKE_RECORD:-0} BD_WORKERS=${BD_WORKERS:-2}
@@ -18,7 +19,7 @@ while read -r NAME SEED OPTS; do
   i=$((i + 1))
   while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 5; done
   ( if [ -n "${DUMP_FITS:-}" ]; then mkdir -p "$FAKE_RUNS/$NAME.fits"; export BD_DUMP_FITS="$FAKE_RUNS/$NAME.fits"; fi
-    FAKE_PORT=$((${PORT_BASE:-11000} + i)) bash harness/run/fake.sh "$NAME" "$SEED" --rate 0 $OPTS > "$FAKE_RUNS/$NAME.launch.txt" 2>&1 &
+    FAKE_PORT=$((${PORT_BASE:-11000} + i)) bash harness/run/fake.sh "$NAME" "$SEED" --rate ${RATE:-0} $OPTS > "$FAKE_RUNS/$NAME.launch.txt" 2>&1 &
     P=$!
     if [ -n "${STOP_AT:-}" ]; then
       while kill -0 $P 2> /dev/null; do
