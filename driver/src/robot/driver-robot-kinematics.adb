@@ -871,6 +871,10 @@ package body Driver.Robot.Kinematics is
 
    type Pixel_Derivative is array (1 .. 2) of Real;   --  of the pixel's u and v
 
+   --  What a fitted arm's offer states of a point it does not predict (Offer_Of: one its fit gave no depth): that it
+   --  may lie anywhere.
+   Unpredicted : constant Real := Real'Last / 4.0;
+
    --  The fitted arm's own prediction of where its reference's query points are in a keyframe at those readings.
    --  A query the fit gave a depth is a point in the reference eye's frame; the eye at the readings (the fit's
    --  joints) sees it where the lens puts it. The prediction's uncertainty is the fit's whole covariance carried to
@@ -891,7 +895,6 @@ package body Driver.Robot.Kinematics is
       use Driver.Numerics.Arrays;
       Queries   : constant Natural := Natural (R.Query_U.Length);
       Lens      : constant Fit.Lens := Fit_Lens (R.Result.Lens);
-      Unbounded : constant Real := Real'Last / 4.0;
       Pose      : constant Rigid := Eye_In_Reference (M, R.Arm, Readings);
       Step      : constant Real := Ada.Numerics.Long_Elementary_Functions."**" (Real'Model_Epsilon, 1.0 / 3.0);
 
@@ -1013,10 +1016,10 @@ package body Driver.Robot.Kinematics is
             V0 : constant Real := (if Q < Queries then R.Query_V (Q) else 0.0);
          begin
             Into (K) := (From => (U => U0, V => V0), To => (U => U0, V => V0),
-                         Cov => (UU => Unbounded, UV => 0.0, VV => Unbounded), others => <>);
+                         Cov => (UU => Unpredicted, UV => 0.0, VV => Unpredicted), others => <>);
             if Known and then Q < Queries and then R.Result.Track_Known (Q)
               and then Q < Natural (R.Result.Track_Sigmas.Length)
-              and then R.Result.Track_Sigmas (Q) < Unbounded and then Covariant
+              and then R.Result.Track_Sigmas (Q) < Unpredicted and then Covariant
             then
                declare
                   X     : constant Vec3 :=
@@ -1152,14 +1155,29 @@ package body Driver.Robot.Kinematics is
            & " points on the best field alone against" & Common.Other'Image & " on the next, of"
            & Common.Points'Image & ";" & Common.Draws'Image & " draws;" & Common.Unmoved'Image & " where they stood)");
 
+   --  The median standard deviation, over the points a prediction places, that it states: the larger axis of each.
+   --  A fitted arm's offer places only the points its fit gave a depth (Offer_Of: the rest Unpredicted). Taken over
+   --  every point, an arm whose fit gave fewer than half of its points a depth stated the unbounded at every keyframe,
+   --  and no keyframe was ever aligned again from it (Realign_Arms, Narrowed): e20x_20 (seed 20 of the default fake
+   --  robot, 10-22), 115 of its 255 points with a depth, none of its 89 keyframes aligned again, and 29 of the 43
+   --  after its first fit kept 5 sightings or fewer; e20v_26 (seed 26, 176 of 255 with a depth) aligned 45 again.
+   --  Where the prediction places no point, what an unplaced one states.
    function Stated_By (Given : Keyframes.Prediction_Array) return Real is
       Sigmas : Real_Access := new Real_Array (1 .. Given'Length);
+      Placed : Natural := 0;
    begin
       for K in Given'Range loop
-         Sigmas (K - Given'First + 1) :=
-           Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (Given (K).Cov.UU, Given (K).Cov.VV));
+         if Real'Max (Given (K).Cov.UU, Given (K).Cov.VV) < Unpredicted then
+            Placed := Placed + 1;
+            Sigmas (Placed) :=
+              Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (Given (K).Cov.UU, Given (K).Cov.VV));
+         end if;
       end loop;
-      return Result : constant Real := (if Given'Length = 0 then 0.0 else Driver.Stats.Median (Sigmas.all)) do
+      return Result : constant Real :=
+        (if Given'Length = 0 then 0.0
+         elsif Placed = 0 then Ada.Numerics.Long_Elementary_Functions.Sqrt (Unpredicted)
+         else Driver.Stats.Median (Sigmas (1 .. Placed)))
+      do
          Free (Sigmas);
       end return;
    end Stated_By;
@@ -1779,6 +1797,23 @@ package body Driver.Robot.Kinematics is
       return Result;
    end Readings_Array;
 
+   --  Keyframe F's readings less where its joints' gears' slack stood then (Slack_Parts): the readings the fitted
+   --  arm stands at, which its offer of the keyframe is made at (Offer_Of). Made at the readings as read, a fitted
+   --  arm's offer put a joint where its slack had not let it go: e20x_20 (seed 20 of the default fake robot, 10-22,
+   --  its base joint's half slack 0.139 units, about 2 degrees), keyframe 48 found its points a median 7.46 px from
+   --  where they were predicted, the prediction stating 2.45 px.
+   function Standing (M : Model; R : Arm_Evidence; F : Positive) return Real_Array is
+      Readings : Real_Array := Readings_Array (R.Frames (F));
+      Parts    : constant Real_Array := Slack_Parts (M, R.Arm, R.Frames (F).Beat);
+   begin
+      if Parts'Length = Readings'Length then
+         for C in Readings'Range loop
+            Readings (C) := Readings (C) - Parts (Parts'First + C - Readings'First);
+         end loop;
+      end if;
+      return Readings;
+   end Standing;
+
    type Tally is array (Driver.Alignment.Reason) of Natural;
 
    --  A tally of the aligner's reasons, for the log: "; because: matched 5358, no_texture 1200, ...".
@@ -1959,7 +1994,7 @@ package body Driver.Robot.Kinematics is
                --  from nothing (Keyframes.Predict: a window as wide as the aligner searches), the next from it.
                Shift (C) := Pixels_Per_Unit (M, R, C);
             end loop;
-            Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
+            Offer_Of (M, R, Standing (M, R, F), Offered.all, Known);
             if Known then
                Keyframes.Predict (R.Chain, Change, Noise, Shift, Offered.all, Given.all, From);
             else
@@ -2232,7 +2267,7 @@ package body Driver.Robot.Kinematics is
                         Agree   : Agreement_Access := new Keyframes.Flag_Array (1 .. Queries);
                         Known   : Boolean;
                      begin
-                        Offer_Of (M, R, Readings_Array (R.Frames (F)), Offered.all, Known);
+                        Offer_Of (M, R, Standing (M, R, F), Offered.all, Known);
                         --  A keyframe is aligned again when the fitted arm gives it a window narrower by a pixel (the grid the
                         --  aligner's candidates lie on) than the one it was aligned from, and one a size of the pictures narrower if
                         --  what it answered was what a fit may rest on already (a keyframe the fit takes in, or not, by whether most
