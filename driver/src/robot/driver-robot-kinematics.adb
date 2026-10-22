@@ -390,7 +390,13 @@ package body Driver.Robot.Kinematics is
          D     : Real_Array (1 .. Now'Length);
       begin
          for C in D'Range loop
-            D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1);
+            --  Less the creep of the span's beats (Channels.Drift): a reading that creeps at rest changes over the span
+            --  by its creep a beat times the span, and that is rest, as Steps has it. Taken whole, it held ba_t21's
+            --  arm 1 for a keyframe 5850 beats (seed 21 of the default fake robot, 10-22, from beat 6564 until the
+            --  estimate of beat 12413 measured again): its six readings crept 3e-10 to 5e-9 units a beat, their noise
+            --  1.05 times that, and over the span of 4 beats each crept 2.7 of its sigmas, the six together beyond
+            --  the gate, while the eye's picture had settled.
+            D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1) - Channels.Drift (M, G, C) * Real (Span);
          end loop;
          return not Channels.Visible (M, G, D);
       end;
@@ -705,7 +711,7 @@ package body Driver.Robot.Kinematics is
             D     : Real_Array (1 .. Now'Length);
          begin
             for C in D'Range loop
-               D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1);
+               D (C) := Now (Now'First + C - 1) - Since (Since'First + C - 1) - Channels.Drift (M, G, C) * Real (Span);
             end loop;
             if Channels.Visible (M, G, D) then
                Append (Cause, " the readings changed over the span as a whole;");
