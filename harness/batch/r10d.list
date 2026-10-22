@@ -1,0 +1,5 @@
+t101 101 --beats 3000000
+t104 104 --beats 3000000
+h401 401 --class humanoid --beats 3000000
+h402 402 --class humanoid --beats 3000000
+h408 408 --class humanoid --beats 3000000

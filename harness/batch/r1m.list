@@ -1,0 +1,8 @@
+m102 102 --quirk mjpeg=0
+m106 106 --quirk mjpeg=0
+m303 303 --class base --quirk mjpeg=0
+m304 304 --class base --quirk mjpeg=0
+m305 305 --class base --quirk mjpeg=0
+m306 306 --class base --quirk mjpeg=0
+m503 503 --class drone --quirk mjpeg=0
+m504 504 --class drone --quirk mjpeg=0
