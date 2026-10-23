@@ -56,7 +56,7 @@ package Driver.Robot.Kinematics.Flow_Eye is
 
    function Smoothing_Radius return Natural;
    --  How far, in whole pixels, the smoothing reaches that Evidence takes the picture's gradient and its changes
-   --  through (for studies: tools/driver-robot-flow_bench).
+   --  through (for studies against a simulator's truth).
 
    function Best_Turn
      (Still, Turned : Real_Array;
@@ -192,7 +192,7 @@ package Driver.Robot.Kinematics.Flow_Eye is
       In_Front      : out Natural);
    --  What the model leaves at a given eye (a pinhole of that lens at that pose): the residuals' root mean square over
    --  their sigmas (every pixel's depth eliminated), and how many of the pixels that two joints or more move it puts in
-   --  front of the eye. For a fit studied against the truth (tools/driver-robot-flow_bench). Joints: the arm's joints
+   --  front of the eye. For a fit studied against a simulator's truth. Joints: the arm's joints
    --  along its chain from the base, as its fit has them (its reference frame and its unit). The lens has no
    --  distortion: its focal lengths across and down and its principal point, fitted from one focal length (square
    --  pixels) and the picture's middle. The start is a race over the camera's turns and focal lengths, run at counts of
@@ -212,8 +212,7 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  Every pixel's residuals at a given eye (a pinhole of that lens at that pose) with the given joints, its depth
    --  eliminated, each in units of its rate's spread (its sigma and Relative times the rate, in quadrature): pixel
    --  after pixel and each one's joints in order, nought where the terms move no point on its line of sight, as many
-   --  for the same poses whatever the joints and the eye. For a fit studied against the truth
-   --  (tools/driver-robot-flow_bench).
+   --  for the same poses whatever the joints and the eye. For a fit studied against a simulator's truth.
 
    procedure Synthesize
      (Poses         : Pose_Array;
@@ -224,6 +223,6 @@ package Driver.Robot.Kinematics.Flow_Eye is
       Deviates      : not null access function return Real);
    --  Every pixel's rates made the model's at the given eye (each pixel's depth the one the measured rates give it)
    --  with a standard Gaussian deviate from Deviates times each rate's sigma added: the pictures' places and gradients
-   --  as they were, rates the model holds exactly. For a fit studied against the truth (tools/driver-robot-flow_bench).
+   --  as they were, rates the model holds exactly. For a fit studied against a simulator's truth.
 
 end Driver.Robot.Kinematics.Flow_Eye;

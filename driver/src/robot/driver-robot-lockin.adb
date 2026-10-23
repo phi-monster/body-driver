@@ -1,5 +1,7 @@
 with Ada.Containers;
+with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Ada.Numerics.Long_Elementary_Functions;
@@ -672,6 +674,9 @@ package body Driver.Robot.Lockin is
             S.Gain_Totals.Clear;
             S.Spread_Totals.Clear;
             S.Shifts.Clear;
+            S.Shift_U.Clear;
+            S.Shift_V.Clear;
+            S.Col_Responds.Clear;
             if N > 0 then
                Mark_Motions;
                Mark_Reach;
@@ -971,6 +976,10 @@ package body Driver.Robot.Lockin is
                            S.Gains.Append (Gain_Of (I));
                            S.Gain_Variances.Append (Spread_Of (I));
                            S.Shifts.Append (Shift_Of (I));
+                           --  Which way it moved, where it responds (Shift_Of is nought where it does not).
+                           S.Shift_U.Append (if Shift_Of (I) > 0.0 then Beta_U_Of (I) else 0.0);
+                           S.Shift_V.Append (if Shift_Of (I) > 0.0 then Beta_V_Of (I) else 0.0);
+                           S.Col_Responds.Append (Col_Responding ((I - 1) / Kept + 1, Group_Id ((I - 1) mod Kept + 1)));
                         end loop;
                         Total_Gains (S);
                         Free (Noise_Of);
@@ -1570,5 +1579,47 @@ package body Driver.Robot.Lockin is
       end loop;
       return (if Count = 0 then 0.0 else Median_Shift (S, Kept, Column, Count));
    end Shift;
+
+   procedure Dump_Cells (M : Model; Tag : String) is
+      use Ada.Text_IO;
+      File : File_Type;
+      function Img (N : Integer) return String is (Ada.Strings.Fixed.Trim (N'Image, Ada.Strings.Left));
+   begin
+      if not Ada.Environment_Variables.Exists ("BD_DUMP_CELLS") then
+         return;
+      end if;
+      Create (File, Out_File, Ada.Environment_Variables.Value ("BD_DUMP_CELLS") & "/cells_" & Tag & ".txt");
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            S    : Eye_Stream renames M.Eyes (E);
+            N    : constant Natural := Cells (S.Grid);
+            Kept : constant Natural := Natural (S.Kept_Groups.Length);
+            Line : Ada.Strings.Unbounded.Unbounded_String;
+         begin
+            Put_Line (File, "eye " & Img (Natural (E)) & " width " & Img (S.Grid.Width) & " height " & Img (S.Grid.Height)
+                      & " columns " & Img (S.Grid.Columns) & " rows " & Img (S.Grid.Rows) & " kept " & Img (Kept));
+            for Cell in 0 .. Natural'Min (N, Natural (S.Textured.Length)) - 1 loop
+               Ada.Strings.Unbounded.Append (Line, (if S.Textured (Cell) then "1" else "0"));
+            end loop;
+            Put_Line (File, "textured " & Ada.Strings.Unbounded.To_String (Line));
+            if Natural (S.Shift_U.Length) = N * Kept and then Natural (S.Shift_V.Length) = N * Kept
+              and then Natural (S.Col_Responds.Length) = N * Kept
+            then
+               for K in 1 .. Kept loop
+                  Put_Line (File, "column " & Img (K) & " group " & Img (S.Kept_Groups (S.Kept_Groups.First_Index + K - 1))
+                            & " channel " & Img (S.Kept_Channels (S.Kept_Channels.First_Index + K - 1)));
+                  for Cell in 0 .. N - 1 loop
+                     if S.Col_Responds (Cell * Kept + K - 1) then
+                        Put_Line (File, "cell " & Img (Cell) & " " & Driver.Log.Image (S.Shift_U (Cell * Kept + K - 1), 6)
+                                  & " " & Driver.Log.Image (S.Shift_V (Cell * Kept + K - 1), 6)
+                                  & (if S.Shifts (Cell * Kept + K - 1) > 0.0 then " group" else " alone"));
+                     end if;
+                  end loop;
+               end loop;
+            end if;
+         end;
+      end loop;
+      Close (File);
+   end Dump_Cells;
 
 end Driver.Robot.Lockin;

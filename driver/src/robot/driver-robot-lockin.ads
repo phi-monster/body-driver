@@ -154,4 +154,9 @@ private package Driver.Robot.Lockin is
    --  and steps that small moved its eye against nothing. False until both
    --  are measured.
 
+   procedure Dump_Cells (M : Model; Tag : String);
+   --  For a recognition studied after its run: with BD_DUMP_CELLS naming a folder, every eye's grid, its textured
+   --  cells, and for each of its regressors (a group's channel) the cells that respond to it and which way each moved
+   --  per reading unit, in BD_DUMP_CELLS/cells_TAG.txt. Nothing when BD_DUMP_CELLS is not set.
+
 end Driver.Robot.Lockin;

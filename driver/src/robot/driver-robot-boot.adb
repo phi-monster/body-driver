@@ -1457,6 +1457,7 @@ package body Driver.Robot.Boot is
                         (if R.First > 0.0 then R.First else R.Amount));
          end loop;
          Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
+         Lockin.Dump_Cells (M, Ada.Strings.Fixed.Trim (M.Beats'Image, Ada.Strings.Left));
          for G in 1 .. Group_Count (M) loop
             if Is_Commandable (M, Group_Id (G)) and then Contract_Breach (M, Group_Id (G)) > 0 then
                Breach := True;

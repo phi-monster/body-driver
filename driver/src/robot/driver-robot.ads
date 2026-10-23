@@ -588,6 +588,10 @@ private
       Spread_Totals : Real_Vectors.Vector;   --  (Lockin.Total_Gains), as Lockin.Gain_Of gives them
       Shifts        : Real_Vectors.Vector;   --  per cell and regressor: pixels moved per reading unit,
                                              --  zero where the cell does not respond to that group
+      Shift_U, Shift_V : Real_Vectors.Vector;   --  per cell and regressor: the signed pixels moved across and down per
+                                                --  reading unit, zero where the cell does not respond to that group
+      Col_Responds  : Flag_Vectors.Vector;   --  per cell and regressor: the cell follows that channel alone (the
+                                             --  lock-in's test of its one column), whatever its group's others do
       Luma_Variance : Real_Vectors.Vector;   --  per cell: a resting pixel's luma variance (Stillness)
       Settled       : Driver.Pixels.View;    --  the frames since the eye last saw a change
       Noise_View    : Driver.Pixels.View;    --  the longest still run before the current one

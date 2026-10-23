@@ -3604,6 +3604,7 @@ driver-robot-lag.adb	for Stop in reverse 2 .. N loop	2	structure	extraction stop
 driver-robot-lag.adb	if Last < 1 then	1	structure	a differenced series needs two beats
 driver-robot-lag.adb	if Used = 0 or else R2 >= 1.0 then	1.0	math	a fraction of variance explained is at most one
 driver-robot-lag.adb	return (if Used = 0 then 1.0 else 0.0);	1.0	math	probabilities: no positive coefficient explains nothing, a perfect fit cannot be noise
+driver-robot-lockin.adb	& "" & Driver.Log.Image (S.Shift_V (Cell * Kept + K - 1), 6)	6	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& "" & Driver.Log.Image (Sum_Variance, 4) & "" & Far'Image & "");	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));	5	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
@@ -3616,6 +3617,8 @@ driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image 
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
 driver-robot-lockin.adb	(Pu ** 2 / Wu + Pv ** 2 / Wv, 2));	2	statistics	two degrees of freedom: one pooled gain per picture direction
+driver-robot-lockin.adb	Ada.Strings.Unbounded.Append (Line, (if S.Textured (Cell) then "" else ""));	"0	format	a cell's texture written as one digit in the cells' dump (Lockin.Dump_Cells)
+driver-robot-lockin.adb	Ada.Strings.Unbounded.Append (Line, (if S.Textured (Cell) then "" else ""));	"1	format	a cell's texture written as one digit in the cells' dump (Lockin.Dump_Cells)
 driver-robot-lockin.adb	Fit_Cells (1, N);	1	structure	the cells are numbered from one
 driver-robot-lockin.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a displacement has two components
 driver-robot-lockin.adb	Half : constant Real := 0.5;	0.5	math	a majority is more than half: a whole image moves when a significant majority of its cells do, and the cells far above the rest are what moves when they carry more than half the energy
@@ -3625,6 +3628,7 @@ driver-robot-lockin.adb	High : constant Real := Real'Max (0.0, Real'Min (1.0, (M
 driver-robot-lockin.adb	Low : constant Real := Real'Max (0.0, Real'Min (1.0, (Mean - Z * Sigma) / Typical));	1.0	math	a share of the cells is at most all of them
 driver-robot-lockin.adb	Noise_Of (Cell) := Sqrt ((Fu.Scale ** 2 + Fv.Scale ** 2) / 2.0);	2.0	math	the mean of the two components' variances
 driver-robot-lockin.adb	Of_Cell (C + 1) := Real'Max (1.0, Sqrt (Driver.Stats.Median (Ratios (1 .. K)) / Half_Chi));	1.0	math	a cell moves at rest by no less than the floor its pixels allow: the factor is one or more
+driver-robot-lockin.adb	Put_Line (File, "" & Img (Cell) & "" & Driver.Log.Image (S.Shift_U (Cell * Kept + K - 1), 6)	6	format	digits printed in a log line or a message
 driver-robot-lockin.adb	Reached : Flags_Access := new Flags'(1 .. Natural'Max (1, M.Beats) => True);	1	structure	an array of at least one beat
 driver-robot-lockin.adb	Rest_At : Flags_Access := new Flags'(1 .. Natural'Max (1, Beats) => False);	1	structure	a flag per beat from the first beat that has a beat before it
 driver-robot-lockin.adb	S.Rest_Counts_Known := S.Rest_Count_Beats > 1;	1	statistics	a spread takes two samples
