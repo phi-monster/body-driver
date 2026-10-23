@@ -3713,7 +3713,7 @@ driver-robot-look.adb	Turn := (W / 4.0) / Shift;	4.0	structure	a quarter of the 
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
-driver-robot-motion.adb	& "" & Driver.Log.Image (Pushed_Away (E), 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-motion.adb	& "" & Driver.Log.Image (Was, 2) & "" & Driver.Log.Image (Rest, 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Rare, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Resolved_Moved > 0 then Driver.Log.Image (Driver.Stats.Median (Shifts (1 .. Resolved_Moved)), 2)	2	format	digits printed in a log line or a message
@@ -3727,7 +3727,7 @@ driver-robot-motion.adb	& Driver.Log.Image (E.Length, 4)	4	format	digits printed
 driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
-driver-robot-motion.adb	& Driver.Log.Image (Rest, 2)	2	format	digits printed in a log line or a message
+driver-robot-motion.adb	& "" & Driver.Log.Image (Was, 2) & "" & Driver.Log.Image (Rest, 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2	2	statistics	a drift lasts when two drifting beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
@@ -3802,7 +3802,7 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
-driver-robot-motion.adb	Stayed : constant Boolean := Showed and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
+driver-robot-motion.adb	Stayed : constant Boolean := Beyond and then Now_Away > (Rest + Was) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
@@ -4310,3 +4310,4 @@ driver-robot-lockin.adb	Tests := Tests + 2;	2	structure	two tests an eye: the ce
 driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));	1	structure	no test asked: the least is one, over one
 driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));	1.0	math	a chance is at most one
 driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in yet: a chance of one
+driver-robot-lockin.adb	X (1) := 1.0;	1.0	math	the mean's regressor: one at every row (as the fit's X has it)

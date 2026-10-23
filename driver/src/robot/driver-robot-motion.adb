@@ -28,6 +28,60 @@ package body Driver.Robot.Motion is
    --  (h406 on the big machine, 10-22: from beat 20461 to an estimate at 43146, and from 46635 to the run's end).
    Longest_Wait : Natural := 0;
 
+   --  Sent back and settled: a joint sent back comes back, and its eyes' pictures with it, to where the push began,
+   --  however it shook or crept on the way (round 1, 10-23: arms of the SO-101, the Panda and ALOHA, creeping under
+   --  their quantized readings, drifted, and drifted again once sent back); a body that a speed carried stops
+   --  where it got to, and its pictures stay away. Come back: nearer to the push's first frame than halfway from what
+   --  rest changes a picture by (Stillness.Eye_Rest_Change) to how far the push had taken it (Pushed, each eye's change
+   --  from where the push began as it was sent back, from 1). Told only by an eye the push took further than rest takes
+   --  a picture (Z of its scale beyond, as a drift away from an anchor is told), and a speed only where no such eye came
+   --  back: nothing a speed moved returns when it is sent back, and a joint's push that leaves something moved (a box its
+   --  jaw knocked, a view another body part moved meanwhile) is seen to stay by the eyes that saw that alone. ALOHA's jaw
+   --  was a speed by its overhead eye, pushed 1.14 from where it began against rest's 0.62, and 0.99 after, while its
+   --  wrist eye came back from 24.69 to 0.78 (seed 1, paced round p69a, 10-23). Considered: the eyes judged, and on
+   --  return those that stayed away where the push kept the body going; Showed: some eye the push took beyond rest.
+   procedure Judge_Return
+     (M          : Model;
+      Pushed     : Real_Array;
+      Considered : in out Channel_Flags;
+      Kept_Going : out Boolean;
+      Showed     : out Boolean)
+   is
+      Text     : Unbounded_String;
+      Any_Back : Boolean := False;   --  some eye the push took beyond rest came back
+   begin
+      Kept_Going := False;
+      Showed := False;
+      for E in 1 .. Eye_Count (M) loop
+         if Considered (Considered'First + E - 1) then
+            declare
+               Now_Away : constant Real := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
+               Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
+               Was      : constant Real := Pushed (Pushed'First + E - 1);
+               Beyond   : constant Boolean :=
+                 Now_Away < Real'Last and then Was < Real'Last and then Rest < Real'Last
+                 and then Was > Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
+               Stayed   : constant Boolean := Beyond and then Now_Away > (Rest + Was) / 2.0;
+            begin
+               Considered (Considered'First + E - 1) := Stayed;
+               Kept_Going := Kept_Going or else Stayed;
+               Showed := Showed or else Beyond;
+               Any_Back := Any_Back or else (Beyond and then not Stayed);
+               Append (Text, " eye" & E'Image & " " & Driver.Log.Image (Now_Away, 2) & " from where the push began"
+                       & " (pushed " & Driver.Log.Image (Was, 2) & ", rest " & Driver.Log.Image (Rest, 2)
+                       & (if not Beyond then "): no further than rest takes it;"
+                          elsif Stayed then "): stayed away;" else "): came back;"));
+            end;
+         end if;
+      end loop;
+      Kept_Going := Kept_Going and then not Any_Back;
+      if not Kept_Going then
+         Considered := [others => False];
+      end if;
+      Driver.Log.Line (Driver.Log.Robot, "motion: sent back and settled:" & To_String (Text)
+                       & (if Kept_Going then " the push kept the body going" else " no speed"));
+   end Judge_Return;
+
    procedure Settle_Body
      (M            : in out Model;
       Back         : Driver.Commands.Command;
@@ -175,7 +229,7 @@ package body Driver.Robot.Motion is
       Sent_Back     : Boolean := False;
       Anchored      : Boolean := False;   --  every eye's anchor was taken as the readings stood (Stillness.Set_Anchor)
       Stood_Before  : Natural := 0;       --  the beats the readings stood, past the lag, before the drift was told
-      Pushed_Away   : array (1 .. Eyes) of Real := [others => Real'Last];
+      Pushed_Away   : Real_Array (1 .. Eyes) := [others => Real'Last];
 
       --  The eye's picture drifts: beat on beat (Stillness.Eye_Drift_Run), or away from its anchor (Eye_Away_Run), two
       --  beats running, the least that tells a lasting drift from one beat's.
@@ -331,54 +385,35 @@ package body Driver.Robot.Motion is
             Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
          end loop;
       end if;
-      --  Sent back and settled: a joint sent back comes back, and its eyes' pictures with it, to where the push began,
-      --  however it shook or crept on the way (round 1, 10-23: arms of the SO-101, the Panda and ALOHA, creeping under
-      --  their quantized readings, drifted, and drifted again once sent back); a body that a speed carried stops
-      --  where it got to, and its pictures stay away. Come back: nearer to the push's first frame than halfway from what
-      --  rest changes a picture by (Stillness.Eye_Rest_Change) to how far the push had taken it. Told only by an eye the
-      --  push took further than rest takes a picture (Z of its scale beyond, as a drift away from an anchor is told), and
-      --  a speed only where no such eye came back: nothing a speed moved returns when it is sent back, and a joint's push
-      --  that leaves something moved (a box its jaw knocked, a view another body part moved meanwhile) is seen to stay
-      --  by the eyes that saw that alone. ALOHA's jaw was a speed by its overhead eye, pushed 1.14 from where it began
-      --  against rest's 0.62, and 0.99 after, while its wrist eye came back from 24.69 to 0.78 (seed 1, paced round
-      --  p69a, 10-23).
       if Sent_Back then
          declare
-            Text : Unbounded_String;
-            Any_Back : Boolean := False;   --  some eye the push took beyond rest came back
+            Showed : Boolean;
          begin
-            for E in 1 .. Eyes loop
-               if Kept_Eyes (Kept_Eyes'First + E - 1) then
-                  declare
-                     Now_Away : constant Real := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
-                     Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
-                     Showed   : constant Boolean :=
-                       Now_Away < Real'Last and then Pushed_Away (E) < Real'Last and then Rest < Real'Last
-                       and then Pushed_Away (E)
-                                  > Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
-                     Stayed   : constant Boolean := Showed and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;
-                  begin
-                     Kept_Eyes (Kept_Eyes'First + E - 1) := Stayed;
-                     Kept_Going := Kept_Going or else Stayed;
-                     Any_Back := Any_Back or else (Showed and then not Stayed);
-                     Append (Text, " eye" & E'Image & " " & Driver.Log.Image (Now_Away, 2) & " from where the push began"
-                             & " (pushed " & Driver.Log.Image (Pushed_Away (E), 2) & ", rest "
-                             & Driver.Log.Image (Rest, 2)
-                             & (if not Showed then "): no further than rest takes it;"
-                                elsif Stayed then "): stayed away;" else "): came back;"));
-                  end;
-               end if;
-            end loop;
-            Kept_Going := Kept_Going and then not Any_Back;
-            if not Kept_Going then
-               Kept_Eyes := [others => False];
-            end if;
-            Driver.Log.Line (Driver.Log.Robot, "motion: sent back and settled:" & To_String (Text)
-                             & (if Kept_Going then " the push kept the body going" else " no speed"));
+            Judge_Return (M, Pushed_Away, Kept_Eyes, Kept_Going, Showed);
          end;
       end if;
       Came_Back := Sent_Back and then not Kept_Going;
    end Settle_Body;
+
+   function Eyes_From_Origin (M : Model) return Real_Array is
+     ([for E in 1 .. Eye_Count (M) => Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E))]);
+
+   procedure Judge_Sent_Back
+     (M            : in out Model;
+      Pushed       : Real_Array;
+      Beats_Waited : out Natural;
+      Kept_Going   : out Boolean;
+      Kept_Eyes    : out Channel_Flags;
+      Came_Back    : out Boolean)
+   is
+      Considered : Channel_Flags (1 .. Eye_Count (M)) := [others => True];
+      Showed     : Boolean;
+   begin
+      Settle (M, Beats_Waited);
+      Judge_Return (M, Pushed, Considered, Kept_Going, Showed);
+      Kept_Eyes := Considered;
+      Came_Back := Showed and then not Kept_Going;
+   end Judge_Sent_Back;
 
    procedure Mark_Origins (M : in out Model) is
    begin

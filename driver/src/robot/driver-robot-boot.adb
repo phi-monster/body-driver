@@ -241,44 +241,58 @@ package body Driver.Robot.Boot is
                end if;
                --  Held so, a push that keeps the body going drifts the pictures while every commanded reading stands, and
                --  is sent back to the hold (Motion.Settle): the Go2 walked 50 m in round 1 (10-23) through these rounds.
+               --  One that drifted no beat's worth is told once sent back below (Motion.Judge_Sent_Back).
                declare
                   Back       : Driver.Commands.Command := Driver.Commands.Hold;
                   Kept, Came : Boolean := False;
                   Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
+                  Told       : Boolean := True;   --  the hold told what the channel is, or it is known
+                  Pushed     : Real_Array (1 .. Eye_Count (M)) := [others => Real'Last];
+                  procedure Note is
+                  begin
+                     if Came then
+                        Note_Comes_Back (M, G, P.Channel);
+                     end if;
+                     if Kept then
+                        Note_Keeps_Going (M, G, P.Channel, Kept_Eyes);
+                        Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
+                                         & " keeps the body going while held: a speed");
+                     end if;
+                  end Note;
                begin
                   if Comes_Back (M, G, P.Channel) then
                      Driver.Robot.Motion.Settle (M, Waited);
                   else
                      Driver.Commands.Set_Target (Back, G, Here);
                      Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
-                     if Came then
-                        Note_Comes_Back (M, G, P.Channel);
-                     end if;
-                  end if;
-                  if Kept then
-                     Note_Keeps_Going (M, G, P.Channel, Kept_Eyes);
-                     Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
-                                      & " keeps the body going while held: a speed");
+                     Told := Kept or else Came;
+                     Pushed := Driver.Robot.Motion.Eyes_From_Origin (M);
+                     Note;
                   end if;
                   --  What the push left, where the settle did not send the body back (Graph: each eye's own group).
                   if not Kept and then not Came then
                      Driver.Robot.Motion.Note_Stayed (M, G, P.Sign);
                   end if;
+                  Settled := Settled + Waited;
+                  --  And back to where it was pushed from, a second push the same size the other way: a round of pushes
+                  --  that only go on from where the last one left (item 17's chain) gives the lock-in half the evidence a
+                  --  round of pushes out and back does, and an eye whose middle distance showed itself at twice the
+                  --  amounts with the old round showed nothing with the chain, so the patch did not grow and the boot
+                  --  left the arm a part (robot.boot.patch, robot.boot.step: 13 of 48 cells at twice the amounts against
+                  --  17 before). The chain's other saving stands: only the channels an undecided eye does not see.
+                  Go_To (G, Here, Report);
+                  if Pause > 0 then
+                     Driver.Robot.Motion.Hold (M, Pause);
+                     Settled := Settled + Pause;
+                  end if;
+                  if Told then
+                     Driver.Robot.Motion.Settle (M, Waited);
+                  else
+                     Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+                     Note;
+                  end if;
+                  Settled := Settled + Waited;
                end;
-               Settled := Settled + Waited;
-               --  And back to where it was pushed from, a second push the same size the other way: a round of pushes
-               --  that only go on from where the last one left (item 17's chain) gives the lock-in half the evidence a
-               --  round of pushes out and back does, and an eye whose middle distance showed itself at twice the
-               --  amounts with the old round showed nothing with the chain, so the patch did not grow and the boot
-               --  left the arm a part (robot.boot.patch, robot.boot.step: 13 of 48 cells at twice the amounts against
-               --  17 before). The chain's other saving stands: only the channels an undecided eye does not see.
-               Go_To (G, Here, Report);
-               if Pause > 0 then
-                  Driver.Robot.Motion.Hold (M, Pause);
-                  Settled := Settled + Pause;
-               end if;
-               Driver.Robot.Motion.Settle (M, Waited);
-               Settled := Settled + Waited;
             end;
          end loop;
          Go_To (G, Start, Report);
@@ -470,6 +484,18 @@ package body Driver.Robot.Boot is
             --  What the push left, where the settle did not send the body back.
             if not Kept and then not Came then
                Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+               --  And sent back with no drift seen while it was held: where its pictures settle tells what it is all the
+               --  same (Motion.Judge_Sent_Back). The drone, its motors asked 0.06 units at the level the lock-in
+               --  confirmed, flew on for 392 beats, too slowly for a beat to show its drift against its hover's sway, and
+               --  was an arm (seed 1, paced round p73a, 10-23).
+               declare
+                  Pushed : constant Real_Array := Driver.Robot.Motion.Eyes_From_Origin (M);
+               begin
+                  Go_To (G, Hold, Report);
+                  Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+               end;
+            else
+               Go_To (G, Hold, Report);
             end if;
             for C in 1 .. Size loop
                if Kept then
@@ -481,7 +507,6 @@ package body Driver.Robot.Boot is
             if Kept then
                Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " keeps the body going while held: a speed");
             end if;
-            Go_To (G, Hold, Report);
          end;
          --  The hold's push went out and back one way; the other way's completes the pair. Both again after it, the
          --  group waited for its pictures to settle six times, the G1's 40 to 60 beats each after every move of its

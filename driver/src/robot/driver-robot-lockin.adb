@@ -745,8 +745,30 @@ package body Driver.Robot.Lockin is
                         end loop;
                      end if;
                   end loop;
-                  if Rows <= Kept + 1 then
-                     Kept := 0;
+                  --  More rows than the coefficients they can tell apart (the rank of the regressors' X'X, the mean's
+                  --  among them, Regression.Gram_Rank): the channels of a group always pushed together are one coefficient
+                  --  however many they are. Counted one a channel, the Shadow's arm and hand asked for 28 rows, and the
+                  --  lock-in measured nothing in a whole boot (seed 3, paced rounds p69a and p72a, 10-23).
+                  if Kept > 0 then
+                     declare
+                        A : Real_Matrix (1 .. Kept + 1, 1 .. Kept + 1) := [others => [others => 0.0]];
+                        X : Real_Array (1 .. Kept + 1);
+                     begin
+                        for R in 1 .. Rows loop
+                           X (1) := 1.0;
+                           for K in 1 .. Kept loop
+                              X (K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
+                           end loop;
+                           for I in X'Range loop
+                              for J in X'Range loop
+                                 A (I, J) := A (I, J) + X (I) * X (J);
+                              end loop;
+                           end loop;
+                        end loop;
+                        if Rows <= Regression.Gram_Rank (A) then
+                           Kept := 0;
+                        end if;
+                     end;
                   end if;
                   for K in 1 .. Kept loop
                      S.Kept_Groups.Append (Natural (Cols (K).Group));

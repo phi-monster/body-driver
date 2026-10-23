@@ -33,6 +33,24 @@ package Driver.Robot.Motion is
    --  back comes back; Kept_Eyes: the eyes that stayed away, one a Boolean per eye from 1.
    --  Came_Back: Back was sent and every eye came back: a joint's push.
 
+   function Eyes_From_Origin (M : Model) return Real_Array;
+   --  Each eye's picture's change from where the push began (Mark_Origins) at the latest beat, from 1
+   --  (Stillness.Eye_From_Origin).
+
+   procedure Judge_Sent_Back
+     (M            : in out Model;
+      Pushed       : Real_Array;
+      Beats_Waited : out Natural;
+      Kept_Going   : out Boolean;
+      Kept_Eyes    : out Channel_Flags;
+      Came_Back    : out Boolean)
+     with Pre => Kept_Eyes'Length = Eye_Count (M) and then Pushed'Length = Eye_Count (M);
+   --  After a push held with no drift seen (Settle with Back, neither Kept_Going nor Came_Back) and sent back since:
+   --  holds until Still (M), as Settle, and every eye the push had taken beyond rest (Pushed: Eyes_From_Origin as the
+   --  push stood) tells whether it came back to where the push began, as Settle tells it after a drift. Kept_Going:
+   --  some such eye stayed away and none came back (a body a speed carried too slowly for a beat to show its drift
+   --  stopped where it got to); Kept_Eyes: those that stayed; Came_Back: some such eye, and not Kept_Going.
+
    procedure Mark_Origins (M : in out Model);
    --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).
 

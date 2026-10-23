@@ -337,6 +337,14 @@ package body Driver.Robot.Regression is
       return Value;
    end Count_Significant;
 
+   function Gram_Rank (A : Real_Matrix) return Natural is
+      Inverse : Real_Matrix (A'Range (1), A'Range (2));
+      Rank    : Natural;
+   begin
+      Pseudo_Inverse (A, Inverse, Rank);
+      return Rank;
+   end Gram_Rank;
+
    function Count_Tail (Count, Trials : Natural; Rate : Real) return Real is
    begin
       if Count = 0 then

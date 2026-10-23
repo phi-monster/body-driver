@@ -54,6 +54,11 @@ private package Driver.Robot.Regression is
                  and then From.Columns = X'Length (2);
    --  Solve, its first pass From Start_Of (X): the same fit to the bit.
 
+   function Gram_Rank (A : Real_Matrix) return Natural
+     with Pre => A'Length (1) = A'Length (2);
+   --  The numerical rank of a symmetric positive semi-definite matrix (the regressors' X'X), as the fits'
+   --  pseudo-inverse counts it: how many coefficients the rows can tell apart.
+
    function Count_Tail (Count, Trials : Natural; Rate : Real) return Real
      with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
    --  The exact binomial probability of at least Count events in that many independent trials at Rate per trial
