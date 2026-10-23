@@ -28,20 +28,9 @@ scenario = sys.argv[1]
 seed = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 kind = os.environ.get("KIND", "g1")
 rng = np.random.default_rng(seed)
-built = bodies.KINDS[kind](rng)
-if os.environ.get("NOPROPS") == "1":
-    for b in list(built["spec"].bodies):
-        if b.name.startswith("prop"):
-            built["spec"].delete(b)
-m = built["spec"].compile()
+built, m, d, w = bodies.build(kind, rng, with_props=os.environ.get("NOPROPS") != "1", policy=os.environ.get("FIRMWARE"))
 if os.environ.get("NOSLIP") is not None:
     m.opt.noslip_iterations = int(os.environ["NOSLIP"])
-d = mujoco.MjData(m)
-if os.environ.get("FIRMWARE"):
-    built["walker"]["policy"] = os.environ["FIRMWARE"]
-w = legged.firmware(m, d, built["walker"])
-w.pose(built["walker"]["height"])
-mujoco.mj_forward(m, d)
 groups = {g["name"]: g for g in built["groups"]}
 def ids(name):   # a group's servos; none for a group the robot has not (the Go2's arms)
     return [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, a) for a in groups[name]["actuators"]] if name in groups else []

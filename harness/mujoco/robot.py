@@ -57,26 +57,7 @@ rng = np.random.default_rng(args.seed)
 # ---------------------------------------------------------------------------------------------------------------------
 # The robot
 
-built = bodies.KINDS[args.kind](rng)
-spec = built["spec"]
-if built["fix"]:
-    # Held where it stands: its free joint gone, and with it the keyframes that gave that joint a place.
-    for k in list(spec.keys):
-        spec.delete(k)
-    body = bodies.find_body(spec, built["fix"])
-    for j in list(body.joints):
-        if j.type == mujoco.mjtJoint.mjJNT_FREE:
-            spec.delete(j)
-m = spec.compile()
-d = mujoco.MjData(m)
-walker = legged.firmware(m, d, built["walker"]) if built.get("walker") else None
-if walker:
-    walker.pose(built["walker"]["height"])
-if built["key"]:
-    mujoco.mj_resetDataKeyframe(m, d, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_KEY, built["key"]))
-for name, value in (built.get("init") or {}).items():   # the pose such a robot is booted in
-    d.qpos[m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, name)]] = value
-mujoco.mj_forward(m, d)
+built, m, d, walker = bodies.build(args.kind, rng)
 substeps = max(1, int(round(args.beat / m.opt.timestep)))
 
 groups = built["groups"]
@@ -230,7 +211,7 @@ def control():
     for g in groups:
         if g["kind"] == "servo":
             for k, i in enumerate(g["ids"]):
-                d.ctrl[i] = g["ref"][k]
+                d.ctrl[i] = bodies.servo_command(m, d, g, i, g["ref"][k])
         elif g["kind"] == "pd":
             kp, kd = np.broadcast_to(g["kp"], g["n"]), np.broadcast_to(g["kd"], g["n"])   # one gain, or one a joint
             for k, i in enumerate(g["ids"]):

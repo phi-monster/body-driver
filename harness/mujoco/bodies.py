@@ -8,6 +8,8 @@ import math
 import numpy as np
 import mujoco
 
+import legged
+
 MENAGERIE = "/root/mj/menagerie"
 
 
@@ -95,23 +97,31 @@ def room(spec):
             g.material = "bd_grid"
 
 
-def props(spec, rng, center, size, count, clear=None):
-    """Boxes of drawn colours and sizes on the floor around the robot: things for its cameras to see move. CLEAR, a
-    place on the floor and a radius, is where a robot stands on its own feet: no box is drawn within it."""
-    c = np.asarray(center, float)
-    i = 0
-    while i < count:
+def place(rng, drawn, s):
+    """A place on the floor for a box of half-size S: on the ring about the robot its kind drew its boxes on, outside
+    the place its robot stands on its own feet."""
+    c, size, clear = np.asarray(drawn["center"], float), drawn["size"], drawn["clear"]
+    while True:
         r = size * rng.uniform(0.35, 1.0)
         a = rng.uniform(-math.pi, math.pi)
-        s = size * rng.uniform(0.03, 0.09)
         x, y = float(c[0] + r * math.cos(a)), float(c[1] + r * math.sin(a))
-        if clear is not None and math.hypot(x - clear[0][0], y - clear[0][1]) < clear[1] + 1.5 * s:
-            continue
+        if clear is None or math.hypot(x - clear[0][0], y - clear[0][1]) >= clear[1] + 1.5 * s:
+            return x, y
+
+
+def props(spec, rng, center, size, count, clear=None):
+    """Boxes of drawn colours and sizes on the floor around the robot: things for its cameras to see move. CLEAR, a
+    place on the floor and a radius, is where a robot stands on its own feet: no box is drawn within it. Returns the
+    draw, for build to draw a box again where it touches the robot as booted."""
+    drawn = {"center": center, "size": size, "clear": clear}
+    for i in range(count):
+        s = size * rng.uniform(0.03, 0.09)
+        x, y = place(rng, drawn, s)
         b = spec.worldbody.add_body(name="prop%d" % i, pos=[x, y, float(s)])
         b.add_geom(type=mujoco.mjtGeom.mjGEOM_BOX, size=[float(s), float(s * rng.uniform(0.5, 1.5)), float(s)],
                    rgba=[float(x) for x in list(rng.uniform(0.05, 0.95, 3)) + [1.0]])
-        i += 1
     lights(spec, rng)
+    return drawn
 
 
 def servo(name, role, actuators, ticks=None):
@@ -122,6 +132,39 @@ def pd(name, role, actuators, kp, kd):
     return {"name": name, "role": role, "kind": "pd", "actuators": actuators, "kp": kp, "kd": kd, "ticks": None}
 
 
+def servo_command(m, d, g, i, ref):
+    """What servo actuator I of group G is sent this step for its target REF: REF itself; or, for a group its maker's
+    controller moves along a plan (G's "plan": each joint's speed and acceleration limits, and whether it compensates
+    gravity), this step's point of a path toward REF within those limits, the path's speed fed forward through the
+    servo's damping, and the torque that holds the joint against gravity and the body's motion: all through the
+    actuator, so within its force limit."""
+    plan = g.get("plan")
+    if not plan:
+        return ref
+    j = m.actuator_trnid[i, 0]
+    path = g.setdefault("path", {})
+    if i not in path:   # a path begins where its joint stands, at rest
+        path[i] = [float(d.qpos[m.jnt_qposadr[j]]), 0.0]
+    p = path[i]
+    vmax, amax = plan["limits"].get(m.joint(j).name, (None, None))
+    if vmax is None:
+        p[0], p[1] = ref, 0.0
+    else:
+        dt = m.opt.timestep
+        err = ref - p[0]
+        want = math.copysign(vmax if amax is None else min(vmax, math.sqrt(2.0 * amax * abs(err))), err)
+        p[1] = want if amax is None else p[1] + max(-amax * dt, min(amax * dt, want - p[1]))
+        nxt = p[0] + p[1] * dt
+        if (ref - nxt) * err <= 0.0:   # the path reaches its target this step
+            nxt, p[1] = ref, 0.0
+        p[0] = nxt
+    kp, kv = -m.actuator_biasprm[i, 1], -m.actuator_biasprm[i, 2]
+    u = p[0] + kv / kp * p[1]
+    if plan.get("gravity"):
+        u += d.qfrc_bias[m.jnt_dofadr[j]] / kp
+    return u
+
+
 def kind_panda(rng):
     spec = mujoco.MjSpec.from_file(MENAGERIE + "/franka_emika_panda/scene.xml")
     center, size = [0.3, 0.0, 0.4], 0.8
@@ -130,8 +173,8 @@ def kind_panda(rng):
     cams = [body_camera(spec, "hand", "arm1_wrist", [0.09, 0.0, 0.0], [-0.45, 0.0, 1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
             base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
-    props(spec, rng, center, size, 8)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": "home", "fix": None}
+    drawn = props(spec, rng, center, size, 8)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": "home", "fix": None}
 
 
 def kind_ur5e(rng):
@@ -141,8 +184,8 @@ def kind_ur5e(rng):
     cams = [body_camera(spec, "wrist_3_link", "arm1_wrist", [0.05, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
             base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
-    props(spec, rng, center, size, 8)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    drawn = props(spec, rng, center, size, 8)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "init": {"shoulder_lift_joint": -1.57, "elbow_joint": 1.57, "wrist_1_joint": -1.57, "wrist_2_joint": -1.57}}
 
 
@@ -154,8 +197,8 @@ def kind_so101(rng):
               servo("arm1_closer", "CLOSER", ["gripper"], ticks)]
     cams = [{"name": "wrist_cam", "mount": "ARM_CARRIED", "by": "arm1_joints"},   # the maker's own wrist camera
             base_camera(spec, rng, [0.2, 0.0, 0.03], size)]
-    props(spec, rng, center, size, 8)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None}
+    drawn = props(spec, rng, center, size, 8)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None}
 
 
 def kind_aloha(rng):
@@ -169,8 +212,10 @@ def kind_aloha(rng):
     cams = [{"name": "wrist_cam_left", "mount": "ARM_CARRIED", "by": "arm1_joints"},
             {"name": "wrist_cam_right", "mount": "ARM_CARRIED", "by": "arm2_joints"},
             {"name": "overhead_cam", "mount": "WORLD_FIXED", "by": None}]   # the maker's three cameras
-    props(spec, rng, center, size, 6)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None}
+    # Booted in its maker's neutral pose (its keyframe): at all zeros, the hall's first boot, the two arms reach into each
+    # other, each gripper 1 to 3.5 cm inside the other wrist, and neither waist answered a push either way (10-23).
+    drawn = props(spec, rng, center, size, 6)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": "neutral_pose", "fix": None}
 
 
 def kind_stretch(rng):
@@ -185,8 +230,8 @@ def kind_stretch(rng):
               servo("head", "ARM", ["head_pan", "head_tilt"])]
     cams = [{"name": "d405_rgb", "mount": "ARM_CARRIED", "by": "arm1_joints"},
             {"name": "d435i_camera_rgb", "mount": "ARM_CARRIED", "by": "head"}]
-    props(spec, rng, center, size, 8)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    drawn = props(spec, rng, center, size, 8)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             # The head turned to the gripper and the table, as Stretch works (its D435i stands on its side, as on the robot).
             "init": {"joint_head_pan": -1.6, "joint_head_tilt": -0.8, "joint_lift": 0.5}}
 
@@ -198,8 +243,8 @@ def kind_x2(rng):
                "ticks": None}]
     cams = [body_camera(spec, "x2", "body_cam", [0.12, 0.0, 0.0], [1.0, 0.0, -0.35], [0.0, 0.0, 1.0], rng,
                         "CARRIER_CARRIED", "motors")]
-    props(spec, rng, center, size, 10)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": "hover", "fix": None}
+    drawn = props(spec, rng, center, size, 10)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": "hover", "fix": None}
 
 
 TRAINED = "/root/mj"   # where export_trained.py wrote the robots of Unitree's walking tasks
@@ -277,14 +322,36 @@ def kind_g1(rng):
                         rng, "ARM_CARRIED", "arm1_joints"),
             body_camera(spec, "right_wrist_yaw_link", "arm2_wrist", [0.0, -0.04, 0.04], [1.0, 0.2, -0.3], [0.0, 0.0, 1.0],
                         rng, "ARM_CARRIED", "arm2_joints")]
-    props(spec, rng, [0.5, 0.0, 0.0], 1.4, 10, clear=((0.0, 0.0), 0.5))
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    drawn = props(spec, rng, [0.5, 0.0, 0.0], 1.4, 10, clear=((0.0, 0.0), 0.5))
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "walker": {"kind": "gear_wbc", "dir": NVIDIA_WBC, "prefix": "", "root": "pelvis", "imu": "imu_in_pelvis",
                        "height": float(find_body(spec, "pelvis").pos[2])}}
 
 
+# RB-Y1's joint limits as its maker's SDK plans a position command with them: speed (rad/s, the grippers' m/s) and
+# acceleration (rad/s^2; none given for the head and the grippers), from rby1-sdk (ac7e83056e, 2026-09-02),
+# models/rby1m/urdf/model_v1.2.urdf, the version of the model the hall loads.
+RBY1_LIMITS = {"torso_0": (2.09439510, 5.0), "torso_1": (2.09439510, 5.0), "torso_2": (2.09439510, 5.0),
+               "torso_3": (3.141592654, 5.0), "torso_4": (3.141592654, 5.0), "torso_5": (3.141592654, 5.0),
+               "head_0": (3.14, None), "head_1": (3.14, None),
+               "gripper_finger_r1": (0.05, None), "gripper_finger_l1": (0.05, None)}
+for side in ("right", "left"):
+    RBY1_LIMITS.update({"%s_arm_%d" % (side, j): (v, 10.0) for j, v in
+                        enumerate((3.141592654, 3.141592654, 3.141592654, 3.141592654, 6.283185308, 6.283185308,
+                                   2.094395102))})
+
+
 def kind_rby1(rng):
     spec = mujoco.MjSpec.from_file(MENAGERIE + "/rainbow_robotics_rby1/scene_rby1m_1.2.xml")
+    # Its wheel servos follow their asks as a wheel's velocity loop does. The maker's model leaves them MuJoCo's default
+    # gain (kv 1) against the wheel joints' damping of 5: a wheel turned a sixth of its ask (10-23: 0.036 rad in 2 s for
+    # 0.3 rad/s) and the base could not be driven. Stretch's maker gives its wheel loop 30 times its joint's damping
+    # (gear squared times kv over the damping: 9 x 100 / 30); the same here.
+    for a in spec.actuators:
+        if a.name.endswith("_wheel_act"):
+            kv = 9.0 * 100.0 / 30.0 * float(spec.joint(a.target).damping[0])
+            a.gainprm = [kv] + [0.0] * 9
+            a.biasprm = [0.0, 0.0, -kv] + [0.0] * 7
     # Only its wheels touch the floor, as on the real robot: the base's own collision hull reaches below the wheels'
     # bottoms, and the floor pushing it up turned the robot over within two seconds (both bases, 10-23).
     base = find_body(spec, "base")
@@ -299,14 +366,22 @@ def kind_rby1(rng):
               servo("arm2_joints", "ARM", ["right_arm_%d_act" % i for i in range(1, 8)]),
               servo("arm2_closer", "CLOSER", ["right_finger_act"]),
               servo("head", "ARM", ["head_0_act", "head_1_act"])]
+    # Its joints moved as its maker's controller moves them (rby1-sdk's joint position command): along a planned path
+    # within each joint's speed and acceleration limits (its URDF, RBY1_LIMITS), each step's PD with the path's speed fed
+    # forward and the joint's own gravity compensated, all within the motor's torque limit. The maker's MuJoCo model has
+    # stiff position servos alone (kp 4000, kv 400, 270 N m): asked 0.3 rad, its first torso pitch folded on to 1.25
+    # rad under its 64 kg upper body (10-23), as no RB-Y1 does.
+    for g in groups:
+        if g["name"] != "base":
+            g["plan"] = {"limits": RBY1_LIMITS, "gravity": True}
     cams = [body_camera(spec, "link_head_2", "head_cam", [0.08, 0.0, 0.05], [1.0, 0.0, -0.4], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "head"),
             body_camera(spec, "link_left_arm_6", "arm1_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
             body_camera(spec, "link_right_arm_6", "arm2_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm2_joints")]
-    props(spec, rng, [0.6, 0.0, 0.0], size, 10)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    drawn = props(spec, rng, [0.6, 0.0, 0.0], size, 10)
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "init": {"right_arm_3": -1.6, "left_arm_3": -1.6, "head_1": 0.5}}
 
 
@@ -326,10 +401,10 @@ def kind_shadow(rng):
     cams = [body_camera(spec, "wrist_3_link", "arm1_wrist", [0.0, 0.06, 0.09], [0.0, 1.0, -0.7], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
             base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
-    props(spec, rng, center, size, 8)
+    drawn = props(spec, rng, center, size, 8)
     spec.option.impratio = 10.0   # the hand's own solver settings (its model asks for them)
     spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "init": {"shoulder_lift_joint": -1.57, "elbow_joint": 1.57, "wrist_1_joint": -1.57, "wrist_2_joint": -1.57}}
 
 
@@ -347,8 +422,8 @@ def kind_go2(rng):
               {"name": "walk", "role": "CARRIER", "kind": "walk", "ticks": None, "actuators": [], "channels": 3}]
     cams = [body_camera(spec, "robot/base_link", "head_cam", [0.335, 0.0, 0.01], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], rng,
                         "CARRIER_CARRIED", "walk")]
-    props(spec, rng, [0.0, 0.0, 0.0], 1.0, 10, clear=((0.0, 0.0), 0.45))
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+    drawn = props(spec, rng, [0.0, 0.0, 0.0], 1.0, 10, clear=((0.0, 0.0), 0.45))
+    return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "walker": {"policy": FIRMWARE + "/go2", "prefix": "robot/", "root": "robot/base_link", "imu": "robot/imu",
                        "hide": "none", "height": height}}
 
@@ -356,6 +431,59 @@ def kind_go2(rng):
 KINDS = {"panda": kind_panda, "ur5e": kind_ur5e, "so101": kind_so101, "aloha": kind_aloha, "stretch": kind_stretch,
          "x2": kind_x2, "go2": kind_go2, "g1": kind_g1, "rby1": kind_rby1,
          "shadow": kind_shadow}
+
+
+def build(kind, rng, with_props=True, policy=None):
+    """KIND as every rig program boots it (robot.py, check.py, answers.py, legwalk.py): built from RNG, its stand fixed,
+    compiled, posed (a legged robot as its walking program boots it, its maker's keyframe, the pose such a robot is
+    booted in), and no box touching it. Returns the kind's description, the model, its data and the walking program."""
+    built = KINDS[kind](rng)
+    spec = built["spec"]
+    if not with_props:
+        for b in list(spec.bodies):
+            if b.name.startswith("prop"):
+                spec.delete(b)
+    if built["fix"]:
+        for k in list(spec.keys):
+            spec.delete(k)
+        body = find_body(spec, built["fix"])
+        for j in list(body.joints):
+            if j.type == mujoco.mjtJoint.mjJNT_FREE:
+                spec.delete(j)
+    m = spec.compile()
+    d = mujoco.MjData(m)
+    if policy:
+        built["walker"]["policy"] = policy
+    walker = legged.firmware(m, d, built["walker"]) if built.get("walker") else None
+    if walker:
+        walker.pose(built["walker"]["height"])
+    if built["key"]:
+        mujoco.mj_resetDataKeyframe(m, d, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_KEY, built["key"]))
+    for name, value in (built.get("init") or {}).items():
+        d.qpos[m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, name)]] = value
+    mujoco.mj_forward(m, d)
+    if with_props:
+        clear_props(m, d, built["props"], rng)
+    return built, m, d, walker
+
+
+def clear_props(m, d, drawn, rng):
+    """Every box that touches the robot as booted drawn again, from its kind's draw, until none does (10-23: a box drawn
+    inside the UR5e's shoulder held its pan joint at its 150 N m limit, another sat inside ALOHA's right shoulder)."""
+    boxes = {b for b in range(m.nbody) if m.body(b).name.startswith("prop")}
+    while True:
+        touching = set()
+        for c in d.contact[:d.ncon]:
+            b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+            for b, other in ((b1, b2), (b2, b1)):
+                if b in boxes and other != 0 and other not in boxes:   # a box and the robot, not the floor or a box
+                    touching.add(b)
+        if not touching:
+            return
+        for b in sorted(touching):
+            g = m.body_geomadr[b]
+            m.body_pos[b][:2] = place(rng, drawn, float(m.geom_size[g][0]))
+        mujoco.mj_forward(m, d)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
