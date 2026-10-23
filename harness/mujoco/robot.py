@@ -1,5 +1,5 @@
 # robot.py --connect HOST:PORT --kind KIND --seed N --out DIR [--beats N] [--stop FILE] [--rate R] [--beat S]
-#          [--width W --height H] [--instruction TEXT]
+#          [--width W --height H] [--instruction TEXT] [--truth FILE]
 #
 # Simulator-side rig code (owner 10-02: the only Python we write is the simulator's side). One real robot of the
 # MuJoCo Menagerie (bodies.py), spoken to the driver over the body protocol (docs/body-protocol.md) as the lab's
@@ -14,7 +14,8 @@
 # loop, a wheeled base's and a drone's velocity loops, a legged robot's walking program: legged.py) run at the model's
 # step inside it. A legged robot is booted standing on its walking program, settled before the driver's first beat.
 # RATE gives beats a second of the wall (0: as fast as the driver answers). The run ends after BEATS beats or when the
-# STOP file exists.
+# STOP file exists. With --truth FILE, every observation sent writes the world's truth beside it (truth.py), for the
+# scorer of steps 2 to 4 (driver/tools/score).
 import argparse
 import collections
 import io
@@ -34,6 +35,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bodies
 import legged
+import truth as truth_file
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--connect", required=True)
@@ -47,6 +49,7 @@ ap.add_argument("--beat", type=float, default=0.1)
 ap.add_argument("--width", type=int, default=320)
 ap.add_argument("--height", type=int, default=240)
 ap.add_argument("--instruction", default="Pick up the thing by 10 cm.")
+ap.add_argument("--truth", default="")
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
 rng = np.random.default_rng(args.seed)
@@ -473,6 +476,7 @@ print("robot: %s seed %d, %d groups, %d cameras of %d x %d, a beat %.3f s of %d 
 
 beat, t_step, t_render, t_wire = 0, 0.0, 0.0, 0.0
 fell = [0]
+truth = truth_file.Truth(m, d, args.truth, cameras) if args.truth else None
 next_at = time.time()
 while True:
     beat += 1
@@ -486,6 +490,8 @@ while True:
         capture(c)
     t1 = time.perf_counter()
     obs = observation()
+    if truth:
+        truth.write(beat, obs["state"], args.width, args.height)
     t2 = time.perf_counter()
     scrambled = scramble_map(obs)
     call("update_obs", beat, scrambled)
@@ -528,5 +534,7 @@ while True:
         next_at += 1.0 / args.rate
         time.sleep(max(0.0, next_at - time.time()))
 renderer.close()
+if truth:
+    truth.close()
 ws.close()
 print("robot: ended at beat %d" % beat, flush=True)

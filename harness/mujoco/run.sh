@@ -3,6 +3,12 @@
 # BIN: the driver's build (its body_driver); PORT: the driver's port; MINUTES: the cap (a run past it is a failure, and
 # its meta.txt says "stop limit"); STOP: an extended regular expression of the driver's log at which the run is stopped
 # (default: the body as measured); GPU: the card the robot draws on; BD_WORKERS as the driver takes it.
+# TRUTH=1: the robot writes the world's truth beside every observation (truth.jsonl; the bodies' geometry once, in
+# TRUTH_GEOMETRY, shared by every run). RECORD=1: the driver records the run, compressed as it is written (run.rec.zst:
+# never uncompressed on disk, a cold boot's recording is gigabytes). SCORE=1 (with both): after the run the recording
+# is replayed for the driver's estimates (estimates.jsonl) and scored against the truth (score.txt: the arms' tools,
+# the eyes, the hands' tips, driver/tools/score), both read straight from the compressed recording, which then goes
+# unless KEEP_RECORDING=1.
 # Leaves driver.log, robot.log, body.json (what the driver measured), truth.json, scramble.json and meta.txt.
 set -u
 NAME=$1; KIND=$2; SEED=$3; shift 3
@@ -13,14 +19,24 @@ mkdir -p "$R"
 PORT=${PORT:-$((31000 + SEED % 2000))}; LIM=${MINUTES:-5}; STOP=${STOP:-"the body as measured:"}
 { echo "kind $KIND"; echo "seed $SEED"; echo "port $PORT"; echo "driver $(md5sum "$BIN/body_driver" | cut -d' ' -f1)";
   echo "options $*"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
-"$BIN/body_driver" --listen "$PORT" --body "$R/body.json" > "$R/driver.log" 2>&1 &
+# DUMP_CELLS=1: the driver writes every eye's cells as the lock-in saw them at each recognition (Lockin.Dump_Cells).
+[ "${DUMP_CELLS:-0}" = 1 ] && export BD_DUMP_CELLS="$R"
+TRUTH_ARGS=(); RECORD_ARGS=()
+if [ "${TRUTH:-0}" = 1 ]; then
+  TRUTH_ARGS=(--truth "$R/truth.jsonl"); export BD_TRUTH_GEOMETRY=${TRUTH_GEOMETRY:-/root/mj/truth_geometry}
+fi
+if [ "${RECORD:-0}" = 1 ]; then
+  mkfifo "$R/rec.fifo"; zstd -q -T2 -o "$R/run.rec.zst" < "$R/rec.fifo" & ZST=$!
+  RECORD_ARGS=(--record "$R/rec.fifo")
+fi
+"$BIN/body_driver" --listen "$PORT" --body "$R/body.json" "${RECORD_ARGS[@]}" > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -qE "listening on port|cannot listen" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
 if grep -q "cannot listen" "$R/driver.log"; then
   { echo "end $(date +%FT%T)"; echo "stop port_taken"; } >> "$R/meta.txt"; kill "$DRV" 2>/dev/null; exit 3
 fi
 MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=${GPU:-0} /root/mj/venv/bin/python "$HERE/robot.py" --connect "127.0.0.1:$PORT" \
-  --kind "$KIND" --seed "$SEED" --out "$R" --stop "$R/stop" "$@" > "$R/robot.log" 2>&1 &
+  --kind "$KIND" --seed "$SEED" --out "$R" --stop "$R/stop" "${TRUTH_ARGS[@]}" "$@" > "$R/robot.log" 2>&1 &
 ROB=$!
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt "$end" ]; do
@@ -32,5 +48,17 @@ while [ "$(date +%s)" -lt "$end" ]; do
 done
 touch "$R/stop"
 for _ in $(seq 1 20); do kill -0 "$ROB" 2>/dev/null || break; sleep 0.5; done
-kill "$ROB" 2>/dev/null; kill "$DRV" 2>/dev/null; wait 2>/dev/null
+kill "$ROB" 2>/dev/null; kill "$DRV" 2>/dev/null
+# A driver that never opened its recording leaves zstd waiting on the pipe: opening it read-write (never blocks on a
+# FIFO) and closing it gives zstd its end, whether or not the driver wrote.
+[ -p "$R/rec.fifo" ] && { exec 3<>"$R/rec.fifo"; exec 3>&-; }
+wait 2>/dev/null
 { echo "end $(date +%FT%T)"; echo "stop $why"; } >> "$R/meta.txt"
+rm -f "$R/rec.fifo"
+if [ "${SCORE:-0}" = 1 ] && [ -s "$R/run.rec.zst" ] && [ -s "$R/truth.jsonl" ]; then
+  zstd -dc "$R/run.rec.zst" | "$BIN/replay" /dev/stdin --estimates "$R/estimates.jsonl" > "$R/replay.log" 2>&1
+  zstd -dc "$R/run.rec.zst" | "$BIN/score" --scramble "$R/scramble.json" "$R/estimates.jsonl" /dev/stdin "$R/truth.jsonl" \
+    > "$R/score.txt" 2>&1
+  echo "scored $(date +%FT%T)" >> "$R/meta.txt"
+  [ "${KEEP_RECORDING:-0}" = 1 ] || rm -f "$R/run.rec.zst"
+fi
