@@ -221,6 +221,7 @@ package body Driver.Robot.Boot is
                --  wherever the pushes before left the group: the lock-in regresses on the readings' changes, and
                --  the amounts are the smallest an eye sees, so the group stays about its hold.
                Driver.Robot.Motion.Settle (M, Waited);
+               Driver.Robot.Motion.Mark_Origins (M);
                Go_To (G, Away, Report);
                Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
                --  Held after the push for Pause beats before the pictures are asked to settle: a picture that trails

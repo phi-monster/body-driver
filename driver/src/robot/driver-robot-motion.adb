@@ -165,12 +165,13 @@ package body Driver.Robot.Motion is
 
       --  A push that keeps the body going (Use_Back): the beat of the wait the readings last began to stand at, the
       --  slowest eye's lag (a picture that trails its readings has not drifted on before it has passed), whether
-      --  Back was sent, and whether some eye drifted on once the readings stood after it.
+      --  Back was sent, and each eye's change from the frame the push began from (Stillness.Set_Origin) then.
       Stood_Since   : Integer := -1;
       Lag           : Natural := 0;
       Sent_Back     : Boolean := False;
-      Drifted_After : Boolean := False;
       Anchored      : Boolean := False;   --  every eye's anchor was taken as the readings stood (Stillness.Set_Anchor)
+      Stood_Before  : Natural := 0;       --  the beats the readings stood, past the lag, before the drift was told
+      Pushed_Away   : array (1 .. Eyes) of Real := [others => Real'Last];
 
       --  The eye's picture drifts: beat on beat (Stillness.Eye_Drift_Run), or away from its anchor (Eye_Away_Run), two
       --  beats running, the least that tells a lasting drift from one beat's.
@@ -266,10 +267,14 @@ package body Driver.Robot.Motion is
                end loop;
                Anchored := True;
             end if;
-            Drifting := Use_Back and then not Done and then Standing and then Beats_Waited - Stood_Since > Lag
+            Drifting := Use_Back and then Standing and then Beats_Waited - Stood_Since > Lag
               and then (for some E in 1 .. Eyes => Drifted (Eye_Id (E)));
-            if Drifting and then not Sent_Back then
+            if Drifting and then not Done and then not Sent_Back then
                Sent_Back := True;
+               Stood_Before := Beats_Waited - Stood_Since;
+               for E in 1 .. Eyes loop
+                  Pushed_Away (E) := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
+               end loop;
                Stood_Since := -1;
                declare
                   Which : Unbounded_String;
@@ -277,15 +282,16 @@ package body Driver.Robot.Motion is
                   for E in 1 .. Eyes loop
                      Kept_Eyes (Kept_Eyes'First + E - 1) := Drifted (Eye_Id (E));
                      if Kept_Eyes (Kept_Eyes'First + E - 1) then
-                        Append (Which, " eye" & E'Image);
+                        Append (Which, " eye" & E'Image & " (beat on beat"
+                                & Driver.Robot.Stillness.Eye_Drift_Run (M, Eye_Id (E))'Image & ", away from its anchor"
+                                & Driver.Robot.Stillness.Eye_Away_Run (M, Eye_Id (E))'Image & ")");
                      end if;
                   end loop;
-                  Driver.Log.Line (Driver.Log.Robot, "motion: every reading stands and" & To_String (Which)
-                                   & " drift on: the push keeps the body going; sent back to its hold");
+                  Driver.Log.Line (Driver.Log.Robot, "motion: every commanded reading stands, after" & Stood_Before'Image
+                                   & " beats" & To_String (Which) & " drift on; sent back to its hold");
                end;
                Driver.Beats.Send (Back);
             else
-               Drifted_After := Drifted_After or else (Sent_Back and then Drifting);
                Driver.Beats.Send (Driver.Commands.Hold);
             end if;
             exit when Done;
@@ -320,8 +326,44 @@ package body Driver.Robot.Motion is
             Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
          end loop;
       end if;
-      Kept_Going := Sent_Back and then not Drifted_After;
+      --  Sent back and settled: a joint sent back comes back, and its eyes' pictures with it, to where the push began,
+      --  however it shook or crept on the way (round 1, 10-23: arms of the SO-101, the Panda and ALOHA, creeping under
+      --  their quantized readings, drifted, and drifted again once sent back); a body that a speed carried stops
+      --  where it got to, and its pictures stay away. Come back: nearer to the push's first frame than halfway from what
+      --  rest changes a picture by (Stillness.Eye_Rest_Change) to how far the push had taken it.
+      if Sent_Back then
+         declare
+            Text : Unbounded_String;
+         begin
+            for E in 1 .. Eyes loop
+               if Kept_Eyes (Kept_Eyes'First + E - 1) then
+                  declare
+                     Now_Away : constant Real := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
+                     Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
+                     Stayed   : constant Boolean :=
+                       Now_Away < Real'Last and then Pushed_Away (E) < Real'Last and then Rest < Real'Last
+                       and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;
+                  begin
+                     Kept_Eyes (Kept_Eyes'First + E - 1) := Stayed;
+                     Kept_Going := Kept_Going or else Stayed;
+                     Append (Text, " eye" & E'Image & " " & Driver.Log.Image (Now_Away, 2) & " from where the push began"
+                             & " (pushed " & Driver.Log.Image (Pushed_Away (E), 2) & ", rest "
+                             & Driver.Log.Image (Rest, 2) & (if Stayed then "): stayed away;" else "): came back;"));
+                  end;
+               end if;
+            end loop;
+            Driver.Log.Line (Driver.Log.Robot, "motion: sent back and settled:" & To_String (Text)
+                             & (if Kept_Going then " the push kept the body going" else " no speed"));
+         end;
+      end if;
    end Settle_Body;
+
+   procedure Mark_Origins (M : in out Model) is
+   begin
+      for E in 1 .. Eye_Count (M) loop
+         Driver.Robot.Stillness.Set_Origin (M, Eye_Id (E));
+      end loop;
+   end Mark_Origins;
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
       Kept : Boolean;
@@ -1821,6 +1863,7 @@ package body Driver.Robot.Motion is
                --  401 of the default fake robot on the big machine, 10-22, a humanoid of 30 channels): each level of
                --  each channel looked at the 436 to 484 beats since the last, its chance of a false alarm 1.000, was
                --  "seen", and was confirmed by an estimate of 17 to 20 s that saw nothing; 4 channels in 28209 beats.
+               Mark_Origins (M);
                Unlooked := M.Beats;
                Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
                Last_Offset := Offset;

@@ -200,6 +200,10 @@ package body Driver.Robot.Stillness is
          if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then
             S.Change_2 := Mean_Change (S.Current.all, S.Before.all, S.Deviations.all);
          end if;
+         --  The change from the frame the latest push began from (Set_Origin).
+         if S.Has_Origin and then S.Origin /= null and then S.Origin'Length = S.Current'Length then
+            S.From_Origin := Mean_Change (S.Current.all, S.Origin.all, S.Deviations.all);
+         end if;
          --  The change from the anchor, against what rest makes (the stationary beats' median change and its scale): a
          --  picture farther from it than rest moves one, and farther than at the beat before.
          if S.Has_Anchor and then S.Anchor /= null and then S.Anchor'Length = S.Current'Length
@@ -323,6 +327,27 @@ package body Driver.Robot.Stillness is
    end Drop_Anchor;
 
    function Eye_Away_Run (M : Model; E : Eye_Id) return Natural is (M.Eyes (E).Away_Run);
+
+   procedure Set_Origin (M : in out Model; E : Eye_Id) is
+      S : Eye_Stream renames M.Eyes (E);
+   begin
+      S.From_Origin := Real'Last;
+      if S.Current = null then
+         S.Has_Origin := False;
+         return;
+      end if;
+      if S.Origin = null or else S.Origin'Length /= S.Current'Length then
+         Free (S.Origin);
+         S.Origin := new Real_Array (S.Current'Range);
+      end if;
+      S.Origin.all := S.Current.all;
+      S.Has_Origin := True;
+   end Set_Origin;
+
+   function Eye_From_Origin (M : Model; E : Eye_Id) return Real is
+     (if M.Eyes (E).Has_Origin then M.Eyes (E).From_Origin else Real'Last);
+
+   function Eye_Rest_Change (M : Model; E : Eye_Id) return Real is (M.Eyes (E).Watch_Rest);
 
    function All_Still (M : Model) return Boolean is
    begin

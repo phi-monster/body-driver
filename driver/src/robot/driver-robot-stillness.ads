@@ -91,6 +91,18 @@ private package Driver.Robot.Stillness is
    --  before and farther than rest moves a picture (the median change at its stationary beats, Z of their scale
    --  above): a drift too slow for one beat's change to show, as a body that keeps going slowly makes it.
 
+   procedure Set_Origin (M : in out Model; E : Eye_Id);
+   --  The eye's latest frame is the one a push begins from: its picture is compared with it from now on
+   --  (Eye_From_Origin), until the next push's.
+
+   function Eye_From_Origin (M : Model; E : Eye_Id) return Real;
+   --  The eye's picture's mean change from its origin at the latest beat, in units of its pixels' noise; Real'Last
+   --  when not measured.
+
+   function Eye_Rest_Change (M : Model; E : Eye_Id) return Real;
+   --  What rest changes the eye's picture by from one frame to another (the median change of its stationary beats,
+   --  Watch); Real'Last before it is measured.
+
    function Group_Still (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  False while the group's noise is not measured or a reading is missing.
 

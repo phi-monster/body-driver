@@ -26,9 +26,13 @@ package Driver.Robot.Motion is
      with Pre => Kept_Eyes'Length = Eye_Count (M);
    --  Holds until Still (M), as Settle, the push before it held meanwhile; but when every commanded reading stands
    --  and some eye's picture goes on drifting (Stillness.Eye_Drift_Run: two beats running, the least that tells a
-   --  lasting drift from one beat's, past the slowest eye's lag), the push is keeping the body going: Back (the holds
-   --  of the groups it pushed) is sent, and the wait goes on. Kept_Going: Back was sent, and once the readings stood
-   --  again no eye drifted on; Kept_Eyes: the eyes that drifted, one a Boolean per eye from 1.
+   --  lasting drift from one beat's, past the slowest eye's lag), Back (the holds of the groups it pushed) is sent,
+   --  and the wait goes on. Kept_Going: Back was sent, and once settled some eye's picture stayed away from where the
+   --  push began (Mark_Origins) rather than came back: a body a speed carried stops where it got to, a joint sent
+   --  back comes back; Kept_Eyes: the eyes that stayed away, one a Boolean per eye from 1.
+
+   procedure Mark_Origins (M : in out Model);
+   --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).
 
    type Step_Outcome is (Reached, Blocked, Short);
    --  Reached  every targeted channel arrived within its noise

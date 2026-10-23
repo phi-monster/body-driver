@@ -3682,6 +3682,7 @@ driver-robot-look.adb	Turn := (W / 4.0) / Shift;	4.0	structure	a quarter of the 
 driver-robot-motion.adb	"" & G'Image & "" & C'Image & "" & Driver.Log.Image (Stop, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digits printed in a log line or a message
+driver-robot-motion.adb	& "" & Driver.Log.Image (Pushed_Away (E), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Rare, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message
@@ -3694,6 +3695,7 @@ driver-robot-motion.adb	& Driver.Log.Image (E.Length, 4)	4	format	digits printed
 driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image (Rest, 2) & (if Stayed then "" else ""));	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2	2	statistics	a drift lasts when two drifting beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
@@ -3708,6 +3710,7 @@ driver-robot-motion.adb	Amount := 2.0 * Amount;	2.0	structure	the probe doubles
 driver-robot-motion.adb	Amount := Real'Min (Ask * 2.0 ** Stride, Most);	2.0	structure	the ladder's doubling, climbed one doubling further at each level nothing answered
 driver-robot-motion.adb	Append (Errors, "" & C'Image & "" & Driver.Log.Image (Error, 1));	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	Append (Report.Detail, "" & Driver.Log.Image (Largest, 1)	1	format	digits printed in a log line or a message
+driver-robot-motion.adb	Append (Text, "" & E'Image & "" & Driver.Log.Image (Now_Away, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	Creep : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Before, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Found_At, 6)	6	format	digits printed in a log line or a message
@@ -3763,6 +3766,7 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
+driver-robot-motion.adb	and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made; nearer the first, it came back
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters

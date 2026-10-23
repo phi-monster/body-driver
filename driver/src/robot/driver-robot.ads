@@ -604,6 +604,9 @@ private
       Away_Last     : Real := 0.0;           --  the picture's change from it at the beat before
       Away_Run      : Natural := 0;          --  beats in a row the picture went farther from it than the beat before, and
                                             --  farther than rest moves a picture: a drift too slow for one beat to show
+      Origin        : Luma_Access;           --  the frame a push began from (Stillness.Set_Origin), and
+      Has_Origin    : Boolean := False;      --  it is in effect
+      From_Origin   : Real := Real'Last;     --  the picture's change from it at the latest beat; Real'Last unmeasured
       Run_Moved     : Boolean := False;      --  the still view holds frames the noise called changed, after the
                                              --  picture stopped (Stillness.Judge_Eye): it measures no noise
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat
