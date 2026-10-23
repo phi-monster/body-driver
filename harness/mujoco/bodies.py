@@ -2,7 +2,7 @@
 # on, each given as its maker's interface gives it: joints that go to a position they are sent (the model's own servos,
 # or a position loop of the rig's around a model's torque motors, as a humanoid's or a quadruped's controller board
 # runs it), a wheeled base and a drone at velocity setpoints with their own loops inside. Each has cameras where such a
-# robot carries them and one camera standing in the room, and the truth a scorer judges the driver against: each
+# robot carries them, its global camera on its own body (none stands in the room), and the truth a scorer judges the driver against: each
 # group's role and each camera's mount. Nothing here reaches the driver but what robot.py sends: readings and pictures.
 import math
 import numpy as np
@@ -34,18 +34,19 @@ def find_body(spec, name):
     raise KeyError("no body " + name)
 
 
-def world_camera(spec, rng, center, size):
-    """One camera standing in the room, somewhere around the robot at a distance and height drawn from the seed,
-    looking at the robot's middle (drawn a little off it)."""
-    az = rng.uniform(-math.pi, math.pi)
-    d = size * rng.uniform(1.4, 2.2)
-    h = size * rng.uniform(0.5, 1.2)
-    c = np.asarray(center, float)
+def base_camera(spec, rng, target, size):
+    """A fixed arm's own global camera (owner 10-23: no robot has a camera standing in the room; each carries its own):
+    on a post on the arm's base, behind it and above, drawn from the seed, looking over its shoulder at where its hand
+    works. The base never moves: the camera is fixed in the world, as such a camera is."""
+    az = rng.uniform(math.radians(140.0), math.radians(220.0))
+    d = size * rng.uniform(0.8, 1.2)
+    h = size * rng.uniform(0.6, 1.0)
+    c = np.asarray(target, float)
     pos = c + np.array([d * math.cos(az), d * math.sin(az), h])
-    target = c + rng.uniform(-0.1, 0.1, 3) * size
-    spec.worldbody.add_camera(name="room", pos=[float(x) for x in pos], xyaxes=look_axes(target - pos),
-                              fovy=float(rng.uniform(50.0, 70.0)))
-    return {"name": "room", "mount": "WORLD_FIXED", "by": None}
+    aim = c + rng.uniform(-0.05, 0.05, 3) * size
+    spec.worldbody.add_camera(name="base_cam", pos=[float(x) for x in pos], xyaxes=look_axes(aim - pos),
+                              fovy=float(rng.uniform(55.0, 75.0)))
+    return {"name": "base_cam", "mount": "WORLD_FIXED", "by": None}
 
 
 def body_camera(spec, body, name, pos, forward, up, rng, mount, by):
@@ -122,7 +123,7 @@ def kind_panda(rng):
               servo("arm1_closer", "CLOSER", ["actuator8"])]
     cams = [body_camera(spec, "hand", "arm1_wrist", [0.09, 0.0, 0.0], [-0.45, 0.0, 1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
-            world_camera(spec, rng, center, size)]
+            base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
     props(spec, rng, center, size, 8)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": "home", "fix": None}
 
@@ -133,7 +134,7 @@ def kind_ur5e(rng):
     groups = [servo("arm1_joints", "ARM", ["shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"])]
     cams = [body_camera(spec, "wrist_3_link", "arm1_wrist", [0.05, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
-            world_camera(spec, rng, center, size)]
+            base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
     props(spec, rng, center, size, 8)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "init": {"shoulder_lift_joint": -1.57, "elbow_joint": 1.57, "wrist_1_joint": -1.57, "wrist_2_joint": -1.57}}
@@ -146,7 +147,7 @@ def kind_so101(rng):
     groups = [servo("arm1_joints", "ARM", ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"], ticks),
               servo("arm1_closer", "CLOSER", ["gripper"], ticks)]
     cams = [{"name": "wrist_cam", "mount": "ARM_CARRIED", "by": "arm1_joints"},   # the maker's own wrist camera
-            world_camera(spec, rng, center, size)]
+            base_camera(spec, rng, [0.2, 0.0, 0.03], size)]
     props(spec, rng, center, size, 8)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None}
 
@@ -177,11 +178,11 @@ def kind_stretch(rng):
               servo("arm1_closer", "CLOSER", ["gripper"]),
               servo("head", "ARM", ["head_pan", "head_tilt"])]
     cams = [{"name": "d405_rgb", "mount": "ARM_CARRIED", "by": "arm1_joints"},
-            {"name": "d435i_camera_rgb", "mount": "ARM_CARRIED", "by": "head"},
-            world_camera(spec, rng, center, size)]
+            {"name": "d435i_camera_rgb", "mount": "ARM_CARRIED", "by": "head"}]
     props(spec, rng, center, size, 8)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
-            "init": {"joint_head_tilt": -0.6, "joint_lift": 0.5}}
+            # The head turned to the gripper and the table, as Stretch works (its D435i stands on its side, as on the robot).
+            "init": {"joint_head_pan": -1.6, "joint_head_tilt": -0.8, "joint_lift": 0.5}}
 
 
 def kind_x2(rng):
@@ -190,8 +191,7 @@ def kind_x2(rng):
     groups = [{"name": "motors", "role": "CARRIER", "kind": "flight", "actuators": ["thrust1", "thrust2", "thrust3", "thrust4"],
                "ticks": None}]
     cams = [body_camera(spec, "x2", "body_cam", [0.12, 0.0, 0.0], [1.0, 0.0, -0.35], [0.0, 0.0, 1.0], rng,
-                        "CARRIER_CARRIED", "motors"),
-            world_camera(spec, rng, center, size)]
+                        "CARRIER_CARRIED", "motors")]
     props(spec, rng, center, size, 10)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": "hover", "fix": None}
 
@@ -214,8 +214,7 @@ def kind_g1(rng):
             body_camera(spec, "left_wrist_yaw_link", "arm1_wrist", [0.0, 0.04, 0.04], [1.0, -0.2, -0.3], [0.0, 0.0, 1.0],
                         rng, "ARM_CARRIED", "arm1_joints"),
             body_camera(spec, "right_wrist_yaw_link", "arm2_wrist", [0.0, -0.04, 0.04], [1.0, 0.2, -0.3], [0.0, 0.0, 1.0],
-                        rng, "ARM_CARRIED", "arm2_joints"),
-            world_camera(spec, rng, center, size)]
+                        rng, "ARM_CARRIED", "arm2_joints")]
     props(spec, rng, [0.5, 0.0, 0.0], size, 10)
     # On a stand: the pelvis held where it stands (no free joint), as a humanoid is first booted in a lab.
     return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": "pelvis"}
@@ -242,8 +241,7 @@ def kind_rby1(rng):
             body_camera(spec, "link_left_arm_6", "arm1_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
             body_camera(spec, "link_right_arm_6", "arm2_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
-                        "ARM_CARRIED", "arm2_joints"),
-            world_camera(spec, rng, center, size)]
+                        "ARM_CARRIED", "arm2_joints")]
     props(spec, rng, [0.6, 0.0, 0.0], size, 10)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
             "init": {"right_arm_3": -1.6, "left_arm_3": -1.6, "head_1": 0.5}}
@@ -264,7 +262,7 @@ def kind_shadow(rng):
                                                "LFJ3", "LFJ0")])]
     cams = [body_camera(spec, "wrist_3_link", "arm1_wrist", [0.0, 0.06, 0.09], [0.0, 1.0, -0.7], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
-            world_camera(spec, rng, center, size)]
+            base_camera(spec, rng, [0.45, 0.0, 0.1], size)]
     props(spec, rng, center, size, 8)
     spec.option.impratio = 10.0   # the hand's own solver settings (its model asks for them)
     spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
@@ -279,8 +277,7 @@ def kind_go2(rng):
     # it settles within the minute, 10-23).
     groups = [pd("leg_" + l, "CARRIER", [l + "_hip", l + "_thigh", l + "_calf"], 150.0, 8.0) for l in ("FL", "FR", "RL", "RR")]
     cams = [body_camera(spec, "base", "head_cam", [0.4, 0.0, 0.06], [1.0, 0.0, -0.25], [0.0, 0.0, 1.0], rng,
-                        "CARRIER_CARRIED", "leg_FL"),
-            world_camera(spec, rng, center, size)]
+                        "CARRIER_CARRIED", "leg_FL")]
     props(spec, rng, center, size, 10)
     return {"spec": spec, "groups": groups, "cameras": cams, "key": "home", "fix": None}
 
@@ -302,7 +299,7 @@ KINDS = {"panda": kind_panda, "ur5e": kind_ur5e, "so101": kind_so101, "aloha": k
 # (Luxonis' glass-to-glass rig: 54 ms, peaks 60 to 70, for a 52 fps MJPEG stream; OBS: one or two frames of buffering),
 # a RealSense's color at about 40 to 100 ms, and a camera on a video link (H.264) later still.
 CAMERA_CLASSES = {
-    # A USB camera streaming MJPEG (a webcam on a wrist, in a room).
+    # A USB camera streaming MJPEG (a webcam on a wrist, on a fixed arm's post).
     "webcam": {"full_well": (3000.0, 10000.0), "read_noise": (1.5, 4.0), "jpeg": (70, 90), "latency": (0.06, 0.13)},
     # A depth camera's color stream, raw over USB 3 (Intel RealSense D405, D435).
     "depth_rgb": {"full_well": (5000.0, 13000.0), "read_noise": (1.5, 4.0), "jpeg": None, "latency": (0.04, 0.10)},
@@ -318,33 +315,33 @@ CAMERA_CLASSES = {
 # Hall effect sensors, known for a jitter of several counts.
 JITTER = (0.2, 0.6)
 SENSORS = {
-    "panda": {"cameras": {"arm1_wrist": "depth_rgb", "room": "webcam"},
+    "panda": {"cameras": {"arm1_wrist": "depth_rgb", "base_cam": "webcam"},
               "groups": {"arm1_joints": {"bits": (14, 14)}, "arm1_closer": {"step": 0.5}}},
-    "ur5e": {"cameras": {"arm1_wrist": "webcam", "room": "webcam"},
+    "ur5e": {"cameras": {"arm1_wrist": "webcam", "base_cam": "webcam"},
              "groups": {"arm1_joints": {"bits": (16, 20)}}},
-    "so101": {"cameras": {"wrist_cam": "webcam", "room": "webcam"},
+    "so101": {"cameras": {"wrist_cam": "webcam", "base_cam": "webcam"},
               "groups": {"arm1_joints": {"bits": (12, 12)}, "arm1_closer": {"bits": (12, 12)}}},
     "aloha": {"cameras": {"wrist_cam_left": "webcam", "wrist_cam_right": "webcam", "overhead_cam": "webcam"},
               "groups": {"arm1_joints": {"bits": (12, 12)}, "arm2_joints": {"bits": (12, 12)},
                          "arm1_closer": {"step": 3.0e-5}, "arm2_closer": {"step": 3.0e-5}}},
-    "stretch": {"cameras": {"d405_rgb": "depth_rgb", "d435i_camera_rgb": "depth_rgb", "room": "webcam"},
+    "stretch": {"cameras": {"d405_rgb": "depth_rgb", "d435i_camera_rgb": "depth_rgb"},
                 "groups": {"base": {"bits": (12, 16), "velocity": True},
                            "arm1_joints": {"bits": (12, 12), "slide_step": (1.0e-5, 1.0e-4)},
                            "arm1_closer": {"step": 1.0e-5}, "head": {"bits": (12, 12)}}},
-    "x2": {"cameras": {"body_cam": "stream", "room": "webcam"},
+    "x2": {"cameras": {"body_cam": "stream"},
            "groups": {"motors": {"estimate": (0.01, 0.05)}}},
-    "go2": {"cameras": {"head_cam": "stream", "room": "webcam"},
+    "go2": {"cameras": {"head_cam": "stream"},
             "groups": {"leg_FL": {"bits": (14, 16)}, "leg_FR": {"bits": (14, 16)}, "leg_RL": {"bits": (14, 16)},
                        "leg_RR": {"bits": (14, 16)}}},
-    "g1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam", "room": "webcam"},
+    "g1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam"},
            "groups": {"leg_left": {"bits": (14, 18)}, "leg_right": {"bits": (14, 18)}, "waist": {"bits": (14, 18)},
                       "arm1_joints": {"bits": (14, 18)}, "arm2_joints": {"bits": (14, 18)},
                       "arm1_closer": {"bits": (12, 14)}, "arm2_closer": {"bits": (12, 14)}}},
-    "rby1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam", "room": "webcam"},
+    "rby1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam"},
              "groups": {"base": {"bits": (12, 16), "velocity": True}, "torso": {"bits": (14, 20)},
                         "arm1_joints": {"bits": (14, 20)}, "arm2_joints": {"bits": (14, 20)},
                         "arm1_closer": {"step": 1.0e-5}, "arm2_closer": {"step": 1.0e-5}, "head": {"bits": (14, 20)}}},
-    "shadow": {"cameras": {"arm1_wrist": "webcam", "room": "webcam"},
+    "shadow": {"cameras": {"arm1_wrist": "webcam", "base_cam": "webcam"},
                "groups": {"arm1_joints": {"bits": (16, 20)}, "arm1_closer": {"bits": (12, 12), "jitter": (1.0, 3.0)}}},
 }
 
