@@ -312,14 +312,6 @@ package body Driver.Robot.Lockin is
       Eyes   : constant Natural := Natural (M.Eyes.Length);
       All_Columns : Natural := 0;
 
-      --  A group's reading change as a cause: only while it is being pushed.
-      --  A held group that moves a little because another one moved is not
-      --  a cause, or a regression could credit it with the other's effect
-      --  (its tiny motion is a scaled copy) and reject its own still pushes
-      --  as outliers.
-      function Pushed_Change (G : Group_Id; Beat : Natural; Channel : Positive) return Real is
-        (if Channels.Pushed (M, G, Beat) then Channels.Change (M, G, Beat, Channel) else 0.0);
-
       --  The beat at which the push of a group that is under way at a beat began, for every group and beat.
       Starts : Natural_Access := new Natural_Array (1 .. Groups * M.Beats);
 
@@ -525,6 +517,28 @@ package body Driver.Robot.Lockin is
             function Mark (Marks : Natural_Access; G : Group_Id; B : Natural) return Natural is
               (Marks ((Natural (G) - 1) * M.Beats + B + 1));
 
+            --  A group's reading change as a cause of what the eye saw at a beat: while it is pushed, and while, held, it
+            --  moves by what this eye can see of a group the eye has measured. A held group that moves as another is pushed
+            --  (a hand that swings as its arm moves, an arm that sways as its hand does) moves the picture with it, and
+            --  is credited with that, rather than the beat left out: the Shadow's arm and hand, each moving at the other's
+            --  pushes, left its lock-in no row in a whole boot (seed 3, paced rounds p69 to p79, 10-23: 535 pushed beats,
+            --  none a row). Only a group with pushes of its own up to the beat, which give its column its own rows, and only
+            --  where the eye can see its motion: a held group that moves a little because another one moved, its tiny
+            --  motion a scaled copy of the push's and no push of its own to tell them apart, would take the push's credit
+            --  and leave its own still pushes outliers. Asked further, of a group this eye had measured, the Shadow's
+            --  arm and hand, never measured, had no row still (paced round p80a). Nor a speed's (Keeps_Going): what its
+            --  readings change moves is the body's speed, not its place, and Stretch's wheels, their readings shaken as its
+            --  arm moved, took the arm's motion for theirs, and the base was pushed again and again to the boot's end (seed
+            --  2, paced round p82b); a speed moving while another group is pushed leaves the beat out (Kind_Of).
+            function Own_Pushes (G : Group_Id; Beat : Natural) return Boolean is (Mark (Last_Pushed, G, Beat) > 0);
+            function Cause_Change (G : Group_Id; Beat : Natural; Channel : Positive) return Real is
+              (if Channels.Pushed (M, G, Beat) then Channels.Change (M, G, Beat, Channel)
+               elsif Own_Pushes (G, Beat) and then not Keeps_Going (M, G) and then Group_Moved (G, Beat)
+                 and then not Unseen (G, Beat)
+               then Channels.Change (M, G, Beat, Channel)
+               else 0.0);
+
+
             --  Whether the eye's picture moved, at each beat, within what the flow resolves: a cell resolves a
             --  displacement of less than half its width, and where the cells that could not resolve theirs are a
             --  significant majority of those with texture, the picture moved beyond the flow's reach, and the
@@ -661,7 +675,9 @@ package body Driver.Robot.Lockin is
                                  return Another_Pushed;
                               elsif Began > Low and then Mark (Last_Moved, G, Began - 1) > Low then
                                  return Another_Moved_Before;
-                              elsif Mark (Last_Seen_Moving, G, Natural (R)) > Began then
+                              elsif Mark (Last_Seen_Moving, G, Natural (R)) > Began
+                                and then (not Own_Pushes (G, Natural (R)) or else Keeps_Going (M, G))
+                              then
                                  return Another_Moving;
                               end if;
                            end if;
@@ -766,7 +782,7 @@ package body Driver.Robot.Lockin is
                               Moved : Boolean := False;
                            begin
                               for R in 1 .. Rows loop
-                                 if Pushed_Change (G, Beat_Of (R) - Lag, C) /= 0.0 then
+                                 if Cause_Change (G, Beat_Of (R) - Lag, C) /= 0.0 then
                                     Moved := True;
                                     exit;
                                  end if;
@@ -791,7 +807,7 @@ package body Driver.Robot.Lockin is
                         for R in 1 .. Rows loop
                            X (1) := 1.0;
                            for K in 1 .. Kept loop
-                              X (K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
+                              X (K + 1) := Cause_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                            for I in X'Range loop
                               for J in X'Range loop
@@ -1006,7 +1022,7 @@ package body Driver.Robot.Lockin is
                         for R in 1 .. Rows loop
                            X (R, 1) := 1.0;
                            for K in 1 .. Kept loop
-                              X (R, K + 1) := Pushed_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
+                              X (R, K + 1) := Cause_Change (Cols (K).Group, Beat_Of (R) - Lag, Cols (K).Channel);
                            end loop;
                         end loop;
                         All_Rows := new Regression.Start'(Regression.Start_Of (X.all));

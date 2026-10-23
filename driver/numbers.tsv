@@ -3802,7 +3802,7 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
-driver-robot-motion.adb	Stayed : constant Boolean := Beyond and then Now_Away > (Rest + Was) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
+driver-robot-motion.adb	Stayed : constant Boolean := Beyond and then Now_Away > Real'Max ((Rest + Was) / 2.0, Bound);	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters

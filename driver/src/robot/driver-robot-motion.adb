@@ -58,10 +58,14 @@ package body Driver.Robot.Motion is
                Now_Away : constant Real := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
                Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
                Was      : constant Real := Pushed (Pushed'First + E - 1);
+               --  Further than rest takes a picture: beyond what rest changes it by, Z of its scale.
+               Bound    : constant Real := Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
                Beyond   : constant Boolean :=
-                 Now_Away < Real'Last and then Was < Real'Last and then Rest < Real'Last
-                 and then Was > Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
-               Stayed   : constant Boolean := Beyond and then Now_Away > (Rest + Was) / 2.0;
+                 Now_Away < Real'Last and then Was < Real'Last and then Rest < Real'Last and then Was > Bound;
+               --  Stayed away: nearer to how far the push took it than to rest, and itself further than rest takes a
+               --  picture. Nearer the halfway mark alone, the G1's hands were speeds by their eyes' 2.6 and 3.0 after
+               --  pushes of 2.0 and 2.4 against rest's 1.5 (seed 1, paced round p79b, 10-23).
+               Stayed   : constant Boolean := Beyond and then Now_Away > Real'Max ((Rest + Was) / 2.0, Bound);
             begin
                Considered (Considered'First + E - 1) := Stayed;
                Kept_Going := Kept_Going or else Stayed;
