@@ -702,7 +702,9 @@ package body Driver.Robot.Body_File is
                                Resting    => 0.0,
                                Rest_Pull  => 0.0,
                                --  Absent from a file written before it: as then, the eye may ride on the group.
-                               Could_Be_Whole => Whole (Y, "could_be_whole") /= 0));
+                               Could_Be_Whole => Whole (Y, "could_be_whole") /= 0,
+                               --  Not kept: the next measure tells it again from the beats it reads.
+                               Far_Chance => 1.0));
                         end;
                      end loop;
                   end;

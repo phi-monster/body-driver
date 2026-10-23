@@ -349,6 +349,8 @@ package body Driver.Robot.Stillness is
 
    function Eye_Rest_Change (M : Model; E : Eye_Id) return Real is (M.Eyes (E).Watch_Rest);
 
+   function Eye_Rest_Scale (M : Model; E : Eye_Id) return Real is (M.Eyes (E).Watch_Rest_Scale);
+
    function All_Still (M : Model) return Boolean is
    begin
       if M.Beats = 0 then

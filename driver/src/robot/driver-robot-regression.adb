@@ -337,23 +337,26 @@ package body Driver.Robot.Regression is
       return Value;
    end Count_Significant;
 
-   function Count_Significant_Computed (Count, Trials : Natural; Rate : Real; Tests : Positive) return Boolean is
+   function Count_Tail (Count, Trials : Natural; Rate : Real) return Real is
    begin
       if Count = 0 then
-         return False;
+         return 1.0;
       end if;
       --  P (X >= k) for X binomial (n, p) is P (F < (n - k + 1) p / (k (1 - p)))
       --  for F with 2 k and 2 (n - k + 1) degrees of freedom.
       declare
          K : constant Real := Real (Count);
          N : constant Real := Real (Trials);
-         Tail : constant Real :=
-           1.0 - Driver.Distributions.F_Upper_Tail
-                   ((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));
       begin
-         return Tail < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests);
+         return 1.0 - Driver.Distributions.F_Upper_Tail
+                        ((N - K + 1.0) * Rate / (K * (1.0 - Rate)), 2 * Count, 2 * (Trials - Count + 1));
       end;
-   end Count_Significant_Computed;
+   end Count_Tail;
+
+   function Count_Significant_Computed (Count, Trials : Natural; Rate : Real; Tests : Positive) return Boolean is
+     (Count > 0
+      and then Count_Tail (Count, Trials, Rate)
+               < Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / Real (Tests));
 
    function Explained_On
      (X : Real_Matrix; Y : Real_Array; Xc : in out Real_Matrix; Yc : in out Real_Vector; Used : out Natural) return Real

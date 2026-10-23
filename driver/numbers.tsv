@@ -3672,6 +3672,10 @@ driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	1
 driver-robot-lockin.adb	if Cell = 1 or else Cell = N or else Cell = N / 2 then	2	format	the log shows the middle cell's rows
 driver-robot-lockin.adb	if Pushes > 1 then	1	structure	at most one group pushed at a beat the regression explains
 driver-robot-lockin.adb	if R >= 1 and then Channels.Pushed (M, G, R) then	1	structure	a row's change is from the beat before it: the first beat has none (as Usable asks)
+driver-robot-lockin.adb	(B - Lag >= 1 and then B - Lag < M.Beats and then B < Natural (S.Measured.Length) and then S.Measured (B));	1	structure	the first beat has none before it
+driver-robot-lockin.adb	(Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))	2	statistics	Laplace's rule of succession: one more than seen over two more than counted
+driver-robot-lockin.adb	then Regression.Count_Tail (Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))	2	statistics	Laplace's rule of succession: one more than seen over two more than counted
+driver-robot-lockin.adb	else 1.0);	1.0	math	no pushed beat: nothing chance had to explain
 driver-robot-lockin.adb	new Flag_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => False]];	1	structure	the first group of the kept ones: the grid's lower bound
 driver-robot-lockin.adb	new Natural_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0]];	1	structure	the first group of the kept ones: the grid's lower bound
 driver-robot-lockin.adb	new Real_Grid'[1 .. N => [Group_Id (1) .. Group_Id (Kept) => 0.0]];	1	structure	the first group of the kept ones: the grid's lower bound
@@ -3714,7 +3718,7 @@ driver-robot-motion.adb	& "" & Driver.Log.Image (Rare, 2) & ""	2	format	digits p
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Resolved_Moved > 0 then Driver.Log.Image (Driver.Stats.Median (Shifts (1 .. Resolved_Moved)), 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message
-driver-robot-motion.adb	& Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)	2	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image ((if Looks = Real'First then -Real'Last else Looks), 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Chance, 3) & "" & Natural'Image (M.Beats - 1));	3	format	digits printed in a log line or a message
@@ -3723,7 +3727,7 @@ driver-robot-motion.adb	& Driver.Log.Image (E.Length, 4)	4	format	digits printed
 driver-robot-motion.adb	& Driver.Log.Image (Failed_At, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Failed_From), 6)),	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
-driver-robot-motion.adb	& Driver.Log.Image (Rest, 2) & (if Stayed then "" else ""));	2	format	digits printed in a log line or a message
+driver-robot-motion.adb	& Driver.Log.Image (Rest, 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	(Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2	2	statistics	a drift lasts when two drifting beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
@@ -3798,7 +3802,7 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
-driver-robot-motion.adb	and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
+driver-robot-motion.adb	Stayed : constant Boolean := Showed and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
@@ -3827,6 +3831,8 @@ driver-robot-regression.adb	return (if R = 0.0 then 1.0 else 0.0);	1.0	math	with
 driver-robot-regression.adb	return (if U <= Huber_K then 1.0 else Huber_K / U);	1.0	math	Huber's weight is one inside the cutoff
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
+driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
+driver-robot-regression.adb	return 1.0;	1.0	math	no events: at least none is certain
 driver-robot-steps.adb	(X.Followed < 2 or else not X.Turned	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
@@ -4297,3 +4303,10 @@ driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mo
 driver-world.adb	if Bits (Bits'First + Driver.Bytes.Offset (I / 8)) / 2 ** (I mod 8) mod 2 = 1 then	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	if N = 7 then	7	format	an adopt record with the placed points has seven elements
 driver-world.adb	if What = "" and then N = 1 then	1	format	the record of the scene seen anew: its name alone
+driver-robot-body_file.adb	Far_Chance => 1.0));	1.0	math	not kept: no evidence until the next measure, a chance of one
+driver-robot.ads	Far_Chance : Real := 1.0;	1.0	math	no evidence yet: a chance of one
+driver-robot-lockin.adb	Least : Real := 1.0;	1.0	math	no evidence yet: a chance of one
+driver-robot-lockin.adb	Tests := Tests + 2;	2	structure	two tests an eye: the cells that respond, and the beats beyond the flow's reach
+driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));	1	structure	no test asked: the least is one, over one
+driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));	1.0	math	a chance is at most one
+driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in yet: a chance of one

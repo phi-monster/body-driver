@@ -704,8 +704,11 @@ package body Driver.Robot.Lockin is
                end loop;
                Marks_Took := Driver.Clock.Seconds - Eye_Began;
             end if;
-            --  A regression needs more observations than coefficients.
-            if Rows > All_Columns + 1 then
+            --  A regression needs more observations than coefficients: the channels pushed over its rows, and the mean
+            --  (below, Kept). Not every commandable channel, pushed or not: asked for the Shadow's 26 rows and more, the
+            --  lock-in measured nothing in a whole boot of its arm's and its hand's pushes, every group unmeasured in both
+            --  eyes and the hand unclassified, nor in one of RB-Y1's (seed 3 of each, paced round p69a, 10-23).
+            if Rows > 0 then
                declare
                   Beat_Of : Natural_Access := new Natural_Array (1 .. Rows);
                   Cols    : Column_Array (1 .. All_Columns);
@@ -742,6 +745,9 @@ package body Driver.Robot.Lockin is
                         end loop;
                      end if;
                   end loop;
+                  if Rows <= Kept + 1 then
+                     Kept := 0;
+                  end if;
                   for K in 1 .. Kept loop
                      S.Kept_Groups.Append (Natural (Cols (K).Group));
                      S.Kept_Channels.Append (Cols (K).Channel);
@@ -1269,6 +1275,62 @@ package body Driver.Robot.Lockin is
                   Free (Beat_Of);
                end;
             end if;
+            --  Beyond the flow's reach: how likely rest alone put as many of a group's pushed beats' pictures farther than
+            --  the cells resolve (Reached) as there were (Far_Chance), at rest's rate of such beats where no group was pushed
+            --  or moved, by the rule of succession (one beat of each kind added: never zero before it is seen). The regression
+            --  measures small motions and leaves such beats out: Stretch's base, a speed whose pushes swung its wrist
+            --  eye's view beyond reach at 16 of its 24 beats, was in no row of either eye, and its ladder found it moving
+            --  no eye up to 7 units and probed its channels one at a time to the boot's end (seed 3, paced round p70a,
+            --  10-23).
+            declare
+               Rest_Beats, Rest_Far : Natural := 0;
+               function Pictured (B : Natural) return Boolean is
+                 (B - Lag >= 1 and then B - Lag < M.Beats and then B < Natural (S.Measured.Length) and then S.Measured (B));
+            begin
+               for B in 1 .. M.Beats - 1 loop
+                  if Pictured (B)
+                    and then (for all G in M.Groups.First_Index .. M.Groups.Last_Index =>
+                                not M.Groups (G).Commandable
+                                or else not (Channels.Pushed (M, G, B - Lag) or else Group_Moved (G, B - Lag)))
+                  then
+                     Rest_Beats := Rest_Beats + 1;
+                     if not Reached (B + 1) then
+                        Rest_Far := Rest_Far + 1;
+                     end if;
+                  end if;
+               end loop;
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  if M.Groups (G).Commandable then
+                     declare
+                        Push_Beats, Push_Far : Natural := 0;
+                        Index : constant Positive := (Natural (G) - 1) * Eyes + Natural (E);
+                        Effect : Eye_Effect := M.Graph.Effects (Index);
+                     begin
+                        for B in 1 .. M.Beats - 1 loop
+                           if Pictured (B) and then Channels.Pushed (M, G, B - Lag) then
+                              Push_Beats := Push_Beats + 1;
+                              if not Reached (B + 1) then
+                                 Push_Far := Push_Far + 1;
+                              end if;
+                           end if;
+                        end loop;
+                        Effect.Far_Chance :=
+                          (if Push_Beats > 0
+                           then Regression.Count_Tail (Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))
+                           else 1.0);
+                        M.Graph.Effects.Replace_Element (Index, Effect);
+                        if Regression.Count_Significant
+                             (Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))
+                        then
+                           Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
+                                            & " moved the picture beyond the flow's reach at" & Push_Far'Image & " of its"
+                                            & Push_Beats'Image & " pushed beats, rest at" & Rest_Far'Image & " of"
+                                            & Rest_Beats'Image);
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end;
             Free (Last_Pushed);
             Free (Last_Moved);
             Free (Last_Seen_Moving);
@@ -1543,6 +1605,28 @@ package body Driver.Robot.Lockin is
    --  arm's first channel in its own eye from the lock-in, 0.31 from the keyframes; no raise of the eye within the
    --  arm's reach showed, its closer was seen from no second pose, and its hand was never made. The keyframes'
    --  measure, once they have one; the lock-in's before, and for every other group and eye.
+   function Moving_Chance (M : Model; G : Group_Id) return Real is
+      P0    : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      Eyes  : constant Natural := Natural (M.Eyes.Length);
+      Least : Real := 1.0;
+      Tests : Natural := 0;
+   begin
+      for E in 1 .. Eyes loop
+         if (Natural (G) - 1) * Eyes + E <= Natural (M.Graph.Effects.Length) then
+            declare
+               F : constant Eye_Effect := M.Graph.Effects ((Natural (G) - 1) * Eyes + E);
+            begin
+               if F.Verdict /= Unmeasured and then F.Textured > 0 then
+                  Least := Real'Min (Least, Regression.Count_Tail (F.Responding, F.Textured, P0));
+               end if;
+               Least := Real'Min (Least, F.Far_Chance);
+               Tests := Tests + 2;
+            end;
+         end if;
+      end loop;
+      return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));
+   end Moving_Chance;
+
    function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean is
       Noise   : constant Real := Cell_Noise (M, E);
       Mount_E : constant Mount := Eye_Mount (M, E);

@@ -619,10 +619,10 @@ package body Driver.Robot.Tests is
       M : Model;
       Undecided_Third : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
-         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
       Nothing_Third : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
-         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+         Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
    begin
       Exercise_Rig (M);
       Check (Role (M, 3) = Closer, "the closer is a closer, got " & Role (M, 3)'Image);
@@ -642,15 +642,15 @@ package body Driver.Robot.Tests is
       Whole_Effect : constant Eye_Effect :=
         (Verdict => Whole, Responding => 48, Textured => 48,
          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
-         Could_Be_Whole => True);
+         Could_Be_Whole => True, Far_Chance => 1.0);
       Nothing_Effect : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
          Fraction => (Value => 0.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
-         Could_Be_Whole => True);
+         Could_Be_Whole => True, Far_Chance => 1.0);
       Undecided_Effect : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
          Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0,
-         Could_Be_Whole => True);
+         Could_Be_Whole => True, Far_Chance => 1.0);
       Group : constant Group_Id := 1;   --  the rig's first arm, of two channels
 
       procedure Set (Eye_1_Channel_1, Eye_1_Channel_2, Eye_2_Channel_1, Eye_2_Channel_2, Third : Eye_Effect) is
@@ -751,7 +751,7 @@ package body Driver.Robot.Tests is
       function Patch_Of (Cells : Natural) return Eye_Effect is
         (Verdict => Patch, Responding => Cells, Textured => Own.Textured,
          Fraction => (Value => Real (Cells) / Real (Own.Textured), Sigma => 0.07, Degrees_Of_Freedom => 0),
-         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
+         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False, Far_Chance => 1.0);
    begin
       Exercise_Rig (M);
       Own := M.Graph.Effects (Index_Of (1));
@@ -803,10 +803,10 @@ package body Driver.Robot.Tests is
       M : Model;
       Undecided_Own : constant Eye_Effect :=
         (Verdict => Undecided, Responding => 24, Textured => 48,
-         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+         Fraction => (Value => 0.5, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
       Nothing_Own : constant Eye_Effect :=
         (Verdict => Nothing, Responding => 0, Textured => 48,
-         Fraction => (Value => 0.0, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False);
+         Fraction => (Value => 0.0, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False, Far_Chance => 1.0);
       G : Group_Id;
       E : Eye_Id'Base := 0;
       K : Natural := 0;   --  arm 1's evidence
@@ -1045,7 +1045,7 @@ package body Driver.Robot.Tests is
       M.Graph.Effects.Replace_Element
         ((3 - 1) * Eye_Count (M) + 1,
          (Verdict => Patch, Responding => 8, Textured => 48,
-          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+          Fraction => (Value => 8.0 / 48.0, Sigma => 0.05, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, 3) = Unclassified, "the closer pushed only with arm 1 is " & Role (M, 3)'Image);
       Check (Closer_Arm (M, 3) = 0, "the closer pushed only with arm 1 is given arm" & Closer_Arm (M, 3)'Image);
@@ -1753,7 +1753,7 @@ package body Driver.Robot.Tests is
       procedure Credit (M : in out Model; Gain : Real) is
          Effect : constant Eye_Effect :=
            (Verdict => Patch, Responding => 1, Textured => 1,
-            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True);
+            Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
       begin
          M.Eyes (1).Kept_Groups.Append (1);
          M.Eyes (1).Kept_Channels.Append (1);
@@ -2050,7 +2050,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B > 40 then
@@ -2373,7 +2373,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 40 | 46 | 52 | 58 then
@@ -2456,7 +2456,7 @@ package body Driver.Robot.Tests is
       end loop;
       M.Graph.Effects.Replace_Element
         (1, (Verdict => Whole, Responding => 1, Textured => 1,
-             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+             Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
    end Put_Eye;
 
    --  A joint pressed into a table moves about against it (A16's arm 1,
@@ -2735,7 +2735,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          --  Pushes 1 to 8, then (once an estimate has measured how long the
@@ -2816,7 +2816,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -2908,7 +2908,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 10, Textured => 10,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 80 or else B in 130 .. 141 then
@@ -2986,7 +2986,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -3063,7 +3063,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 110 then
@@ -3143,7 +3143,7 @@ package body Driver.Robot.Tests is
                S.Gain_Variances.Append (1.0);
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 310 then
@@ -3226,7 +3226,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -3302,7 +3302,7 @@ package body Driver.Robot.Tests is
                end loop;
                M.Graph.Effects.Replace_Element
                  (1, (Verdict => Whole, Responding => 1, Textured => 1,
-                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             end;
          end if;
          if B in 66 .. 105 then
@@ -3849,7 +3849,7 @@ package body Driver.Robot.Tests is
       S : Eye_Stream;
       function Seen (V : Eye_Response) return Eye_Effect is
         ((Verdict => V, Responding => 1, Textured => 1,
-          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+          Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
    begin
       M.Eyes.Append (S);
       M.Eyes.Append (S);
@@ -4693,7 +4693,7 @@ package body Driver.Robot.Tests is
             M.Graph.Effects.Replace_Element
               ((5 - 1) * Eyes + 1,
                (Verdict => Patch, Responding => 1, Textured => 1,
-                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True));
+                Fraction => (Value => 1.0, Sigma => 0.1, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
             M.From_File (Stored_Responses) := True;
          end Credit_Step;
       begin

@@ -691,6 +691,10 @@ private
       --  The most cells that may show the motion are significantly more than half the textured ones: the eye's view
       --  may yet move whole with the group, so the eye may ride on it (Lockin.Judge's test of a whole view, at the
       --  most); false when even the most could not make it whole
+      Far_Chance : Real := 1.0;
+      --  The chance that rest alone put as many of the group's pushed beats' pictures beyond the flow's reach as they
+      --  were (Lockin: the binomial tail at rest's rate of such beats; one for none): a motion too large for the
+      --  regression, which leaves such beats out
    end record;
 
    package Effect_Vectors is new Ada.Containers.Vectors (Positive, Eye_Effect);

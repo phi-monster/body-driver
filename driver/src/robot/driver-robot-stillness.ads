@@ -103,6 +103,10 @@ private package Driver.Robot.Stillness is
    --  What rest changes the eye's picture by from one frame to another (the median change of its stationary beats,
    --  Watch); Real'Last before it is measured.
 
+   function Eye_Rest_Scale (M : Model; E : Eye_Id) return Real;
+   --  The robust scale of those changes about that median (zero before it is measured): a change beyond the median
+   --  by Z of it is more than rest makes.
+
    function Group_Still (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  False while the group's noise is not measured or a reading is missing.
 

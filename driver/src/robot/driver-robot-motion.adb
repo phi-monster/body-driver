@@ -335,28 +335,44 @@ package body Driver.Robot.Motion is
       --  however it shook or crept on the way (round 1, 10-23: arms of the SO-101, the Panda and ALOHA, creeping under
       --  their quantized readings, drifted, and drifted again once sent back); a body that a speed carried stops
       --  where it got to, and its pictures stay away. Come back: nearer to the push's first frame than halfway from what
-      --  rest changes a picture by (Stillness.Eye_Rest_Change) to how far the push had taken it.
+      --  rest changes a picture by (Stillness.Eye_Rest_Change) to how far the push had taken it. Told only by an eye the
+      --  push took further than rest takes a picture (Z of its scale beyond, as a drift away from an anchor is told), and
+      --  a speed only where no such eye came back: nothing a speed moved returns when it is sent back, and a joint's push
+      --  that leaves something moved (a box its jaw knocked, a view another body part moved meanwhile) is seen to stay
+      --  by the eyes that saw that alone. ALOHA's jaw was a speed by its overhead eye, pushed 1.14 from where it began
+      --  against rest's 0.62, and 0.99 after, while its wrist eye came back from 24.69 to 0.78 (seed 1, paced round
+      --  p69a, 10-23).
       if Sent_Back then
          declare
             Text : Unbounded_String;
+            Any_Back : Boolean := False;   --  some eye the push took beyond rest came back
          begin
             for E in 1 .. Eyes loop
                if Kept_Eyes (Kept_Eyes'First + E - 1) then
                   declare
                      Now_Away : constant Real := Driver.Robot.Stillness.Eye_From_Origin (M, Eye_Id (E));
                      Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
-                     Stayed   : constant Boolean :=
+                     Showed   : constant Boolean :=
                        Now_Away < Real'Last and then Pushed_Away (E) < Real'Last and then Rest < Real'Last
-                       and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;
+                       and then Pushed_Away (E)
+                                  > Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
+                     Stayed   : constant Boolean := Showed and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;
                   begin
                      Kept_Eyes (Kept_Eyes'First + E - 1) := Stayed;
                      Kept_Going := Kept_Going or else Stayed;
+                     Any_Back := Any_Back or else (Showed and then not Stayed);
                      Append (Text, " eye" & E'Image & " " & Driver.Log.Image (Now_Away, 2) & " from where the push began"
                              & " (pushed " & Driver.Log.Image (Pushed_Away (E), 2) & ", rest "
-                             & Driver.Log.Image (Rest, 2) & (if Stayed then "): stayed away;" else "): came back;"));
+                             & Driver.Log.Image (Rest, 2)
+                             & (if not Showed then "): no further than rest takes it;"
+                                elsif Stayed then "): stayed away;" else "): came back;"));
                   end;
                end if;
             end loop;
+            Kept_Going := Kept_Going and then not Any_Back;
+            if not Kept_Going then
+               Kept_Eyes := [others => False];
+            end if;
             Driver.Log.Line (Driver.Log.Robot, "motion: sent back and settled:" & To_String (Text)
                              & (if Kept_Going then " the push kept the body going" else " no speed"));
          end;
@@ -1524,10 +1540,12 @@ package body Driver.Robot.Motion is
       After     : Real_Array;   --  the readings the level's own move left
       Unlooked  : in out Natural;
       Chance    : Real;
-      Confirmed : out Boolean)
+      Confirmed : out Boolean;
+      Group     : Natural := 0)   --  the one group the listed channels are of, or 0
    is
       --  The run is rare enough when the chance that every look in it was a false alarm, the product of their own
-      --  chances (the level's look first), is below Z's tail over every level a probe may try.
+      --  chances (the level's look first), is below Z's tail over every level a probe may try. Its verdict takes in the
+      --  lock-in's chance for the Group, once the run is over (Probe_Together).
       Rare      : constant Real := Ln (Tail / Real (Levels));
       Run_Log   : Real := (if Chance > 0.0 then Ln (Chance) else Real'First);
       Run       : Natural := 1;
@@ -1571,12 +1589,28 @@ package body Driver.Robot.Motion is
          Before := Now;
          Run := Run + 1;
       end loop;
-      Confirmed := Run_Log <= Rare;
-      Driver.Log.Line (Driver.Log.Robot, "probe: the level's look and" & Natural'Image (Run - 1) & " moves back and forth"
-                       & " after it, each seen and made, had together a chance of e^"
-                       & Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)
-                       & " of false alarms only, against e^" & Driver.Log.Image (Rare, 2) & ": "
-                       & (if Confirmed then "confirmed" else "not confirmed"));
+      declare
+         Looks  : constant Real := Run_Log;
+         Prior  : Real := 1.0;   --  the lock-in's chance
+         procedure Read_Prior is
+         begin
+            Prior := Lockin.Moving_Chance (M, Group_Id (Group));
+         end Read_Prior;
+      begin
+         if Group > 0 then
+            Hold_And_Estimate (M);
+            Driver.Beats.Within_A_Beat (Read_Prior'Access);
+            Run_Log := (if Run_Log = Real'First or else Prior <= 0.0 then Real'First else Run_Log + Ln (Prior));
+         end if;
+         Confirmed := Run_Log <= Rare;
+         Driver.Log.Line (Driver.Log.Robot, "probe: the level's look and" & Natural'Image (Run - 1) & " moves back and forth"
+                          & " after it, each seen and made, had together a chance of e^"
+                          & Driver.Log.Image ((if Looks = Real'First then -Real'Last else Looks), 2)
+                          & " of false alarms only"
+                          & (if Group > 0 then ", the lock-in's " & Scientific (Prior) else "")
+                          & ", against e^" & Driver.Log.Image (Rare, 2) & ": "
+                          & (if Confirmed then "confirmed" else "not confirmed"));
+      end;
    end Confirm;
 
    --  Where every listed channel is held and reads, read in a held beat:
@@ -1841,9 +1875,24 @@ package body Driver.Robot.Motion is
             --  long as the stream was old).
             if Seen and then (for some I in 1 .. N => Usable (I) and then (Delivered (I) or else Did (I))) then
                declare
-                  Confirmed : Boolean;
+                  Confirmed : Boolean := False;
+                  --  The run of moves back and forth (Confirm) goes on as its looks ask, and its verdict, for one group's
+                  --  channels, takes in the lock-in's evidence of the group moving some eye over every push, the run's among
+                  --  them (Lockin.Moving_Chance): another chance that chance alone made what was seen, multiplied in as the
+                  --  looks' are. The Go2's walk and the drone's flight, their pictures answering beats after their readings,
+                  --  broke their runs at the first move and the boot stopped, while the lock-in had them moving 96 and 150 of
+                  --  their eyes' 255 cells (seed 1 of each, paced round p69a, 10-23). Not to shorten the run: its moves are
+                  --  the rows the verdicts are judged from, and runs the lock-in ended at no move left the Panda's closer
+                  --  inert and its base camera on its arm, and Stretch's base and the Shadow's hand taken for arms (paced
+                  --  rounds p70 to p72); a group the lock-in measured nothing of (its pushes beyond the flow's reach, or its
+                  --  pictures never settled, as Stretch's base and the G1's groups) adds nothing. The channels of several
+                  --  groups, pushed at the same beats (the first ladder, of every channel), leave the lock-in no way to tell
+                  --  one group's part from another's.
+                  One_Group : constant Boolean :=
+                    (for all I in 1 .. N => Natural (Listed (I).Group) = Natural (Listed (Listed'First).Group));
                begin
-                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Now, Unlooked, Chance, Confirmed);
+                  Confirm (M, Listed, Usable, Base, Offsets, Noise, Now, Unlooked, Chance, Confirmed,
+                           Group => (if One_Group then Natural (Listed (Listed'First).Group) else 0));
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;

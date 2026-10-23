@@ -54,6 +54,11 @@ private package Driver.Robot.Regression is
                  and then From.Columns = X'Length (2);
    --  Solve, its first pass From Start_Of (X): the same fit to the bit.
 
+   function Count_Tail (Count, Trials : Natural; Rate : Real) return Real
+     with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
+   --  The exact binomial probability of at least Count events in that many independent trials at Rate per trial
+   --  (one for none): the chance that chance alone made that many.
+
    function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean
      with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
    --  Count events in that many independent trials are more than chance at
