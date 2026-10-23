@@ -156,8 +156,9 @@ private package Driver.Robot.Lockin is
    function Moving_Chance (M : Model; G : Group_Id) return Real;
    --  How likely chance alone made the lock-in's evidence that the group moves what some eye sees: of every eye, the
    --  binomial tail of the cells its verdict found responding at the per-cell test's false-alarm rate (Judge's test
-   --  of Nothing), and the tail of its pushed beats beyond the flow's reach (Far_Chance); the least of them over as
-   --  many as were asked (Bonferroni), at most one, and one where nothing was measured.
+   --  of Nothing), the tail of its pushed beats beyond the flow's reach (Far_Chance), and each channel's summed gain
+   --  (Seen's test, one-sided); the least of them over as many as were asked (Bonferroni), at most one, and one where
+   --  nothing was measured.
 
    function Shows_Step (M : Model; E : Eye_Id; G : Group_Id; Step : Real_Array) return Boolean;
    --  A step of the group's readings moves the eye's image by what its cells

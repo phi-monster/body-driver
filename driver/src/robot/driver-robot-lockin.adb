@@ -1660,6 +1660,24 @@ package body Driver.Robot.Lockin is
                end if;
                Least := Real'Min (Least, F.Far_Chance);
                Tests := Tests + 2;
+               --  And each channel's gain summed over the eye's cells (Seen's test, on the channel's own column): a
+               --  channel probed alone is confirmed by it (Motion.Probe_Both_Ways), and with the cells counted alone a
+               --  group of RB-Y1's jaw's one channel was seen moved whole by no level and probed again one channel at a
+               --  time, 216 beats, to be seen at the first (seed 1, paced rounds p83 and p84, 10-23).
+               for C in 1 .. M.Groups (G).Size loop
+                  declare
+                     Gain, Spread : Real;
+                     Measured     : Boolean;
+                  begin
+                     Gain_Of (M, Eye_Id (E), G, C, Gain, Spread, Measured);
+                     if Measured and then Spread > 0.0 then
+                        Tests := Tests + 1;
+                        if Gain > 0.0 then
+                           Least := Real'Min (Least, Driver.Distributions.Gaussian_Two_Sided_Tail (Gain / Sqrt (Spread)) / 2.0);
+                        end if;
+                     end if;
+                  end;
+               end loop;
             end;
          end if;
       end loop;

@@ -667,6 +667,8 @@ private
       Stayed_Pushes : Count_Vectors.Vector;  --  how many pushes those are
       Stayed_Moved  : Count_Vectors.Vector;  --  per group: the textured cells its pushes left moved, summed over them, and
       Stayed_Cells  : Count_Vectors.Vector;  --  the textured cells measured, summed
+      Stayed_Far_Cells : Count_Vectors.Vector;   --  per group: the textured cells its pushes left moved beyond the flow's
+                                                 --  reach, summed over them
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)

@@ -1991,8 +1991,13 @@ package body Driver.Robot.Boot is
                               Speed      : Boolean := False;
                               Alike      : Boolean := True;   --  no two of those eyes moved by shares apart
                               Amount     : constant Real := Whole_Amount (Group_Id (G));
-                              --  Two eyes' shares of their textured cells that respond, apart by more than chance:
-                              --  their difference over its pooled standard error beyond Z.
+                              --  Two eyes' shares apart by more than chance: their difference over its pooled standard
+                              --  error beyond Z. The shares the group's pushes left moved beyond the flow's reach (Motion.
+                              --  Note_Stayed), as an eye's own group is told by (Graph.Best_Of): a view the group carries
+                              --  moves whole by its ego-motion, one it is seen in moves where the group is. By the shares
+                              --  of cells responding instead, the lock-in had RB-Y1's arm move its wrist eye and its head
+                              --  camera whole alike, the robot swaying as the arm moved, and it was parted, 500 beats, where
+                              --  its pushes left the two 52 and 1 of 255 cells beyond reach (seed 1, paced round p84a, 10-23).
                               function Apart (K1, N1, K2, N2 : Natural) return Boolean is
                                  P  : constant Real := Real (K1 + K2) / Real (N1 + N2);
                                  SE : constant Real :=
@@ -2002,6 +2007,14 @@ package body Driver.Robot.Boot is
                                  return SE > 0.0
                                    and then abs (Real (K1) / Real (N1) - Real (K2) / Real (N2)) > Driver.Conventions.Z * SE;
                               end Apart;
+                              --  The cells the group's pushes left moved beyond the flow's reach in the eye, and the cells
+                              --  measured, summed over them.
+                              function Far_Of (E : Positive) return Natural is
+                                (if Natural (G) <= Natural (M.Eyes (Eye_Id (E)).Stayed_Far_Cells.Length)
+                                 then M.Eyes (Eye_Id (E)).Stayed_Far_Cells (Natural (G) - 1) else 0);
+                              function Stayed_Of (E : Positive) return Natural is
+                                (if Natural (G) <= Natural (M.Eyes (Eye_Id (E)).Stayed_Cells.Length)
+                                 then M.Eyes (Eye_Id (E)).Stayed_Cells (Natural (G) - 1) else 0);
                               procedure Read_Whole is
                               begin
                                  Speed := Keeps_Going (M, Group_Id (G));
@@ -2010,12 +2023,8 @@ package body Driver.Robot.Boot is
                                        Whole_Eyes := Whole_Eyes + 1;
                                        for F in 1 .. E - 1 loop
                                           if Response (M, Group_Id (G), Eye_Id (F)) = Whole
-                                            and then Textured_Cells (M, Group_Id (G), Eye_Id (E)) > 0
-                                            and then Textured_Cells (M, Group_Id (G), Eye_Id (F)) > 0
-                                            and then Apart (Responding (M, Group_Id (G), Eye_Id (E)),
-                                                            Textured_Cells (M, Group_Id (G), Eye_Id (E)),
-                                                            Responding (M, Group_Id (G), Eye_Id (F)),
-                                                            Textured_Cells (M, Group_Id (G), Eye_Id (F)))
+                                            and then Stayed_Of (E) > 0 and then Stayed_Of (F) > 0
+                                            and then Apart (Far_Of (E), Stayed_Of (E), Far_Of (F), Stayed_Of (F))
                                           then
                                              Alike := False;
                                           end if;

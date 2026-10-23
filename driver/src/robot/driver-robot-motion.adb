@@ -502,11 +502,13 @@ package body Driver.Robot.Motion is
                         S.Stayed_Far.Append (0.0);
                         S.Stayed_Moved.Append (0);
                         S.Stayed_Cells.Append (0);
+                        S.Stayed_Far_Cells.Append (0);
                      end loop;
                      S.Stayed_Pushes.Replace_Element (Natural (G) - 1, S.Stayed_Pushes (Natural (G) - 1) + 1);
                      S.Stayed_Far.Replace_Element (Natural (G) - 1, S.Stayed_Far (Natural (G) - 1) + Real (Far) / Real (Textured));
                      S.Stayed_Moved.Replace_Element (Natural (G) - 1, S.Stayed_Moved (Natural (G) - 1) + Moved);
                      S.Stayed_Cells.Replace_Element (Natural (G) - 1, S.Stayed_Cells (Natural (G) - 1) + Textured);
+                     S.Stayed_Far_Cells.Replace_Element (Natural (G) - 1, S.Stayed_Far_Cells (Natural (G) - 1) + Far);
                   end if;
                   Driver.Log.Line (Driver.Log.Robot, "motion: group" & G'Image & "'s push "
                                    & (if Way > 0.0 then "upwards" else "downwards") & " left eye" & E'Image
