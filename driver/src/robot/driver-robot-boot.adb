@@ -319,7 +319,12 @@ package body Driver.Robot.Boot is
          Amount : Real_Array (1 .. Size) := [others => 0.0];
          function Way (S : Driver.Robot.Motion.Sense) return String is
            (if S = Driver.Robot.Motion.Increasing then "upwards" else "downwards");
+         procedure Mark_Alone is
+         begin
+            M.Groups (G).Channels_Alone := True;
+         end Mark_Alone;
       begin
+         Driver.Beats.Within_A_Beat (Mark_Alone'Access);
          for C in 1 .. Size loop
             declare
                Ref : constant Driver.Robot.Motion.Channel_Ref := (Group => G, Channel => C);
@@ -1991,22 +1996,13 @@ package body Driver.Robot.Boot is
                               Speed      : Boolean := False;
                               Alike      : Boolean := True;   --  no two of those eyes moved by shares apart
                               Amount     : constant Real := Whole_Amount (Group_Id (G));
-                              --  Two eyes' shares apart by more than chance: their difference over its pooled standard
-                              --  error beyond Z. The shares the group's pushes left moved beyond the flow's reach (Motion.
-                              --  Note_Stayed), as an eye's own group is told by (Graph.Best_Of): a view the group carries
-                              --  moves whole by its ego-motion, one it is seen in moves where the group is. By the shares
-                              --  of cells responding instead, the lock-in had RB-Y1's arm move its wrist eye and its head
-                              --  camera whole alike, the robot swaying as the arm moved, and it was parted, 500 beats, where
-                              --  its pushes left the two 52 and 1 of 255 cells beyond reach (seed 1, paced round p84a, 10-23).
-                              function Apart (K1, N1, K2, N2 : Natural) return Boolean is
-                                 P  : constant Real := Real (K1 + K2) / Real (N1 + N2);
-                                 SE : constant Real :=
-                                   Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                     (P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));
-                              begin
-                                 return SE > 0.0
-                                   and then abs (Real (K1) / Real (N1) - Real (K2) / Real (N2)) > Driver.Conventions.Z * SE;
-                              end Apart;
+                              --  Two eyes' shares apart by more than chance (Regression.Shares_Apart): the shares the
+                              --  group's pushes left moved beyond the flow's reach (Motion.Note_Stayed), as the graph tells
+                              --  an eye's own group (Graph.Best_Of): a view the group carries moves whole by its ego-motion,
+                              --  one it is seen in moves where the group is. By the shares of cells responding instead, the
+                              --  lock-in had RB-Y1's arm move its wrist eye and its head camera whole alike, the robot
+                              --  swaying as the arm moved, and it was parted, 500 beats, where its pushes left the two 52
+                              --  and 1 of 255 cells beyond reach (seed 1, paced round p84a, 10-23).
                               --  The cells the group's pushes left moved beyond the flow's reach in the eye, and the cells
                               --  measured, summed over them.
                               function Far_Of (E : Positive) return Natural is
@@ -2024,7 +2020,7 @@ package body Driver.Robot.Boot is
                                        for F in 1 .. E - 1 loop
                                           if Response (M, Group_Id (G), Eye_Id (F)) = Whole
                                             and then Stayed_Of (E) > 0 and then Stayed_Of (F) > 0
-                                            and then Apart (Far_Of (E), Stayed_Of (E), Far_Of (F), Stayed_Of (F))
+                                            and then Driver.Robot.Regression.Shares_Apart (Far_Of (E), Stayed_Of (E), Far_Of (F), Stayed_Of (F))
                                           then
                                              Alike := False;
                                           end if;

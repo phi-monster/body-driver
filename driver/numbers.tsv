@@ -1094,8 +1094,8 @@ driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numeri
 driver-robot-boot.adb	("" & Driver.Log.Image (Driver.Robot.Kinematics.Counted_Turn (M, A, C), 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	(Now_N - Then_N, Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)), Dof));	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
-driver-robot-boot.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
-driver-robot-boot.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
+driver-robot-regression.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
+driver-robot-regression.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix

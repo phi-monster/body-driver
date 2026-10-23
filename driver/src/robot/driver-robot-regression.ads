@@ -64,6 +64,11 @@ private package Driver.Robot.Regression is
    --  The exact binomial probability of at least Count events in that many independent trials at Rate per trial
    --  (one for none): the chance that chance alone made that many.
 
+   function Shares_Apart (K1, N1, K2, N2 : Natural) return Boolean
+     with Pre => K1 <= N1 and then K2 <= N2 and then N1 > 0 and then N2 > 0;
+   --  Two shares, K1 of N1 and K2 of N2, apart by more than chance: their difference over its pooled standard error
+   --  beyond Z.
+
    function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean
      with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;
    --  Count events in that many independent trials are more than chance at

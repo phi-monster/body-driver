@@ -684,6 +684,7 @@ package body Driver.Robot.Tests is
       Exercise_Rig (M);
       Check (Arms_Of_Group (M) = 1, "the rig's first group is" & Natural'Image (Arms_Of_Group (M)) & " arms, not one");
       --  Channel 1 moves eye 1 whole and eye 2 not; channel 2 eye 2 whole and eye 1 not.
+      M.Groups (Group).Channels_Alone := True;
       Set (Whole_Effect, Nothing_Effect, Nothing_Effect, Whole_Effect, Nothing_Effect);
       Check (Arms_Of_Group (M) = 2, "a group whose channels move two eyes apart is" & Natural'Image (Arms_Of_Group (M)) & " arms, not two");
       Check (Eye_Mount (M, 1).Kind = Arm_Carried and then Eye_Mount (M, 2).Kind = Arm_Carried

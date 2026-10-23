@@ -345,6 +345,16 @@ package body Driver.Robot.Regression is
       return Rank;
    end Gram_Rank;
 
+   function Shares_Apart (K1, N1, K2, N2 : Natural) return Boolean is
+      P  : constant Real := Real (K1 + K2) / Real (N1 + N2);
+      SE : constant Real :=
+        Ada.Numerics.Long_Elementary_Functions.Sqrt
+          (P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));
+   begin
+      return SE > 0.0
+        and then abs (Real (K1) / Real (N1) - Real (K2) / Real (N2)) > Driver.Conventions.Z * SE;
+   end Shares_Apart;
+
    function Count_Tail (Count, Trials : Natural; Rate : Real) return Real is
    begin
       if Count = 0 then
