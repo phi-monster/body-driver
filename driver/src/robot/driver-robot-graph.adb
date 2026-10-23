@@ -3,6 +3,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Robot.Channels;
 with Driver.Robot.Lag;
+with Driver.Robot.Lockin;
 
 package body Driver.Robot.Graph is
 
@@ -83,6 +84,21 @@ package body Driver.Robot.Graph is
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
       Best_Of : array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Natural := [others => 0];   --  each eye's own group
+
+      --  Group G moves eye E's view whole: as the lock-in finds it, or, where the lock-in measured nothing of the group
+      --  in the eye (no beat of its pushes a row: the Shadow's arm, whose hand swung at every one, and the head of
+      --  Stretch in seed 1, five paced rounds, 10-23), where its pushes left a significant majority of the view moved
+      --  (Motion.Note_Stayed). Of 396 eyes of those rounds, 390 then mounted right, 363 with the lock-in's alone.
+      function Whole_For (G : Group_Id; E : Eye_Id) return Boolean is
+        (Effect (M, G, E).Verdict = Whole
+         or else (Effect (M, G, E).Verdict = Unmeasured and then Natural (G) <= Natural (M.Eyes (E).Stayed_Cells.Length)
+                  and then Lockin.Mostly (M.Eyes (E).Stayed_Moved (Natural (G) - 1), M.Eyes (E).Stayed_Cells (Natural (G) - 1))));
+
+      --  The share of eye E's textured cells group G's pushes left moved beyond the flow's reach, as a mean over the
+      --  pushes Motion.Note_Stayed measured; 0 where none was.
+      function Far_Of (G : Group_Id; E : Eye_Id) return Real is
+        (if Natural (G) <= Natural (M.Eyes (E).Stayed_Pushes.Length) and then M.Eyes (E).Stayed_Pushes (Natural (G) - 1) > 0
+         then M.Eyes (E).Stayed_Far (Natural (G) - 1) / Real (M.Eyes (E).Stayed_Pushes (Natural (G) - 1)) else 0.0);
 
       type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
 
@@ -242,24 +258,43 @@ package body Driver.Robot.Graph is
          end if;
       end;
 
-      --  Each eye's own group: of the groups that move its view whole, the one that moves the most of it (not the
-      --  carrier, which moves every eye on the body). A group that moves an eye's view whole and less of it than
-      --  another group does moves a part of that eye's view, as a jaw shakes the camera on the hand that carries it:
-      --  Stretch's jaw moved 132 of its wrist eye's 255 cells, its arm 203, and every group that moved some eye
-      --  whole was an arm (round 4d, 10-23, five of six boots with the jaw an arm; ALOHA's and the Shadow's too).
+      --  Each eye's own group: of the groups that move its view whole (not the carrier, which moves every eye on the
+      --  body), the one whose pushes left the most of its view moved beyond the flow's reach (Far_Of: a camera carried
+      --  is turned and moved by the whole push, a part, its shadow and its reflection in a fixed eye sweep a share of
+      --  its view, and a body that sways or rocks shifts a view by a little), and only when it moved no other eye's
+      --  view more (an eye moved by a group that turns another eye further rides on neither, as far as that group
+      --  goes). By the share of the view the lock-in found responding, every group that moved some eye whole was an
+      --  arm, and a fixed eye was the arm's that its arm, the arm's shadow and the floor's reflection of it filled:
+      --  of 396 eyes of five paced rounds (10-23), 321 mounted right, Panda's base camera on its arm in all twelve,
+      --  Stretch's head camera on the arm whose pushes rock the robot; by what the pushes left, both ways, 363.
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
-            Best_Share : Real := 0.0;
+            Best_Far, Best_Share : Real := -1.0;
          begin
             for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-               if Own (G) and then G /= Gr.Carrier and then Effect (M, G, E).Verdict = Whole
-                 and then Effect (M, G, E).Fraction.Value > Best_Share
+               if Own (G) and then G /= Gr.Carrier and then Whole_For (G, E)
+                 and then (Far_Of (G, E) > Best_Far
+                           or else (Far_Of (G, E) = Best_Far and then Effect (M, G, E).Fraction.Value > Best_Share))
                then
+                  Best_Far := Far_Of (G, E);
                   Best_Share := Effect (M, G, E).Fraction.Value;
                   Best_Of (E) := Natural (G);
                end if;
             end loop;
          end;
+      end loop;
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         if Best_Of (E) > 0 then
+            declare
+               G : constant Group_Id := Group_Id (Best_Of (E));
+            begin
+               for F in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+                  if F /= E and then Far_Of (G, F) > Far_Of (G, E) then
+                     Best_Of (E) := 0;
+                  end if;
+               end loop;
+            end;
+         end if;
       end loop;
 
       --  Arms: every other group that moves some eye whole, or that some eye's keyframes tell it carries.
@@ -308,7 +343,6 @@ package body Driver.Robot.Graph is
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
             Best_Arm   : Arm_Id'Base := 0;
-            Best_Share : Real := 0.0;
             Keyed      : Arm_Id'Base := 0;
             Bound      : Arm_Id'Base := 0;   --  the arm of a split group that is for this eye
          begin
@@ -322,15 +356,13 @@ package body Driver.Robot.Graph is
                   Keyed := A;
                end if;
             end loop;
+            --  The arm of the eye's own group (Best_Of): of the arms that move it whole, by what their pushes left, and
+            --  only the arm that moves no other eye more. By the share of the view alone the Panda's base camera rode
+            --  on the arm that its arm, the arm's shadow and its reflection on the floor filled (round p66a, 10-23).
             for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
-               declare
-                  F : constant Eye_Effect := Effect (M, Gr.Arms (A), E);
-               begin
-                  if Gr.Arm_Eye (A) = 0 and then F.Verdict = Whole and then F.Fraction.Value > Best_Share then
-                     Best_Share := F.Fraction.Value;
-                     Best_Arm := A;
-                  end if;
-               end;
+               if Gr.Arm_Eye (A) = 0 and then Natural (Gr.Arms (A)) = Best_Of (E) then
+                  Best_Arm := A;
+               end if;
             end loop;
             if Keyed = 0 and then Best_Arm = 0 then
                for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop

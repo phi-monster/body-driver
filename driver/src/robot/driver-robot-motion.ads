@@ -36,6 +36,13 @@ package Driver.Robot.Motion is
    procedure Mark_Origins (M : in out Model);
    --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).
 
+   procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real);
+   --  After a push of group G (Way: its sign) from a body at rest, held until the body settled: for every eye with an
+   --  origin (Mark_Origins), the cells whose picture moved from the origin's and stayed moved, by the flow from the
+   --  origin's frame to the latest one (displaced beyond the cell's noise at rest, or too far to resolve), of the
+   --  eye's textured cells: what the push left changed. A shake or a swing the body settled from leaves nothing.
+   --  Logged, a line an eye.
+
    type Step_Outcome is (Reached, Blocked, Short);
    --  Reached  every targeted channel arrived within its noise
    --  Blocked  a channel stopped short and pushing further does not move it

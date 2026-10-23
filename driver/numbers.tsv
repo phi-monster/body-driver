@@ -1069,7 +1069,7 @@ driver-robot-body_file.ads	Ends_Method : constant := 2;	2	format	the second vers
 driver-robot-body_file.ads	Graph_Method : constant := 2;	2	format	the second version of this method: every group's turns at which the recognition saw each channel move an eye (seen_at); a file of the first version is recognized again
 driver-robot-body_file.ads	Kinematics_Method : constant := 10;	10	format	the body file's kinematics section's method: 10 since the fixed eyes are fitted from the arms they watch (Hand_Eye), their record's evidence one count
 driver-robot-body_file.ads	Lag_Method : constant := 3;	3	format	the third version of this method: every eye's longest settling after a move (settling) beside its lag; a file of the second version is measured again
-driver-robot-body_file.ads	Lockin_Method : constant := 6;	6	format	the sixth version of this method; the body file records per eye every count of moved cells at rest (Rest_Counts), against which a beat's count is ranked (Lockin.Rest_Share)
+driver-robot-body_file.ads	Lockin_Method : constant := 8;	8	format	the eighth version of this method; the body file records per eye and group the cells its pushes left moved and the cells measured (Stayed_Moved, Stayed_Cells)
 driver-robot-body_file.ads	Noise_Method : constant := 3;	3	format	the third version of this method: a push's answer that still closes in on its target is no rest; a file of the second version is measured again
 driver-robot-body_file.ads	Steps_Method : constant := 3;	3	format	the third version of this method; the body file records per channel the least ask a push moved it for (Steps.Executed_Least)
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
@@ -1152,6 +1152,7 @@ driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved,	1.0	structure	the fir
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two digits after the point in the log
 driver-robot-boot.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
+driver-robot-boot.adb	Recognize_Group (Group_Id (G), Sizes (G), P.Excursion, Alone => Groups_Commanded = 1);	1	structure	the only group that takes commands: the ladder of every channel together was its own
 driver-robot-boot.adb	Rows : Positive := 1;	1	structure	a Sylvester matrix starts at order one
 driver-robot-boot.adb	Rows := 2 * Rows;	2	structure	Sylvester orders double
 driver-robot-boot.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
@@ -1193,6 +1194,8 @@ driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then M
 driver-robot-boot.adb	if not Speed and then Whole_Eyes >= 2 and then Alike then	2	structure	two eyes moved whole: the least a group carrying eyes on channels of their own shows
 driver-robot-boot.adb	if not Speed and then Whole_Eyes >= 2 and then not Alike then	2	structure	two eyes moved whole: the least a group carrying eyes on channels of their own shows
 driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
+driver-robot-boot.adb	or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);	0.5	structure	the round before asked half as much: more than half of this ask delivered is further than all of that one
+driver-robot-boot.adb	or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);	0.5	structure	the round before asked half as much: more than half of this ask delivered is further than all of that one
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Channels.Noise (M, G, C), 4) else ""));	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Steps.Dead_Band (M, G, C), 4) else "")	4	format	digits printed in a log line or a message
@@ -1317,6 +1320,7 @@ driver-robot-flows.adb	if Sees_It (E, A) and then Natural (Captures (E, A).Lengt
 driver-robot-flows.adb	or else (Info.Eye > 0 and then Driver.Pixels.Frames (M.Eyes (Info.Eye).Settled) < 2)	2	structure	a still view is a mean of two frames or more
 driver-robot-flows.adb	or else Natural (R.Covariance.Length) /= Terms ** 2 or else Natural (R.Table_Response.Length) /= 3 * Terms	3	structure	the response's three rows, one a term of the plane's A
 driver-robot-flows.adb	while Turn > 0.0 and then 2.0 * Turn <= Range_Seen loop	2.0	math	a turn either way spans twice the turn, inside the range seen
+driver-robot-graph.adb	Best_Far, Best_Share : Real := -1.0;	1.0	structure	below any share: the first group that moves the view whole ranks, measured or not
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 1);	1	structure	clause 1 of the porting contract (docs/body-protocol.md, 3): the reading does not follow the command
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of the porting contract (docs/body-protocol.md, 3): nothing any eye sees changes when it moves
 driver-robot-graph.adb	if Apart_Eyes >= 2 then	2	structure	two eyes that different channels move are two arms; one such eye is one
@@ -3708,6 +3712,7 @@ driver-robot-motion.adb	& "" & Driver.Log.Image (Chance, 3) & "");	3	format	digi
 driver-robot-motion.adb	& "" & Driver.Log.Image (Pushed_Away (E), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (Rare, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& "" & Driver.Log.Image (W (C), 6));	6	format	digits printed in a log line or a message
+driver-robot-motion.adb	& (if Resolved_Moved > 0 then Driver.Log.Image (Driver.Stats.Median (Shifts (1 .. Resolved_Moved)), 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& (if Way = Increasing then "" else "") & "" & Driver.Log.Image (Stop.Value, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image ((if Run_Log = Real'First then -Real'Last else Run_Log), 2)	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Asked, 6) & "" & Driver.Log.Image (Start, 6) & ""	6	format	digits printed in a log line or a message
@@ -3737,6 +3742,7 @@ driver-robot-motion.adb	Append (Text, "" & E'Image & "" & Driver.Log.Image (Now_
 driver-robot-motion.adb	Creep : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Before, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Found_At, 6)	6	format	digits printed in a log line or a message
+driver-robot-motion.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	math	a displacement in the picture has two components, across and down
 driver-robot-motion.adb	L.Append (0.0);	0.0	structure	no steady error known yet
 driver-robot-motion.adb	Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	Least : Estimate := (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0);	1.0	math	the whole step delivered, until a push says less
@@ -3763,6 +3769,7 @@ driver-robot-motion.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	2	format	two dig
 driver-robot-motion.adb	Real_IO.Put (S, X, Aft => 2, Exp => 3);	3	format	three exponent digits in the log
 driver-robot-motion.adb	Run : Natural := 1;	1	structure	the first seen move starts the run
 driver-robot-motion.adb	S : String (1 .. 32);	32	format	wide enough for any Long_Float image
+driver-robot-motion.adb	S.Stayed_Far.Append (0.0);	0.0	structure	nothing summed before a group's first push is measured
 driver-robot-motion.adb	S.Stopped_High.Append (0.0);	0.0	structure	a channel with no stop noted: the value is read only where its flag says there is one
 driver-robot-motion.adb	S.Stopped_Low.Append (0.0);	0.0	structure	a channel with no stop noted: the value is read only where its flag says there is one
 driver-robot-motion.adb	Share : Real := 1.0;	1.0	structure	all of the error is asked while the share the group delivers is not measured
@@ -3790,10 +3797,11 @@ driver-robot-motion.adb	Window : Natural := 2;	2	structure	the beat of the move 
 driver-robot-motion.adb	Window := Natural'Max (Window, 2 + Natural'Max (0, Image_Lag (M, Eye_Id (E))));	2	structure	the beat of the move and the beat it shows in the readings
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0));	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-motion.adb	and then Driver.Uncertain.Significant (Error, Noise * Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
-driver-robot-motion.adb	and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made; nearer the first, it came back
+driver-robot-motion.adb	and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	statistics	halfway between the two outcomes: a picture back where the push began changes by what rest makes, one carried away by what the push made
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
+driver-robot-motion.adb	if Executed_None and then not Seen and then Level > 1 then	1	structure	the first level repeats the amount the body was found to execute at; a level past it that executes nothing and shows nothing ends the ladder
 driver-robot-motion.adb	if Known (D) and then D.Value > 0.0 and then D.Value < 1.0	1.0	structure	a share below one: the group delivered less than it was asked; one or more is asked as it is
 driver-robot-motion.adb	or else (Anchored and then Driver.Robot.Stillness.Eye_Away_Run (M, E) >= 2));	2	statistics	a drift away from the anchor lasts when two beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);	2.0	math	the landing and the reference it is counted from, each within the dead band of where it was sent

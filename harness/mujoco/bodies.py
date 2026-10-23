@@ -374,11 +374,15 @@ def kind_rby1(rng):
     for g in groups:
         if g["name"] != "base":
             g["plan"] = {"limits": RBY1_LIMITS, "gravity": True}
+    # Each wrist camera on the side of the gripper toward its front, looking past the fingers at what they reach, as
+    # a wrist camera of a hand that works is mounted (the gripper points along the wrist link's -z: its body 0.126 m
+    # out, its fingers 0.2 m, opening along x). Mounted behind the gripper's body looking along it, it saw the body's
+    # back and no finger, and no eye ever saw either jaw move (10-23).
     cams = [body_camera(spec, "link_head_2", "head_cam", [0.08, 0.0, 0.05], [1.0, 0.0, -0.4], [0.0, 0.0, 1.0], rng,
                         "ARM_CARRIED", "head"),
-            body_camera(spec, "link_left_arm_6", "arm1_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
+            body_camera(spec, "link_left_arm_6", "arm1_wrist", [0.0, 0.07, -0.16], [0.0, -0.45, -1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm1_joints"),
-            body_camera(spec, "link_right_arm_6", "arm2_wrist", [0.07, 0.0, 0.02], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], rng,
+            body_camera(spec, "link_right_arm_6", "arm2_wrist", [0.0, 0.07, -0.16], [0.0, -0.45, -1.0], [1.0, 0.0, 0.0], rng,
                         "ARM_CARRIED", "arm2_joints")]
     drawn = props(spec, rng, [0.6, 0.0, 0.0], size, 10)
     return {"spec": spec, "props": drawn, "groups": groups, "cameras": cams, "key": None, "fix": None,

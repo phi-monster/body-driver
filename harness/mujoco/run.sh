@@ -5,6 +5,11 @@
 # (default: the body as measured); GPU: the card the robot draws on; BD_WORKERS as the driver takes it.
 # BEATS: the robot's own time a run may take, in beats (a real robot's beat is a tenth of a second: 1200 beats are two
 # minutes of it, whatever the hall's pace); the robot stops there, and the run's meta.txt says "stop robot_exit".
+# RATE: beats a second the robot keeps to (10: a real robot's, a tenth of a second a beat); unset, as fast as it can.
+# At the robot's own pace a beat the driver spends computing apart (Driver.Apart: answered with Hold, the robot moving
+# on) costs as many beats as that time takes at it: the hall ran 1.5 to 2.3 times a real robot's pace, so such
+# computing cost it that many times the beats, and more or fewer by how loaded the machine was (rounds 4e to 4g2 of
+# one driver: 34, 32, 20 and 26 of 60, 10-23).
 # TRUTH=1: the robot writes the world's truth beside every observation (truth.jsonl; the bodies' geometry once, in
 # TRUTH_GEOMETRY, shared by every run). RECORD=1: the driver records the run, compressed as it is written (run.rec.zst:
 # never uncompressed on disk, a cold boot's recording is gigabytes). SCORE=1 (with both): after the run the recording
@@ -20,7 +25,7 @@ RUNS=${RUNS:-/root/runs}; R=$RUNS/$NAME
 mkdir -p "$R"
 PORT=${PORT:-$((31000 + SEED % 2000))}; LIM=${MINUTES:-5}; STOP=${STOP:-"the body as measured:"}
 { echo "kind $KIND"; echo "seed $SEED"; echo "port $PORT"; echo "driver $(md5sum "$BIN/body_driver" | cut -d' ' -f1)";
-  echo "options $*"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
+  echo "options $* ${RATE:+rate $RATE}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
 # DUMP_CELLS=1: the driver writes every eye's cells as the lock-in saw them at each recognition (Lockin.Dump_Cells).
 [ "${DUMP_CELLS:-0}" = 1 ] && export BD_DUMP_CELLS="$R"
 TRUTH_ARGS=(); RECORD_ARGS=()
@@ -38,7 +43,7 @@ if grep -q "cannot listen" "$R/driver.log"; then
   { echo "end $(date +%FT%T)"; echo "stop port_taken"; } >> "$R/meta.txt"; kill "$DRV" 2>/dev/null; exit 3
 fi
 MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=${GPU:-0} /root/mj/venv/bin/python "$HERE/robot.py" --connect "127.0.0.1:$PORT" \
-  --kind "$KIND" --seed "$SEED" --out "$R" --stop "$R/stop" "${TRUTH_ARGS[@]}" ${BEATS:+--beats "$BEATS"} "$@" > "$R/robot.log" 2>&1 &
+  --kind "$KIND" --seed "$SEED" --out "$R" --stop "$R/stop" "${TRUTH_ARGS[@]}" ${BEATS:+--beats "$BEATS"} ${RATE:+--rate "$RATE"} "$@" > "$R/robot.log" 2>&1 &
 ROB=$!
 end=$(( $(date +%s) + LIM * 60 )); why=limit
 while [ "$(date +%s)" -lt "$end" ]; do

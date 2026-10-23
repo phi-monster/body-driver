@@ -6,8 +6,9 @@
 # score1.pl) into /root/runs/NAME/ledger.txt with its stop and its seconds, and keeps its log compressed.
 NAME=$1; BIN=$2; LIST=$3; P=${4:-40}
 # Each batch its own ports (from its name), so a run left of another batch never holds one (m1's SO-101 met m0's
-# driver still on 32001, 10-23).
-PORT_BASE=${PORT_BASE:-$((33000 + $(echo -n "$NAME" | cksum | cut -d' ' -f1) % 300 * 100))}
+# driver still on 32001, 10-23), and below the box's ephemeral range (32768-60999), where a connection's own port
+# could hold one (r4g's SO-101 seed 2 met port 55042 taken, 10-23); off tensorboard's 16006.
+PORT_BASE=${PORT_BASE:-$((20000 + $(echo -n "$NAME" | cksum | cut -d' ' -f1) % 127 * 100))}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export RUNS=/root/runs/$NAME BIN HERE PORT_BASE MINUTES=${MINUTES:-5} BD_WORKERS=${BD_WORKERS:-2}
 export STOP=${STOP:-"boot: the body is kept in .* after recognizing|the body as measured:"} SCORE=${SCORE:-$HERE/score1.pl}

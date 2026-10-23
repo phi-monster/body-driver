@@ -1487,6 +1487,8 @@ package body Driver.Robot.Lockin is
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
 
+   function Mostly (Count, Cells : Natural) return Boolean is (Regression.Count_Significant (Count, Cells, Half));
+
    function Rest_Share (M : Model; E : Eye_Id; Beat : Natural) return Real is
       S : Eye_Stream renames M.Eyes (E);
       Count, Tested : Natural;

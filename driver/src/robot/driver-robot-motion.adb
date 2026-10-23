@@ -1,6 +1,7 @@
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
+with Ada.Unchecked_Deallocation;
 with Driver.Beats;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -8,10 +9,12 @@ with Driver.Clock;
 with Driver.Log;
 with Driver.Observations;
 with Driver.Robot.Channels;
+with Driver.Robot.Flow;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 with Driver.Robot.Lockin;
 with Driver.Robot.Kinematics;
+with Driver.Stats;
 with Driver.Uncertain;
 
 package body Driver.Robot.Motion is
@@ -367,6 +370,85 @@ package body Driver.Robot.Motion is
          Driver.Robot.Stillness.Set_Origin (M, Eye_Id (E));
       end loop;
    end Mark_Origins;
+
+   procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real) is
+      Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+   begin
+      for E in 1 .. Eye_Count (M) loop
+         declare
+            S : Eye_Stream renames M.Eyes (Eye_Id (E));
+            N : constant Natural := Cells (S.Grid);
+         begin
+            if S.Has_Origin and then S.Current /= null and then S.Origin /= null
+              and then S.Origin'Length = S.Current'Length and then N > 0
+              and then Natural (S.Luma_Variance.Length) >= N
+            then
+               declare
+                  --  Sized by cells: on the heap, as Measure_Displacement has them.
+                  type Real_Access is access Real_Array;
+                  type Flag_Access is access Flow.Flag_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+                  procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flag_Access);
+                  Du       : Real_Access := new Real_Array (1 .. N);
+                  Dv       : Real_Access := new Real_Array (1 .. N);
+                  Cond     : Real_Access := new Real_Array (1 .. N);
+                  Noise    : Real_Access := new Real_Array (1 .. N);
+                  Resolved : Flag_Access := new Flow.Flag_Array (1 .. N);
+                  Moved, Textured, Far : Natural := 0;
+                  Shifts   : Real_Access := new Real_Array (1 .. N);   --  the moved cells' displacements, in pixels
+                  Resolved_Moved : Natural := 0;
+               begin
+                  for C in 1 .. N loop
+                     Noise (C) := S.Luma_Variance (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
+                  end loop;
+                  Flow.Displacements (S.Grid, S.Origin.all, S.Current.all, Noise.all, Du.all, Dv.all, Cond.all,
+                                      Resolved.all);
+                  for C in 1 .. N loop
+                     if Cond (C) > 0.0 and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1)) then
+                        Textured := Textured + 1;
+                        if not Resolved (C) then
+                           Moved := Moved + 1;
+                           Far := Far + 1;
+                        elsif Driver.Uncertain.Significant
+                            (Gate, Sqrt (Du (C) ** 2 + Dv (C) ** 2),
+                             Rest_Factor_Of (S, C - 1) * Flow.Noise_Floor (Cond (C), S.Luma_Variance (C - 1)))
+                        then
+                           Moved := Moved + 1;
+                           Resolved_Moved := Resolved_Moved + 1;
+                           Shifts (Resolved_Moved) := Sqrt (Du (C) ** 2 + Dv (C) ** 2);
+                        end if;
+                     end if;
+                  end loop;
+                  if Textured > 0 then
+                     while Natural (S.Stayed_Pushes.Length) < Natural (G) loop
+                        S.Stayed_Pushes.Append (0);
+                        S.Stayed_Far.Append (0.0);
+                        S.Stayed_Moved.Append (0);
+                        S.Stayed_Cells.Append (0);
+                     end loop;
+                     S.Stayed_Pushes.Replace_Element (Natural (G) - 1, S.Stayed_Pushes (Natural (G) - 1) + 1);
+                     S.Stayed_Far.Replace_Element (Natural (G) - 1, S.Stayed_Far (Natural (G) - 1) + Real (Far) / Real (Textured));
+                     S.Stayed_Moved.Replace_Element (Natural (G) - 1, S.Stayed_Moved (Natural (G) - 1) + Moved);
+                     S.Stayed_Cells.Replace_Element (Natural (G) - 1, S.Stayed_Cells (Natural (G) - 1) + Textured);
+                  end if;
+                  Driver.Log.Line (Driver.Log.Robot, "motion: group" & G'Image & "'s push "
+                                   & (if Way > 0.0 then "upwards" else "downwards") & " left eye" & E'Image
+                                   & " changed:" & Moved'Image & " of" & Textured'Image
+                                   & " textured cells moved and stayed," & Far'Image & " of them too far to resolve, the"
+                                   & " others by a median of "
+                                   & (if Resolved_Moved > 0 then Driver.Log.Image (Driver.Stats.Median (Shifts (1 .. Resolved_Moved)), 2)
+                                      else "-") & " px");
+                  Free (Du);
+                  Free (Dv);
+                  Free (Cond);
+                  Free (Noise);
+                  Free (Resolved);
+                  Free (Shifts);
+               end;
+            end if;
+         end;
+      end loop;
+   end Note_Stayed;
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
       Kept, Back : Boolean;
@@ -1699,6 +1781,7 @@ package body Driver.Robot.Motion is
          Report.Steps := Level;
          declare
             Offsets : Real_Array (1 .. N);
+            Executed_None : Boolean := False;   --  no listed reading went further along its ask at this level
             Seen    : Boolean;
             Chance  : Real;
             Now     : Real_Array (1 .. N);
@@ -1748,6 +1831,7 @@ package body Driver.Robot.Motion is
                                 & Scientific (Amount) & " units, read at beat" & Now_At'Image & ": seen " & Seen'Image
                                 & " (the look's chance of a false alarm " & Driver.Log.Image (Chance, 3) & "), "
                                 & Went_Along'Image & " channels went along their ask");
+               Executed_None := Went_Along = 0;
             end;
             --  A level is seen only when the body executed it: some channel's reading went along its ask. A
             --  camera on an arm whose servo hums against its dead band shakes, and an eye sees motion where no
@@ -1773,6 +1857,18 @@ package body Driver.Robot.Motion is
                                 & Scientific (Amount) & " units, was seen by an eye while no reading went along its ask");
             end if;
             exit when Report.Seen or else (for all I in 1 .. N => not (Usable (I) and then Following (I)));
+            --  A level past the first that no reading went further along and no eye saw, the first being where the body
+            --  was found to execute: doubling the ask moves the body no further (a speed at its most, a joint at its end),
+            --  and no level beyond can be seen executed. The Go2's walk, asked down from 0.52 units, went along at no level
+            --  and showed nothing, and the ladder doubled it 50 times, to 1e9 units, a level every two beats (seed 2,
+            --  paced round p62a, 10-23). Not a level an eye saw: the drone's readings, its flight controller's wandering
+            --  estimates, went no further at its second level while its camera saw it fly, and the ladder ended with
+            --  nothing confirmed (seeds 1 and 2, paced round p65a).
+            if Executed_None and then not Seen and then Level > 1 then
+               Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " moved no reading further along its ask:"
+                                & " the ladder ends");
+               exit;
+            end if;
             Amount := 2.0 * Amount;
          end;
       end loop;

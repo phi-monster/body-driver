@@ -662,6 +662,11 @@ private
       Rest_Counts        : Count_Vectors.Vector;   --  every count of those beats, least first: a beat counting as many
                                              --  is as rare at rest as the share of them that reach it
                                              --  (Lockin.Rest_Share)
+      Stayed_Far    : Real_Vectors.Vector;   --  per group: the shares of the textured cells its pushes left moved beyond
+                                             --  the flow's reach, summed over them (Motion.Note_Stayed), and
+      Stayed_Pushes : Count_Vectors.Vector;  --  how many pushes those are
+      Stayed_Moved  : Count_Vectors.Vector;  --  per group: the textured cells its pushes left moved, summed over them, and
+      Stayed_Cells  : Count_Vectors.Vector;  --  the textured cells measured, summed
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)

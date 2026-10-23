@@ -224,7 +224,12 @@ package body Driver.Robot.Boot is
                Driver.Robot.Motion.Settle (M, Waited);
                Driver.Robot.Motion.Mark_Origins (M);
                Go_To (G, Away, Report);
-               Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
+               --  Further than the round before, which asked half as much, only where more than half of this push's ask
+               --  was delivered: a step is reached when nothing blocked it, and a jaw at its ends, its pushes judged
+               --  against landings as short as theirs, was pushed again from 64 to 2048 times its amounts, a round of
+               --  45 to 55 beats each (ALOHA seed 1, round 4h2, 10-23: 400 of its 1200 beats, out of beats).
+               Moved := Moved
+                 or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
                --  Held after the push for Pause beats before the pictures are asked to settle: a picture that trails
                --  the readings (an eye of the rig ten beats behind them) is settled the beat after they stop, before it
                --  has moved, and pushes a few beats apart make one burst that no lag longer than their spacing can be
@@ -254,6 +259,10 @@ package body Driver.Robot.Boot is
                      Note_Keeps_Going (M, G, P.Channel, Kept_Eyes);
                      Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
                                       & " keeps the body going while held: a speed");
+                  end if;
+                  --  What the push left, where the settle did not send the body back (Graph: each eye's own group).
+                  if not Kept and then not Came then
+                     Driver.Robot.Motion.Note_Stayed (M, G, P.Sign);
                   end if;
                end;
                Settled := Settled + Waited;
@@ -382,7 +391,9 @@ package body Driver.Robot.Boot is
                Driver.Robot.Motion.Settle (M, Waited);
                Driver.Robot.Motion.Mark_Origins (M);
                Go_To (G, Away, Report);
-               Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
+               --  As above: further than the round before only where more than half of this push's ask was delivered.
+               Moved := Moved
+                 or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
                if Keeps_Going (M, G) then
                   Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
                else
@@ -390,6 +401,7 @@ package body Driver.Robot.Boot is
                      Driver.Robot.Motion.Hold (M, Pause);
                   end if;
                   Driver.Robot.Motion.Settle (M, Waited);
+                  Driver.Robot.Motion.Note_Stayed (M, G, Sign);
                end if;
                Go_To (G, Hold, Report);
             end;
@@ -404,28 +416,37 @@ package body Driver.Robot.Boot is
       --  (Motion.Probe_Together); then pushed so and held: a body that keeps going is a speed, and every channel of the
       --  group with it (Motion.Settle); then pushed out and back each way (Push_Group). Each channel keeps the group's
       --  amount, from which step 2's sweeps begin. A group no level shows whole is probed one channel at a time.
-      procedure Recognize_Group (G : Group_Id; Size : Positive; From : Real) is
+      procedure Recognize_Group (G : Group_Id; Size : Positive; From : Real; Alone : Boolean := False) is
          Refs   : constant Driver.Robot.Motion.Channel_Refs (1 .. Size) := [for C in 1 .. Size => (Group => G, Channel => C)];
          Sign   : Real := 1.0;   --  the way the group was seen moved
          P      : Driver.Robot.Motion.Probe_Report;
          Report : Driver.Robot.Motion.Step_Report;
          Moved  : Boolean;
       begin
-         Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, From, P);
-         --  A group at its end one way (a gripper booted open as far as it goes, the Panda's in round 3, 10-23)
-         --  answers the other.
-         if not P.Seen then
-            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole upwards shows nothing confirmed;"
-                             & " downwards");
-            declare
-               --  Where the upward ladder first moved a reading: downwards, a way that moves none up to it is at its
-               --  end (Motion.Probe_Together).
-               Up : constant Real := P.Answered;
-            begin
-               Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P, Other_Way => Up);
-            end;
-            if P.Seen then
-               Sign := -1.0;
+         --  The only group that takes commands: the ladder of every channel together was its own, seen and confirmed at
+         --  From (Alone), and is not climbed again. Climbed again, the drone's motors needed 28.7 units for its noisy
+         --  readings to go along where that ladder saw it at 2.13, and doubled to 1.5e4 before a look of a few beats
+         --  saw anything (seed 2, paced round p62a, 10-23: it fell, and was taken for an arm).
+         if Alone then
+            P.Seen := True;
+            P.Excursion := From;
+         else
+            Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, From, P);
+            --  A group at its end one way (a gripper booted open as far as it goes, the Panda's in round 3, 10-23)
+            --  answers the other.
+            if not P.Seen then
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole upwards shows nothing confirmed;"
+                                & " downwards");
+               declare
+                  --  Where the upward ladder first moved a reading: downwards, a way that moves none up to it is at its
+                  --  end (Motion.Probe_Together).
+                  Up : constant Real := P.Answered;
+               begin
+                  Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P, Other_Way => Up);
+               end;
+               if P.Seen then
+                  Sign := -1.0;
+               end if;
             end if;
          end if;
          if not P.Seen then
@@ -446,6 +467,10 @@ package body Driver.Robot.Boot is
             Driver.Robot.Motion.Mark_Origins (M);
             Go_To (G, Away, Report);
             Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+            --  What the push left, where the settle did not send the body back.
+            if not Kept and then not Came then
+               Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+            end if;
             for C in 1 .. Size loop
                if Kept then
                   Note_Keeps_Going (M, G, C, Kept_Eyes);
@@ -461,8 +486,13 @@ package body Driver.Robot.Boot is
          --  The hold's push went out and back one way; the other way's completes the pair. Both again after it, the
          --  group waited for its pictures to settle six times, the G1's 40 to 60 beats each after every move of its
          --  balance, 150 to 260 beats a group of its seven (round 4c, 10-23).
-         Push_Group (G, Size, P.Excursion, Moved,
-                     Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))), Way => -Sign);
+         --  Not a speed: its hold showed what it does (the pictures drifting on while every reading stood), and a push
+         --  the other way is another walk, flight or drive to send back and wait out (the G1's walk, 275 to 372 beats a
+         --  group, round 4e).
+         if not Keeps_Going (M, G) then
+            Push_Group (G, Size, P.Excursion, Moved,
+                        Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))), Way => -Sign);
+         end if;
          for C in 1 .. Size loop
             Recognized.Append
               (Recognized_Channel'(Ref => (Group => G, Channel => C), Amount => P.Excursion, First => P.Excursion,
@@ -1895,11 +1925,20 @@ package body Driver.Robot.Boot is
                      --  10-14: 170 to 400 beats a push, the estimates on their doubling schedule not due for
                      --  thousands of beats).
                      Driver.Beats.Within_A_Beat (Estimate'Access);
-                     for G in 1 .. Count loop
-                        if Commandable (G) and then Sizes (G) > 0 then
-                           Recognize_Group (Group_Id (G), Sizes (G), P.Excursion);
-                        end if;
-                     end loop;
+                     declare
+                        Groups_Commanded : Natural := 0;
+                     begin
+                        for G in 1 .. Count loop
+                           if Commandable (G) and then Sizes (G) > 0 then
+                              Groups_Commanded := Groups_Commanded + 1;
+                           end if;
+                        end loop;
+                        for G in 1 .. Count loop
+                           if Commandable (G) and then Sizes (G) > 0 then
+                              Recognize_Group (Group_Id (G), Sizes (G), P.Excursion, Alone => Groups_Commanded = 1);
+                           end if;
+                        end loop;
+                     end;
                      Driver.Beats.Within_A_Beat (Estimate'Access);
                      --  A group recognized whole that moves two eyes or more whole and keeps no body going may carry
                      --  them on channels of its own each (one group for two arms): probed again one channel at a time,

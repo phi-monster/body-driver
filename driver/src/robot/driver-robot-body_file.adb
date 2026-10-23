@@ -228,6 +228,10 @@ package body Driver.Robot.Body_File is
                  & ", ""rest_count_beats"": " & Int (S.Rest_Count_Beats)
                  & ", ""rest_count_above"": " & Int (S.Rest_Count_Above)
                  & ", ""rest_counts"": " & Counts (S.Rest_Counts)
+                 & ", ""stayed_far"": " & Reals (S.Stayed_Far)
+                 & ", ""stayed_pushes"": " & Counts (S.Stayed_Pushes)
+                 & ", ""stayed_moved"": " & Counts (S.Stayed_Moved)
+                 & ", ""stayed_cells"": " & Counts (S.Stayed_Cells)
                  & ", ""noise"": " & Reals (S.Noise)
                  & ", ""textured"": " & Flags (S.Textured)
                  & ", ""kept_groups"": " & Counts (S.Kept_Groups)
@@ -671,6 +675,10 @@ package body Driver.Robot.Body_File is
                      S.Rest_Count_Beats := Natural'Max (0, Whole (X, "rest_count_beats"));
                      S.Rest_Count_Above := Natural'Max (0, Whole (X, "rest_count_above"));
                      S.Rest_Counts := Counts_Of (Field (X, "rest_counts"));
+                     S.Stayed_Far := Reals_Of (Field (X, "stayed_far"));
+                     S.Stayed_Pushes := Counts_Of (Field (X, "stayed_pushes"));
+                     S.Stayed_Moved := Counts_Of (Field (X, "stayed_moved"));
+                     S.Stayed_Cells := Counts_Of (Field (X, "stayed_cells"));
                      S.Noise := Reals_Of (Field (X, "noise"));
                      S.Textured := Flags_Of (Field (X, "textured"));
                      S.Kept_Groups := Counts_Of (Field (X, "kept_groups"));

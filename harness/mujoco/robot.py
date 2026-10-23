@@ -51,6 +51,8 @@ ap.add_argument("--height", type=int, default=240)
 ap.add_argument("--instruction", default="Pick up the thing by 10 cm.")
 ap.add_argument("--truth", default="")
 ap.add_argument("--show-refs", type=int, default=0)   # every so many beats, a moving body's commands and root (a diagnostic)
+ap.add_argument("--snap", default="")   # beats (comma-separated) at which every camera's picture is saved as it reaches the
+                                       # driver, side by side, in OUT/snap_BEAT.png (a diagnostic)
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
 rng = np.random.default_rng(args.seed)
@@ -456,6 +458,7 @@ exchange({"message_type": "reset", "payload": {}})
 print("robot: %s seed %d, %d groups, %d cameras of %d x %d, a beat %.3f s of %d steps"
       % (args.kind, args.seed, len(groups), len(cameras), args.width, args.height, args.beat, substeps), flush=True)
 
+snaps = set(int(b) for b in args.snap.split(",") if b.strip())
 beat, t_step, t_render, t_wire = 0, 0.0, 0.0, 0.0
 fell = [0]
 truth = truth_file.Truth(m, d, args.truth, cameras) if args.truth else None
@@ -489,6 +492,9 @@ while True:
                           for n in ("frequency", "env_idx")],
                        "cameras": [{"name": c["name"], "mount": c["mount"], "by": c["by"], "wire": names[c["name"]],
                                     "sensor": c["sensor"]} for c in cameras]}, f, indent=1)
+    if beat in snaps:
+        Image.fromarray(np.concatenate([p["color"] for p in pictures().values()], axis=1)).save(
+            os.path.join(args.out, "snap_%d.png" % beat))
     take_action(call("get_action", beat))
     t3 = time.perf_counter()
     t_step += t1 - t0

@@ -104,6 +104,9 @@ private package Driver.Robot.Lockin is
    --  can measure; a change the stillness judgment sees (a pixel's rounding
    --  flipping) can be far smaller.
 
+   function Mostly (Count, Cells : Natural) return Boolean;
+   --  Count of Cells is a significant majority: what a whole view takes (Judge).
+
    function Rest_Share (M : Model; E : Eye_Id; Beat : Natural) return Real;
    --  The chance that a beat of the eye at rest counts as many moved cells as this beat did, or more (Count_Moved):
    --  of the n counts it had at rest (Rest_Counts), k reached this one, and a count at rest reaches it with chance at
