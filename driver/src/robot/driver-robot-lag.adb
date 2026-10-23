@@ -9,6 +9,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Robot.Flow;
 with Driver.Robot.Regression;
+with Driver.Robot.Steps;
 
 package body Driver.Robot.Lag is
 
@@ -298,6 +299,17 @@ package body Driver.Robot.Lag is
       Starts, Pushes : Natural_Vectors.Vector;
       Every  : constant Natural := (if M.Beats > 0 then Identifiable (M, M.Beats - 1) else 0);
       Bound  : Natural := Every;
+      --  A picture shows a push no sooner than the push began, and the readings show it no later than the body's delay
+      --  (Steps.Body_Delay: the longest wait of any answered push from its start to its readings' first motion): the
+      --  eye can lead the readings by that delay at most, and a shift further back lines the eye's response to one push
+      --  up with the next push of a regular train. The Shadow's eye 1, its body answering within 0 beats, was taken
+      --  to lead its readings by 15 beats, chance 4.6e-5 of 45 shifts, the moves back and forth of its probe 15 to 20
+      --  beats apart: the probe of its hand looked at the wrong beats, saw nothing at any level, and the hand was
+      --  probed one channel at a time to the boot's cap (seed 2, paced round p98b, 10-24); the Panda's base camera,
+      --  at 2 beats by chance 2e-18, went to -10 by 1.5e-55 as its arm was probed (seed 3, round p97a). Before any push
+      --  was answered, none.
+      Delay_Beats : Natural;
+      Delay_Known : Boolean;
       --  An eye whose lag is known keeps it until the stream has doubled since the lags were last all measured, as the
       --  estimates themselves are redone (Observe); one whose lag is not known is measured at every estimate, as it
       --  was. A lag is a constant of the eye and the evidence for it grows with the pushes: told again over every beat
@@ -315,6 +327,7 @@ package body Driver.Robot.Lag is
       if not M.Eyes.Is_Empty and then (for all E in M.Eyes.First_Index .. M.Eyes.Last_Index => Kept (E)) then
          return;
       end if;
+      Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
       Starts_Of (M, Starts, Pushes);
       for I in Starts.First_Index .. Starts.Last_Index loop
          --  Bursts of groups that start on one beat are one start: no window between them.
@@ -606,7 +619,7 @@ package body Driver.Robot.Lag is
                               Py (I) := Py (I - 1) + Wide (Y (I));
                               Pyy (I) := Pyy (I - 1) + Wide (Y (I)) * Wide (Y (I));
                            end loop;
-                           for Shift in -Bound .. Bound loop
+                           for Shift in -Natural'Min (Bound, (if Delay_Known then Delay_Beats else 0)) .. Bound loop
                               declare
                                  Of_Rows : Sums (K);
                               begin
