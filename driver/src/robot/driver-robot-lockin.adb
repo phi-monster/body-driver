@@ -1067,6 +1067,81 @@ package body Driver.Robot.Lockin is
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);
                               end;
                            end loop;
+                           --  A cell that shows another group's motion and not this group's, where that other group
+                           --  moves a patch of this eye's view, is a thing carried along with the eye when this group
+                           --  moves it: the hand before a wrist eye, which the arm's push leaves where it stands in the
+                           --  picture while its closer moves it, or an arm before a head eye on a base. It witnesses
+                           --  nothing against this group moving the whole view. A group judged otherwise with such
+                           --  cells among its witnesses is judged again without them: made whole, or left as it was.
+                           --  The six-value groups of the race's line 1 (10-23, tables and kiwis, 626 of them): the
+                           --  arms whose own eye was left undecided had 52 to 78% of its textured cells respond, and
+                           --  the cells that can tell disagreed; those arms were taken for parts and their eyes for
+                           --  fixed ones. The patches are the first judgement's, so no group's order among them counts.
+                           declare
+                              Patch_Of : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean :=
+                                [others => False];
+                           begin
+                              for H in Patch_Of'Range loop
+                                 Patch_Of (H) := M.Graph.Effects ((Natural (H) - 1) * Eyes + Natural (E)).Verdict = Patch;
+                              end loop;
+                              for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                                 declare
+                                    Effect : Eye_Effect := M.Graph.Effects ((Natural (G) - 1) * Eyes + Natural (E));
+                                 begin
+                                    if Effect.Verdict in Undecided | Patch and then Effect.Textured > 0 then
+                                       declare
+                                          Own         : Flags_Access := new Flags'(Textured.all);
+                                          Left_Out    : Natural := 0;
+                                          Own_Count   : Natural := 0;
+                                          Count       : Natural := 0;
+                                          Least, Most : Natural;
+                                          Disagree    : Boolean;
+                                          Resting     : Real;
+                                       begin
+                                          for Cell in 1 .. N loop
+                                             if Own (Cell) and then not Responding (Cell, G)
+                                               and then (for some H in Patch_Of'Range =>
+                                                           H /= G and then Patch_Of (H) and then Responding (Cell, H))
+                                             then
+                                                Own (Cell) := False;
+                                                Left_Out := Left_Out + 1;
+                                             end if;
+                                             if Own (Cell) then
+                                                Own_Count := Own_Count + 1;
+                                                Count := Count + Boolean'Pos (Responding (Cell, G));
+                                             end if;
+                                          end loop;
+                                          if Left_Out > 0 and then Own_Count > 0 then
+                                             Cells_Showing (G, Own.all, Responding.all, Energy.all, Dof.all, S.Noise,
+                                                            Least, Most, Disagree, Resting, Quiet => True);
+                                             if Judge (Count, Own_Count, Least, Most, Disagree) = Whole then
+                                                declare
+                                                   F : constant Real := Real (Count) / Real (Own_Count);
+                                                begin
+                                                   Effect.Verdict := Whole;
+                                                   Effect.Responding := Count;
+                                                   Effect.Textured := Own_Count;
+                                                   Effect.Fraction :=
+                                                     (Value => F, Sigma => Sqrt (F * (1.0 - F) / Real (Own_Count)),
+                                                      Degrees_Of_Freedom => 0);
+                                                   Effect.Could_Be_Whole := True;
+                                                end;
+                                                M.Graph.Effects.Replace_Element
+                                                  ((Natural (G) - 1) * Eyes + Natural (E), Effect);
+                                                Driver.Log.Line
+                                                  (Driver.Log.Robot, "lock-in: eye" & E'Image & " group" & G'Image
+                                                   & ": WHOLE without the" & Left_Out'Image & " cells that move with the"
+                                                   & " patches of other groups alone:" & Count'Image & " of"
+                                                   & Own_Count'Image & " textured cells respond, " & Least'Image & " to"
+                                                   & Most'Image & " show the motion");
+                                             end if;
+                                          end if;
+                                          Free (Own);
+                                       end;
+                                    end if;
+                                 end;
+                              end loop;
+                           end;
                            --  And of each channel alone, as of a group (the same tests of the column's cells).
                            for K in 1 .. Kept loop
                               declare

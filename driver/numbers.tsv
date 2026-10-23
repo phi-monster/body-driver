@@ -752,7 +752,11 @@ driver-json.adb	when '' .. '' => Character'Pos (C) - Character'Pos ('') + 10,	10
 driver-json.adb	when Boolean_Value => (if Doc.Nodes (Positive (N)).Flag then 1.0 else 0.0),	1.0	format	booleans read as 1 and 0
 driver-json.ads	No_Node : constant Node := 0;	0	structure	the absent node
 driver-log.adb	Buffer : String (1 .. 64);	64	format	room for any Real printed in fixed or exponent form
+driver-log.adb	Chain : GNAT.Traceback.Tracebacks_Array (1 .. 64);	64	format	the frames of the decider's call chain written when it falls silent; the deepest are the runtime's own
 driver-log.adb	IO.Put (Buffer, X, Aft => Digits_After_Point, Exp => 3);	3	format	exponent digits when a value is too large for fixed point
+driver-log.adb	Tell_At := 2 * Natural'Max (1, Longest);	1	structure	a silence is counted in whole beats: none shorter than one is told of
+driver-log.adb	Tell_At := 2 * Natural'Max (1, Longest);	2	structure	told first at twice the longest gap between the decider's lines so far, so a run's ordinary pauses are not
+driver-log.adb	Tell_At := 2 * Quiet;	2	structure	told again at each doubling of the silence: a stall's report grows with the logarithm of its length
 driver-log.adb	function Image (X : Real; Digits_After_Point : Natural := 3) return String is	3	format	default digits printed after the point
 driver-log.ads	function Image (X : Real; Digits_After_Point : Natural := 3) return String;	3	format	default digits printed after the point
 driver-memory.adb	Value := Value * 10 + (Character'Pos (C) - Character'Pos (''));	10	format	decimal digits of the kernel's text
@@ -1298,7 +1302,7 @@ driver-robot-flows.adb	or else Natural (R.Covariance.Length) /= Terms ** 2 or el
 driver-robot-flows.adb	while Turn > 0.0 and then 2.0 * Turn <= Range_Seen loop	2.0	math	a turn either way spans twice the turn, inside the range seen
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 1);	1	structure	clause 1 of the porting contract (docs/body-protocol.md, 3): the reading does not follow the command
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of the porting contract (docs/body-protocol.md, 3): nothing any eye sees changes when it moves
-driver-robot-graph.adb	elsif Whole_Eyes = Eyes and then Eyes >= 2 then	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
+driver-robot-graph.adb	elsif Whole_Eyes = Ridden_Eyes and then Ridden_Eyes >= 2	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
 driver-robot-graph.adb	if Apart_Eyes >= 2 then	2	structure	two eyes that different channels move are two arms; one such eye is one
 driver-robot-graph.adb	return (if Natural (Sets.Length) >= 2 then Result else [others => False]);	2	structure	one set of channels makes one arm: two different sets tell one body from two
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
@@ -1556,6 +1560,8 @@ driver-robot-hand-measure.adb	By := 2.0 * By;	2.0	numerics	doubling search: the 
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	a value to hold before the closer's pair is read; used only once it is
 driver-robot-hand-measure.adb	Eye : Eye_Id := 1;	1	structure	the first eye until the closer's pair is read: a closer an eye on an arm watches has its own
 driver-robot-hand-measure.adb	Gather_Own_Poses (G, Positive'Max (Driver.Robot.Hand.Selfsight.Needed, 2 * Have), Reached);	2	statistics	the poses are asked to double: the estimators place the lobes again once they have (Sweep.Ends_Moved)
+driver-robot-hand-measure.adb	Hand_Lane (1);	1	structure	one lane alone: its hands pressed one after another in it
+driver-robot-hand-measure.adb	Lanes.Append (Key_Lists.To_Vector (K, 1));	1	structure	a lane begun with one hand
 driver-robot-hand-measure.adb	Last_Share : Real := -1.0;	1.0	structure	sentinel: no placing compared yet (a share is never negative)
 driver-robot-hand-measure.adb	Lean : constant Vec3 := Exp ((Side * Ada.Numerics.Pi / 4.0) * Sight) * Away;	4.0	math	half-way between away from the other lobes and across from them
 driver-robot-hand-measure.adb	Noise := Sqrt (2.0) * Reading_Noise (M, G, C);	2.0	statistics	the difference of two readings carries the channel's noise twice over
@@ -1568,7 +1574,7 @@ driver-robot-hand-measure.adb	elsif Steps.Stalled then "" & Driver.Log.Image (By
 driver-robot-hand-measure.adb	elsif not Lined then Ada.Numerics.Pi / 2.0	2.0	math	a right angle: the whole quarter turn of tilts a lobe without a line of its own is pressed through, since a tip anywhere needs presses from three directions
 driver-robot-hand-measure.adb	if Bound < Ada.Numerics.Pi / 2.0 and then not Checked and then Tilt = 0.0 then	2.0	math	tilted a right angle the hand would press across the tip's line, not along it
 driver-robot-hand-measure.adb	if K < 2 then	2	statistics	a median and its robust scatter need two values
-driver-robot-hand-measure.adb	if Natural (Keys.Length) = 1 then	1	structure	one hand is pressed alone, several at once
+driver-robot-hand-measure.adb	if Natural (Lanes.Length) = 1 then	1	structure	one lane is pressed alone, several at once
 driver-robot-hand-measure.adb	if not Significant (Part - Last, Sqrt (2.0) * Sigma) or else abs (Part - Last) < Seeable then	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Eye.Value, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-hand-measure.adb	then "" & Driver.Log.Image (First.Tip.Value, 4) & "" & Driver.Log.Image (First.Tip.Sigma, 4)	4	format	digits printed in a log line or a message
@@ -2262,6 +2268,7 @@ driver-robot-kinematics-fit.adb	F : constant Real := 2.0 * Exp (-Q * Q / 2.0) / 
 driver-robot-kinematics-fit.adb	F_Least := (if Searches = 1 then F else Real'Min (F_Least, F));	1	structure	the first focal length tried starts the least
 driver-robot-kinematics-fit.adb	Far : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));	1	structure	at least one element, for an array that may hold none
 driver-robot-kinematics-fit.adb	Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over or else Order_Is_Told);	2	structure	the profile walked again once the sightings have doubled since it was last walked (the ladder's doubling)
+driver-robot-kinematics-fit.adb	Finite (J.C) and then (for all A in 1 .. 3 => Finite (J.W (A)) and then Finite (J.P (A)))));	3	math	a vector of space has three components
 driver-robot-kinematics-fit.adb	Finite (K + 2) := Av (I) - Sight (Sight'First + I - 1).V;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Finite (K + 2) := Hv (I) - Sight (Sight'First + I - 1).V;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Finite : Real_Access := new Real_Array (1 .. 2 * S);	2	structure	two residuals a sighting, across and down
@@ -3553,6 +3560,7 @@ driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_C
 driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
 driver-robot-kinematics.adb	then (1.0 / (R.Result.Table_A * X)) * R.Result.Table_A	1.0	math	the table's plane A * X = 1 scaled to pass through the point
+driver-robot-kinematics.adb	then Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter	2.0	statistics	the noise of a difference of two readings is the square root of two times one reading's
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
@@ -3824,6 +3832,7 @@ driver-robot-surfaces.adb	Cu : constant Real := (if Run > 0.0 then (Un - U) / Ru
 driver-robot-surfaces.adb	D : constant Natural := At_Offset (0, 1);	1	math	the neighbour one row down
 driver-robot-surfaces.adb	D1 : constant Vec3 := Sight (Now, Q.U + 1.0, Q.V);	1.0	math	the next pixel across, for the warp's derivative by u
 driver-robot-surfaces.adb	D2 : constant Vec3 := Sight (Now, Q.U, Q.V + 1.0);	1.0	math	the next pixel down, for the warp's derivative by v
+driver-robot-surfaces.adb	Diagonal (1, Last_Row - First_Row + 1);	1	structure	a diagonal's queries counted from its first row
 driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
 driver-robot-surfaces.adb	I - 2 * Columns >= Result'First, I + 2 * Columns <= Result'Last);	2	structure	the pair beyond a point along a column are one and two rows off it
 driver-robot-surfaces.adb	J : array (1 .. 2, 1 .. 3) of Real := [others => [others => 0.0]];	2	structure	a place in a picture: its two coordinates
@@ -3856,6 +3865,7 @@ driver-robot-surfaces.adb	exit when not Seen (Near / 2.0);	2.0	numerics	halving 
 driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
 driver-robot-surfaces.adb	for A in 1 .. 3 loop	3	structure	the three axes of the frame
 driver-robot-surfaces.adb	for B in 1 .. 3 loop	3	structure	the three axes of the frame
+driver-robot-surfaces.adb	for D in 0 .. Rows + Columns - 2 loop	2	math	a grid of R rows and C columns has R + C - 1 anti-diagonals, numbered from nought
 driver-robot-surfaces.adb	for D in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
 driver-robot-surfaces.adb	for L in 2 .. Lines loop	2	structure	the views' lines, after the eye now's own (the first)
 driver-robot-surfaces.adb	if Right >= 1.0 and then Sigma < Real'Last then	1.0	statistics	not even one round trip the fit takes for a right one: nothing measured

@@ -158,167 +158,176 @@ package body Driver.Robot.Hand.Sweep is
       High        : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.High_End (S.Views, Channel);
       At_Low      : constant Boolean := Now.Poses_Low >= Now.Poses_High;   --  the anchored end, as the ends' placing had it
       Anchored    : constant Driver.Robot.Hand.Views.View := (if At_Low then Low else High);
-      Anchor      : constant Driver.Pixels.View :=
-        Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, Anchored.Closer.Element);
-      N           : constant Natural := Natural (Now.Located.Lobes.Length);
-      Count       : constant Natural := Driver.Robot.Hand.Views.Stops (S.Views, Channel);
-      Nothing     : constant Mask := Create (0, 0);
-      --  How the picture moves per unit of the channel's reading, from the anchored end towards a stop.
-      procedure Stop_Motion (Column, Row : Natural; U, V : out Real) is
-      begin
-         Motion (Channel, Column, Row, U, V);
-         if not At_Low then
-            U := -U;
-            V := -V;
-         end if;
-      end Stop_Motion;
    begin
-      Now.Stops.Clear;
-      Now.Stops_Seen := Count;
-      for K in 1 .. Count loop
-         declare
-            V        : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Stop (S.Views, Channel, K);
-            Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Anchored.Frames, V.Frames);
-            Tips     : Stop_Tips (1 .. N);
-         begin
-            if Compared.Trusted and then Driver.Images.Count (Compared.Changed) > 0 then
-               declare
-                  Placed : constant Driver.Robot.Hand.Lobes.Located := Driver.Robot.Hand.Lobes.From_Change
-                    (Compared.Changed, Anchored.Frames, V.Frames, Anchor, True, Compared.Spread, Nothing,
-                     Motion => (if Motion = null then null else Stop_Motion'Access));
-               begin
-                  if Placed.How = Driver.Robot.Hand.Lobes.Placed then
+      --  The stops are placed against the anchored end's frames over the poses (Selfsight.Anchor_For): when the
+      --  memory holds fewer than two poses of that end now (it forgets), no stop is placed anew and those placed
+      --  stand. Asked regardless, the anchor's precondition failed and the driver with it (t501 of the race, 10-22).
+      if not Driver.Robot.Hand.Selfsight.Anchored (S.Memory, Anchored.Closer.Element) then
+         return;
+      end if;
+      declare
+         Anchor      : constant Driver.Pixels.View :=
+           Driver.Robot.Hand.Selfsight.Anchor_For (S.Memory, Anchored.Closer.Element);
+         N           : constant Natural := Natural (Now.Located.Lobes.Length);
+         Count       : constant Natural := Driver.Robot.Hand.Views.Stops (S.Views, Channel);
+         Nothing     : constant Mask := Create (0, 0);
+         --  How the picture moves per unit of the channel's reading, from the anchored end towards a stop.
+         procedure Stop_Motion (Column, Row : Natural; U, V : out Real) is
+            begin
+            Motion (Channel, Column, Row, U, V);
+            if not At_Low then
+               U := -U;
+               V := -V;
+            end if;
+         end Stop_Motion;
+      begin
+         Now.Stops.Clear;
+         Now.Stops_Seen := Count;
+         for K in 1 .. Count loop
+            declare
+               V        : constant Driver.Robot.Hand.Views.View := Driver.Robot.Hand.Views.Stop (S.Views, Channel, K);
+               Compared : constant Driver.Pixels.Comparison := Driver.Pixels.Compare (Anchored.Frames, V.Frames);
+               Tips     : Stop_Tips (1 .. N);
+            begin
+               if Compared.Trusted and then Driver.Images.Count (Compared.Changed) > 0 then
+                  declare
+                     Placed : constant Driver.Robot.Hand.Lobes.Located := Driver.Robot.Hand.Lobes.From_Change
+                       (Compared.Changed, Anchored.Frames, V.Frames, Anchor, True, Compared.Spread, Nothing,
+                        Motion => (if Motion = null then null else Stop_Motion'Access));
+                  begin
+                     if Placed.How = Driver.Robot.Hand.Lobes.Placed then
+                        for L in 1 .. N loop
+                           declare
+                              Mine : constant Mask :=
+                                (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                              Best : Natural := 0;
+                              Most : Natural := 0;
+                           begin
+                              for J in Placed.Lobes.First_Index .. Placed.Lobes.Last_Index loop
+                                 declare
+                                    Shared : constant Natural := Overlap (Mine, Placed.Lobes (J).Here);
+                                 begin
+                                    if Shared > Most then
+                                       Best := J;
+                                       Most := Shared;
+                                    end if;
+                                 end;
+                              end loop;
+                              if Best > 0 and then Placed.Lobes (Best).Tip_Known_There then
+                                 Tips (L) := (Known  => True,
+                                              Tip    => Placed.Lobes (Best).Tip_There,
+                                              Centre => Placed.Lobes (Best).Centre_There,
+                                              Region => Placed.Lobes (Best).There);
+                              end if;
+                           end;
+                        end loop;
+                     end if;
+                  end;
+               end if;
+               --  The lobe also as one moved a little from the anchored end (Lobes.Moved_Lobe): where it moved less than
+               --  its width, the placing's lobe is the part of it that was not there before, a crescent (a16 on 10-16: at
+               --  6.998, 1126 pixels of a jaw of 6234, its tip 30 pixels down the jaw's edge), and where it moved
+               --  farther, Moved_Lobe has nothing or a scrap of it. Of the two, the one whose pixels number nearest the
+               --  anchored end's, by their ratio: the lobe is one rigid part, as large at the stop as at the end.
+               if Compared.Trusted then
+                  for L in 1 .. N loop
+                     declare
+                        Mine   : constant Mask :=
+                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
+                        Region : Mask;
+                        Centre, Tip : Pixel;
+                        Known  : Boolean;
+
+                        --  How far a region's size is from the anchored lobe's, as the logarithm of their ratio.
+                        function Apart (M : Mask) return Real is
+                          (abs Ada.Numerics.Long_Elementary_Functions.Log
+                             (Real (Driver.Images.Count (M)) / Real (Driver.Images.Count (Mine))));
+                     begin
+                        if Driver.Images.Count (Mine) > 0 then
+                           Driver.Robot.Hand.Lobes.Moved_Lobe
+                             (Mine, Compared.Changed, Anchored.Frames, V.Frames, Region, Centre, Tip, Known);
+                           if Known and then Driver.Images.Count (Region) > 0
+                             and then (not Tips (L).Known or else Driver.Images.Count (Tips (L).Region) = 0
+                                       or else Apart (Region) < Apart (Tips (L).Region))
+                           then
+                              Tips (L) := (Known => True, Tip => Tip, Centre => Centre, Region => Region);
+                           end if;
+                        end if;
+                     end;
+                  end loop;
+               end if;
+               --  For a study against a fake robot's truth: with BD_DUMP_KEYS naming a folder, each stop's lobes as
+               --  placed, a line a lobe: where its tip and centre are and how many pixels it has, beside the anchored
+               --  end's.
+               if Ada.Environment_Variables.Exists ("BD_DUMP_KEYS") then
+                  declare
+                     File : Ada.Text_IO.File_Type;
+                     Name : constant String := Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stops_c"
+                       & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & ".txt";
+                  begin
+                     begin
+                        Ada.Text_IO.Open (File, Ada.Text_IO.Append_File, Name);
+                     exception
+                        when Ada.Text_IO.Name_Error =>
+                           Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
+                     end;
                      for L in 1 .. N loop
                         declare
                            Mine : constant Mask :=
                              (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
-                           Best : Natural := 0;
-                           Most : Natural := 0;
                         begin
-                           for J in Placed.Lobes.First_Index .. Placed.Lobes.Last_Index loop
-                              declare
-                                 Shared : constant Natural := Overlap (Mine, Placed.Lobes (J).Here);
-                              begin
-                                 if Shared > Most then
-                                    Best := J;
-                                    Most := Shared;
-                                 end if;
-                              end;
-                           end loop;
-                           if Best > 0 and then Placed.Lobes (Best).Tip_Known_There then
-                              Tips (L) := (Known  => True,
-                                           Tip    => Placed.Lobes (Best).Tip_There,
-                                           Centre => Placed.Lobes (Best).Centre_There,
-                                           Region => Placed.Lobes (Best).There);
-                           end if;
+                           Ada.Text_IO.Put_Line
+                             (File, "stop" & K'Image & " of" & Count'Image & " reading "
+                              & Driver.Log.Image (Driver.Robot.Hand.Views.Reading (V, Channel), 1) & " beats"
+                              & V.From'Image & V.To'Image & " lobe" & L'Image & " anchored "
+                              & (if At_Low then "low" else "high") & " pixels" & Driver.Images.Count (Mine)'Image
+                              & (if Tips (L).Known
+                                 then " tip " & Driver.Log.Image (Tips (L).Tip.U, 1) & " " & Driver.Log.Image (Tips (L).Tip.V, 1)
+                                      & " centre " & Driver.Log.Image (Tips (L).Centre.U, 1) & " "
+                                      & Driver.Log.Image (Tips (L).Centre.V, 1) & " pixels"
+                                      & Driver.Images.Count (Tips (L).Region)'Image
+                                 else " not found"));
+                           --  And the picture of it: the pixels that changed from the anchored end (60), the anchored
+                           --  lobe's (120) and the region placed at the stop (255), a PGM a stop and lobe.
+                           declare
+                              Picture : Ada.Text_IO.File_Type;
+                              W       : constant Natural := Driver.Images.Width (Mine);
+                              H       : constant Natural := Driver.Images.Height (Mine);
+                           begin
+                              Ada.Text_IO.Create
+                                (Picture, Ada.Text_IO.Out_File,
+                                 Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stop_c"
+                                 & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & "_k"
+                                 & Ada.Strings.Fixed.Trim (K'Image, Ada.Strings.Left) & "_l"
+                                 & Ada.Strings.Fixed.Trim (L'Image, Ada.Strings.Left) & ".pgm");
+                              Ada.Text_IO.Put_Line (Picture, "P2" & W'Image & H'Image & " 255");
+                              for Y in 0 .. H - 1 loop
+                                 for X in 0 .. W - 1 loop
+                                    Ada.Text_IO.Put
+                                      (Picture,
+                                       (if Tips (L).Known and then Driver.Images.Width (Tips (L).Region) = W
+                                          and then Driver.Images.Contains (Tips (L).Region, X, Y) then " 255"
+                                        elsif Driver.Images.Contains (Mine, X, Y) then " 120"
+                                        elsif Driver.Images.Width (Compared.Changed) = W
+                                          and then Driver.Images.Contains (Compared.Changed, X, Y) then " 60"
+                                        else " 0"));
+                                 end loop;
+                                 Ada.Text_IO.New_Line (Picture);
+                              end loop;
+                              Ada.Text_IO.Close (Picture);
+                           end;
                         end;
                      end loop;
-                  end if;
-               end;
-            end if;
-            --  The lobe also as one moved a little from the anchored end (Lobes.Moved_Lobe): where it moved less than
-            --  its width, the placing's lobe is the part of it that was not there before, a crescent (a16 on 10-16: at
-            --  6.998, 1126 pixels of a jaw of 6234, its tip 30 pixels down the jaw's edge), and where it moved
-            --  farther, Moved_Lobe has nothing or a scrap of it. Of the two, the one whose pixels number nearest the
-            --  anchored end's, by their ratio: the lobe is one rigid part, as large at the stop as at the end.
-            if Compared.Trusted then
-               for L in 1 .. N loop
-                  declare
-                     Mine   : constant Mask :=
-                       (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
-                     Region : Mask;
-                     Centre, Tip : Pixel;
-                     Known  : Boolean;
-
-                     --  How far a region's size is from the anchored lobe's, as the logarithm of their ratio.
-                     function Apart (M : Mask) return Real is
-                       (abs Ada.Numerics.Long_Elementary_Functions.Log
-                          (Real (Driver.Images.Count (M)) / Real (Driver.Images.Count (Mine))));
-                  begin
-                     if Driver.Images.Count (Mine) > 0 then
-                        Driver.Robot.Hand.Lobes.Moved_Lobe
-                          (Mine, Compared.Changed, Anchored.Frames, V.Frames, Region, Centre, Tip, Known);
-                        if Known and then Driver.Images.Count (Region) > 0
-                          and then (not Tips (L).Known or else Driver.Images.Count (Tips (L).Region) = 0
-                                    or else Apart (Region) < Apart (Tips (L).Region))
-                        then
-                           Tips (L) := (Known => True, Tip => Tip, Centre => Centre, Region => Region);
-                        end if;
-                     end if;
+                     Ada.Text_IO.Close (File);
                   end;
-               end loop;
-            end if;
-            --  For a study against a fake robot's truth: with BD_DUMP_KEYS naming a folder, each stop's lobes as
-            --  placed, a line a lobe: where its tip and centre are and how many pixels it has, beside the anchored
-            --  end's.
-            if Ada.Environment_Variables.Exists ("BD_DUMP_KEYS") then
-               declare
-                  File : Ada.Text_IO.File_Type;
-                  Name : constant String := Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stops_c"
-                    & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & ".txt";
-               begin
-                  begin
-                     Ada.Text_IO.Open (File, Ada.Text_IO.Append_File, Name);
-                  exception
-                     when Ada.Text_IO.Name_Error =>
-                        Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
-                  end;
-                  for L in 1 .. N loop
-                     declare
-                        Mine : constant Mask :=
-                          (if At_Low then Now.Located.Lobes (L).Here else Now.Located.Lobes (L).There);
-                     begin
-                        Ada.Text_IO.Put_Line
-                          (File, "stop" & K'Image & " of" & Count'Image & " reading "
-                           & Driver.Log.Image (Driver.Robot.Hand.Views.Reading (V, Channel), 1) & " beats"
-                           & V.From'Image & V.To'Image & " lobe" & L'Image & " anchored "
-                           & (if At_Low then "low" else "high") & " pixels" & Driver.Images.Count (Mine)'Image
-                           & (if Tips (L).Known
-                              then " tip " & Driver.Log.Image (Tips (L).Tip.U, 1) & " " & Driver.Log.Image (Tips (L).Tip.V, 1)
-                                   & " centre " & Driver.Log.Image (Tips (L).Centre.U, 1) & " "
-                                   & Driver.Log.Image (Tips (L).Centre.V, 1) & " pixels"
-                                   & Driver.Images.Count (Tips (L).Region)'Image
-                              else " not found"));
-                        --  And the picture of it: the pixels that changed from the anchored end (60), the anchored
-                        --  lobe's (120) and the region placed at the stop (255), a PGM a stop and lobe.
-                        declare
-                           Picture : Ada.Text_IO.File_Type;
-                           W       : constant Natural := Driver.Images.Width (Mine);
-                           H       : constant Natural := Driver.Images.Height (Mine);
-                        begin
-                           Ada.Text_IO.Create
-                             (Picture, Ada.Text_IO.Out_File,
-                              Ada.Environment_Variables.Value ("BD_DUMP_KEYS") & "/stop_c"
-                              & Ada.Strings.Fixed.Trim (Channel'Image, Ada.Strings.Left) & "_k"
-                              & Ada.Strings.Fixed.Trim (K'Image, Ada.Strings.Left) & "_l"
-                              & Ada.Strings.Fixed.Trim (L'Image, Ada.Strings.Left) & ".pgm");
-                           Ada.Text_IO.Put_Line (Picture, "P2" & W'Image & H'Image & " 255");
-                           for Y in 0 .. H - 1 loop
-                              for X in 0 .. W - 1 loop
-                                 Ada.Text_IO.Put
-                                   (Picture,
-                                    (if Tips (L).Known and then Driver.Images.Width (Tips (L).Region) = W
-                                       and then Driver.Images.Contains (Tips (L).Region, X, Y) then " 255"
-                                     elsif Driver.Images.Contains (Mine, X, Y) then " 120"
-                                     elsif Driver.Images.Width (Compared.Changed) = W
-                                       and then Driver.Images.Contains (Compared.Changed, X, Y) then " 60"
-                                     else " 0"));
-                              end loop;
-                              Ada.Text_IO.New_Line (Picture);
-                           end loop;
-                           Ada.Text_IO.Close (Picture);
-                        end;
-                     end;
-                  end loop;
-                  Ada.Text_IO.Close (File);
-               end;
-            end if;
-            Now.Stops.Append
-              (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,
-                           Tips    => Tip_Holders.To_Holder (Tips)));
-         end;
-      end loop;
-      S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+               end if;
+               Now.Stops.Append
+                 (Stop_State'(Reading => Driver.Robot.Hand.Views.Reading (V, Channel), From => V.From,
+                              Tips    => Tip_Holders.To_Holder (Tips)));
+            end;
+         end loop;
+         S.Per_Channel := Channel_Holders.To_Holder (Per_Channel);
+      end;
    end Renew_Stops;
 
    procedure Set_Status (S : in out State; Channel : Positive; To : Progress);

@@ -3,6 +3,7 @@ with Ada.Exceptions;
 with Ada.Finalization;
 with Ada.Strings.Unbounded;
 with Ada.Task_Attributes;
+with Driver.Log;
 
 package body Driver.Beats is
 
@@ -210,6 +211,7 @@ package body Driver.Beats is
       else
          Doors (L).Take (Beat);
       end if;
+      Driver.Log.Check_Silence;
    end Next;
 
    procedure Send (C : Driver.Commands.Command) is

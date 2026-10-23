@@ -17,4 +17,11 @@ package Driver.Log is
 
    function Image (N : Integer) return String;
 
+   procedure Check_Silence;
+   --  Called by the decider as it takes each beat (Driver.Beats.Next): when the deciding tasks have written no robot,
+   --  action or brain line for twice the longest such silence before this one, a core line says how long and where the calling
+   --  task waits (its call chain, the functions and lines), and again at twice that, until a line is written. A wait
+   --  that tells nothing of itself was found only by reading the code: k204sd (10-23) held still and silent from beat
+   --  3287 to the run's end, 20 000 beats, after a press.
+
 end Driver.Log;

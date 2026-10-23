@@ -622,7 +622,15 @@ package body Driver.Robot.Kinematics is
       elsif Known (Seen) then
          return Floored (Seen.Value);
       else
-         return 0.0;
+         --  Neither the keyframes nor the lock-in tell a step yet: still none nearer than the readings tell apart and
+         --  the body is known to execute, as the steps above are floored. A step of nought made the least turn a
+         --  keyframe counts nought (Motion.Least_Turn), and the joint's ladder began below its dead band and was
+         --  never followed: t502 of the race (10-23), its channel 4 (dead band 1.78, noise 1.15, the eye's step
+         --  unknown) had no keyframe of its own, its order untold, the chain fitted wrong; with every quirk of the
+         --  fake off, the same.
+         return Floored (if Jitter < Real'Last
+                         then Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter
+                         else 0.0);
       end if;
    end Step_Of;
 
@@ -2814,6 +2822,17 @@ package body Driver.Robot.Kinematics is
                               Count := Count + 1;
                            end if;
                         end loop;
+                        --  A joint turned now that the fit begun from held (out of that fit, its turn per reading unit
+                        --  nought there): that fit has nothing of it to begin from, and this one begins from nothing.
+                        --  Begun from it, stage 1 took the held joint's nought for its turn and refused the arm, and every
+                        --  fit after it the same, the arm left at its fit from before the joint turned: t502 of the race
+                        --  (10-23), its channel 4 first turned in pass 1, the arm not fitted again over 58 keyframes.
+                        if Start.N > 0 then
+                           Start.Valid := Start.Valid
+                             and then (for all C in 1 .. N =>
+                                         not Turned (C) or else Start.Joints (C).Slide
+                                         or else abs Start.Joints (C).C > 0.0);
+                        end if;
                         if Count = N or else Count = 0 then
                            Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
                                     M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,

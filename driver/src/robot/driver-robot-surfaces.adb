@@ -3,6 +3,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Log;
+with Driver.Parallel_For;
 with Driver.Round_Trips;
 
 package body Driver.Robot.Surfaces is
@@ -109,6 +110,10 @@ package body Driver.Robot.Surfaces is
       function Inside (V : View; U, W : Real) return Boolean is
         (U >= 0.0 and then W >= 0.0 and then U <= Real (Driver.Alignment.Level_Width (V.Picture, 0))
          and then W <= Real (Driver.Alignment.Level_Height (V.Picture, 0)));
+      --  Each query's own counts, summed in the queries' order once the pass is over: the queries of a pass run side
+      --  by side (Every_Query).
+      Per : array (Queries'Range) of Placing_Counts;
+
       procedure Query (I : Positive) is
       begin
          if Queries (I).U >= 0.0 then
@@ -347,8 +352,6 @@ package body Driver.Robot.Surfaces is
                      begin
                         if Measuring then
                            if Back.Verdict = Driver.Alignment.Found then
-                              Trips.Append (Back.To.U - Q.U);
-                              Trips.Append (Back.To.V - Q.V);
                               declare
                                  --  The two lines of sight's nearest approach, along the eye now's.
                                  W  : constant Vec3 := Sight (V, Got.To.U, Got.To.V);
@@ -634,8 +637,8 @@ package body Driver.Robot.Surfaces is
                --  is not asked.
                if not Measuring and then Firsts (I).Riding then
                   Result (I).Riding := True;
-                  Counts.Asked := Counts.Asked + 1;
-                  Counts.Riding := Counts.Riding + 1;
+                  Per (I).Asked := Per (I).Asked + 1;
+                  Per (I).Riding := Per (I).Riding + 1;
                   return;
                end if;
                if Measuring then
@@ -780,22 +783,22 @@ package body Driver.Robot.Surfaces is
                   Done := True;
                   Place_At (Loose_X, Loose_Cov);
                   if Result (I).Found then
-                     Counts.Loose := Counts.Loose + 1;
+                     Per (I).Loose := Per (I).Loose + 1;
                   end if;
                end if;
-               Counts.Asked := Counts.Asked + 1;
+               Per (I).Asked := Per (I).Asked + 1;
                if Result (I).Found then
-                  Counts.Placed := Counts.Placed + 1;
+                  Per (I).Placed := Per (I).Placed + 1;
                elsif Done then
-                  Counts.Below := Counts.Below + 1;
+                  Per (I).Below := Per (I).Below + 1;
                elsif Count < 2 then
-                  Counts.Unseen := Counts.Unseen + 1;
+                  Per (I).Unseen := Per (I).Unseen + 1;
                elsif Met_Some then
-                  Counts.Untold := Counts.Untold + 1;
+                  Per (I).Untold := Per (I).Untold + 1;
                elsif Found_Some then
-                  Counts.Unmet := Counts.Unmet + 1;
+                  Per (I).Unmet := Per (I).Unmet + 1;
                else
-                  Counts.Unfound := Counts.Unfound + 1;
+                  Per (I).Unfound := Per (I).Unfound + 1;
                end if;
             end;
          end if;
@@ -806,6 +809,33 @@ package body Driver.Robot.Surfaces is
       --  an eye states is what its keyframes measured between two pictures of one pose (the still twin), and a view from
       --  elsewhere sees the patch turned and foreshortened: s65 (servo seed 6, 10-18) stated 0.026 px, and of the points
       --  found in a view, 84 of 130 had lines of sight that did not meet within it.
+      --  Every query of a pass, side by side along each anti-diagonal of the grid: a query reads the finds of its left
+      --  and upper neighbours (Query: Left, Above), which the diagonal before it holds, and what a query writes is
+      --  its own (Firsts and Result at its index, its counts in Per). One query after another, the scene's second
+      --  round of k204sb (the race, 10-23: 336 queries, 116 views) was not over 8 minutes later, and the robot held
+      --  still all the while. A grid whose last row is short has no query beyond its last.
+      procedure Every_Query is
+         Rows : constant Natural := (Queries'Length + Columns - 1) / Columns;
+      begin
+         for D in 0 .. Rows + Columns - 2 loop
+            declare
+               First_Row : constant Natural := Natural'Max (0, D - (Columns - 1));
+               Last_Row  : constant Natural := Natural'Min (Rows - 1, D);
+               procedure One (K : Positive) is
+                  R : constant Natural := First_Row + K - 1;
+                  I : constant Integer := Queries'First + R * Columns + (D - R);
+               begin
+                  if I <= Queries'Last then
+                     Query (I);
+                  end if;
+               end One;
+               procedure Diagonal is new Driver.Parallel_For (One);
+            begin
+               Diagonal (1, Last_Row - First_Row + 1);
+            end;
+         end loop;
+      end Every_Query;
+
       procedure Measured_Error is
          T     : Real_Array (1 .. Natural (Trips.Length));
          K     : Natural := 0;
@@ -843,13 +873,28 @@ package body Driver.Robot.Surfaces is
       --  The first pass measures the aligner's error between these views from the round trips of one search a query,
       --  in the view that stands farthest from the eye; the second places the points with it.
       Measuring := True;
-      for I in Queries'Range loop
-         Query (I);
+      Every_Query;
+      --  The round trips in the queries' order, as one query after another made them: each query's first find keeps
+      --  its own.
+      for F of Firsts.all loop
+         if F.Found then
+            Trips.Append (F.Trip_U);
+            Trips.Append (F.Trip_V);
+         end if;
       end loop;
       Measured_Error;
       Measuring := False;
-      for I in Queries'Range loop
-         Query (I);
+      Every_Query;
+      for P of Per loop
+         Counts.Asked := Counts.Asked + P.Asked;
+         Counts.Riding := Counts.Riding + P.Riding;
+         Counts.Unseen := Counts.Unseen + P.Unseen;
+         Counts.Unfound := Counts.Unfound + P.Unfound;
+         Counts.Unmet := Counts.Unmet + P.Unmet;
+         Counts.Untold := Counts.Untold + P.Untold;
+         Counts.Below := Counts.Below + P.Below;
+         Counts.Placed := Counts.Placed + P.Placed;
+         Counts.Loose := Counts.Loose + P.Loose;
       end loop;
             --  A point whose patch takes in two surfaces is placed by neither: where the depths of its neighbours along its
       --  row or its column do not go on through it as a surface does (their second difference with it is beyond Z of

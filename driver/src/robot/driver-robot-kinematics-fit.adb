@@ -7462,40 +7462,60 @@ package body Driver.Robot.Kinematics.Fit is
                --  After move Mv, how far apart Here's joints in its own order and in order C put the points both
                --  put in the picture (the median, in pixels) and how many; and the median, over the points Here's
                --  order puts in the picture, of how far C puts each from there (what the keyframe's window must reach).
+               --  Whether X is a number, and no infinity.
+               function Finite (X : Real) return Boolean is (abs X <= Real'Last);
+
+               --  A move whose turns, or whose arm's joints, are no numbers tells nothing apart: no point is seen
+               --  after it. The order search had scored an order "nan px" from the arm's own sightings, and the turn
+               --  made of it raised in the rotation's exponential (t720 of the race, 10-23: "the estimates failed",
+               --  and the boot with them).
+               function Movable (Mv : Move) return Boolean is
+                 ((for all X of Change_Of (Mv) => Finite (X))
+                  and then (for all J of Here.Joints =>
+                              Finite (J.C) and then (for all A in 1 .. 3 => Finite (J.W (A)) and then Finite (J.P (A)))));
+
                procedure Separation (C : Chain_Order; Mv : Move; Median, Reached : out Real; Count : out Natural) is
-                  Back_1 : constant Rigid := Inverse (Eye_At (Here.Joints, Here.Order, Change_Of (Mv)));
-                  Back_2 : constant Rigid := Inverse (Eye_At (Here.Joints, C, Change_Of (Mv)));
-                  Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
-                  Far  : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
-                  Seen : array (1 .. Tracks) of Boolean := [others => False];
-                  Kf   : Natural := 0;
                begin
                   Count := 0;
-                  for X of Sight loop
-                     if not Seen (X.Track) and then Depth_Of (Here, X.Track) > 0.0 then
-                        Seen (X.Track) := True;
-                        declare
-                           P              : constant Vec3 := Depth_Of (Here, X.Track) * Ray (Here.L, X.U0, X.V0);
-                           U1, V1, U2, V2 : Real;
-                           A1, A2         : Boolean;
-                        begin
-                           Project (Here.L, Back_1 * P, U1, V1, A1);
-                           Project (Here.L, Back_2 * P, U2, V2, A2);
-                           if A1 and then In_Picture (U1, V1) then
-                              Kf := Kf + 1;
-                              Far (Kf) := (if A2 then Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2) else Real'Last);
-                              if A2 and then In_Picture (U2, V2) then
-                                 Count := Count + 1;
-                                 Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
+                  Median := 0.0;
+                  Reached := Real'Last;
+                  if not Movable (Mv) then
+                     return;
+                  end if;
+                  declare
+                     Back_1 : constant Rigid := Inverse (Eye_At (Here.Joints, Here.Order, Change_Of (Mv)));
+                     Back_2 : constant Rigid := Inverse (Eye_At (Here.Joints, C, Change_Of (Mv)));
+                     Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
+                     Far  : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));
+                     Seen : array (1 .. Tracks) of Boolean := [others => False];
+                     Kf   : Natural := 0;
+                  begin
+                     for X of Sight loop
+                        if not Seen (X.Track) and then Depth_Of (Here, X.Track) > 0.0 then
+                           Seen (X.Track) := True;
+                           declare
+                              P              : constant Vec3 := Depth_Of (Here, X.Track) * Ray (Here.L, X.U0, X.V0);
+                              U1, V1, U2, V2 : Real;
+                              A1, A2         : Boolean;
+                           begin
+                              Project (Here.L, Back_1 * P, U1, V1, A1);
+                              Project (Here.L, Back_2 * P, U2, V2, A2);
+                              if A1 and then In_Picture (U1, V1) then
+                                 Kf := Kf + 1;
+                                 Far (Kf) := (if A2 then Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2) else Real'Last);
+                                 if A2 and then In_Picture (U2, V2) then
+                                    Count := Count + 1;
+                                    Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
+                                 end if;
                               end if;
-                           end if;
-                        end;
-                     end if;
-                  end loop;
-                  Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
-                  Reached := (if Kf > 0 then Driver.Stats.Median (Far (1 .. Kf)) else Real'Last);
-                  Free (Dist);
-                  Free (Far);
+                           end;
+                        end if;
+                     end loop;
+                     Median := (if Count > 0 then Driver.Stats.Median (Dist (1 .. Count)) else 0.0);
+                     Reached := (if Kf > 0 then Driver.Stats.Median (Far (1 .. Kf)) else Real'Last);
+                     Free (Dist);
+                     Free (Far);
+                  end;
                end Separation;
 
                --  Per pair of joints (Earlier, Later as Here has them): the untold orders it tells most, and the turns

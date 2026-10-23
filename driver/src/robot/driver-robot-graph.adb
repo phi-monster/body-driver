@@ -18,7 +18,6 @@ package body Driver.Robot.Graph is
    end Effect;
 
    procedure Derive (M : in out Model) is
-      Eyes : constant Natural := Natural (M.Eyes.Length);
       Gr   : Body_Graph renames M.Graph;
 
       --  A group's own pushes: pushes it answered that no other commandable
@@ -210,51 +209,81 @@ package body Driver.Robot.Graph is
          end if;
       end loop;
 
-      --  Carrier and arms.
-      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-         if Own (G) then
-            declare
-               Whole_Eyes : Natural := 0;
-               Apart      : constant Eye_Flags := (if Informed (G) then Moved_Apart (G) else Remembered (G));
-               Apart_Eyes : Natural := 0;
-            begin
+      --  Carrier and arms. The eyes that ride on the body: those some group moves whole. An eye fixed in the world
+      --  is moved whole by none, and a carrier moves every other eye whole while the world's eye sees it as a patch:
+      --  counted among the eyes it had to move, no group was ever a carrier where a fixed eye watched (the race's
+      --  base bodies, 10-23: their bases taken for arms, their head eyes for fixed ones, 22 of 22).
+      declare
+         Ridden_Eyes : Natural := 0;
+         Moves_Whole : array (M.Groups.First_Index .. M.Groups.Last_Index, M.Eyes.First_Index .. M.Eyes.Last_Index)
+           of Boolean := [others => [others => False]];
+      begin
+         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+            if Own (G) then
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-                  if Effect (M, G, E).Verdict = Whole then
-                     Whole_Eyes := Whole_Eyes + 1;
-                  end if;
-                  if Apart (E) then
-                     Apart_Eyes := Apart_Eyes + 1;
-                  end if;
+                  Moves_Whole (G, E) := Effect (M, G, E).Verdict = Whole;
                end loop;
-               --  Channels that move different eyes (two eyes at least that some channel moves and another decidedly does
-               --  not): an arm of the group for each such eye, however much of the view the group moves together.
-               if Apart_Eyes >= 2 then
-                  Gr.Roles.Replace_Element (G, Arm);
-                  for E in Apart'Range loop
+            end if;
+         end loop;
+         for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+            if (for some G in M.Groups.First_Index .. M.Groups.Last_Index => Moves_Whole (G, E)) then
+               Ridden_Eyes := Ridden_Eyes + 1;
+            end if;
+         end loop;
+         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+            if Own (G) then
+               declare
+                  Whole_Eyes : Natural := 0;
+                  Apart      : constant Eye_Flags := (if Informed (G) then Moved_Apart (G) else Remembered (G));
+                  Apart_Eyes : Natural := 0;
+               begin
+                  for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+                     if Effect (M, G, E).Verdict = Whole then
+                        Whole_Eyes := Whole_Eyes + 1;
+                     end if;
                      if Apart (E) then
-                        Gr.Arms.Append (G);
-                        Gr.Arm_Eye.Append (E);
-                        if Gr.Arm_Of (G) = 0 then
-                           Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
-                        end if;
+                        Apart_Eyes := Apart_Eyes + 1;
                      end if;
                   end loop;
-               --  Two eyes at least: with one, carrying it and carrying the
-               --  body look the same.
-               elsif Whole_Eyes = Eyes and then Eyes >= 2 then
-                  if Gr.Carrier = 0 then
-                     Gr.Carrier := G;
-                     Gr.Roles.Replace_Element (G, Carrier);
+                  --  Channels that move different eyes (two eyes at least that some channel moves and another decidedly does
+                  --  not): an arm of the group for each such eye, however much of the view the group moves together.
+                  if Apart_Eyes >= 2 then
+                     Gr.Roles.Replace_Element (G, Arm);
+                     for E in Apart'Range loop
+                        if Apart (E) then
+                           Gr.Arms.Append (G);
+                           Gr.Arm_Eye.Append (E);
+                           if Gr.Arm_Of (G) = 0 then
+                              Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
+                           end if;
+                        end if;
+                     end loop;
+                  --  Two eyes at least: with one, carrying it and carrying the
+                  --  body look the same. Every eye that rides on the body, and some other group moving some of them
+                  --  whole and not all: something that moves by itself rides on it. An arm that carries two eyes at its
+                  --  end moves them both, and no other group moves either.
+                  elsif Whole_Eyes = Ridden_Eyes and then Ridden_Eyes >= 2
+                    and then (for some H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                                H /= G
+                                and then (for some E in M.Eyes.First_Index .. M.Eyes.Last_Index => Moves_Whole (H, E))
+                                and then (for some E in M.Eyes.First_Index .. M.Eyes.Last_Index =>
+                                            Moves_Whole (G, E) and then not Moves_Whole (H, E)))
+                  then
+                     if Gr.Carrier = 0 then
+                        Gr.Carrier := G;
+                        Gr.Roles.Replace_Element (G, Carrier);
+                     end if;
+                  elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 or else Still_Ridden (G) then
+                     Gr.Arms.Append (G);
+                     Gr.Arm_Eye.Append (0);
+                     Gr.Roles.Replace_Element (G, Arm);
+                     Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
                   end if;
-               elsif Whole_Eyes > 0 or else Told_Eye (G) > 0 or else Still_Ridden (G) then
-                  Gr.Arms.Append (G);
-                  Gr.Arm_Eye.Append (0);
-                  Gr.Roles.Replace_Element (G, Arm);
-                  Gr.Arm_Of.Replace_Element (G, Gr.Arms.Last_Index);
-               end if;
-            end;
-         end if;
-      end loop;
+               end;
+            end if;
+         end loop;
+
+      end;
 
       --  Mounts: an eye rides on the arm whose keyframes tell its view moves
       --  with the arm (Told_Eye); else on the arm whose push moves the

@@ -2099,6 +2099,12 @@ procedure Measure (H : in out Hands; M : in out Model) is
    --  The hands to measure: every group the body takes for a closer, or whose closer an eye on its arm watches,
    --  and every hand already made (of a closer, or of an arm's tool, which has none), when the hands begin.
    Keys : Key_Lists.Vector;
+   --  The hands pressed at once, a lane for every group the presses move: the hands one arm presses (two closers of
+   --  one arm, or a closer and the arm's tool) share its lane and are pressed one after the other, as two lanes may not
+   --  move one group in a beat (b872 of the race, 10-23: "lane 2 targeted a group another lane targets in the same
+   --  beat", and the boot failed). A hand of no arm has a lane of its own.
+   package Lane_Lists is new Ada.Containers.Vectors (Positive, Key_Lists.Vector, Key_Lists."=");
+   Lanes : Lane_Lists.Vector;
    function Has_Key (G : Group_Id'Base; A : Arm_Id'Base) return Boolean is
      (for some K of Keys => K.Group = G and then (G > 0 or else K.Arm = A));
    procedure Read_Closers (O : Observation) is
@@ -2115,6 +2121,31 @@ procedure Measure (H : in out Hands; M : in out Model) is
             Keys.Append (Hand_Key'(Group => H.Data.Found (I).Group, Arm => H.Data.Found (I).Arm));
          end if;
       end loop;
+      Lanes.Clear;
+      for K of Keys loop
+         declare
+            Moves : constant Group_Id'Base :=
+              (if K.Arm > 0 and then Natural (K.Arm) <= Arm_Count (M) then Arm_Group (M, K.Arm) else 0);
+            Into  : Natural := 0;
+         begin
+            for L in Lanes.First_Index .. Lanes.Last_Index loop
+               declare
+                  First : constant Hand_Key := Lanes (L).First_Element;
+               begin
+                  if Moves > 0 and then First.Arm > 0 and then Natural (First.Arm) <= Arm_Count (M)
+                    and then Arm_Group (M, First.Arm) = Moves
+                  then
+                     Into := L;
+                  end if;
+               end;
+            end loop;
+            if Into = 0 then
+               Lanes.Append (Key_Lists.To_Vector (K, 1));
+            else
+               Lanes.Reference (Into).Append (K);
+            end if;
+         end;
+      end loop;
    end Read_Closers;
 
    function Image (K : Hand_Key) return String is
@@ -2122,7 +2153,9 @@ procedure Measure (H : in out Hands; M : in out Model) is
 
    procedure Hand_Lane (Lane : Positive) is
    begin
-      One_Hand (Keys (Lane), Press_Part);
+      for K of Lanes (Lane) loop
+         One_Hand (K, Press_Part);
+      end loop;
    end Hand_Lane;
 
    procedure Hands_At_Once is new Driver.Beats.At_Once (Hand_Lane);
@@ -2138,14 +2171,16 @@ begin
       for K of Keys loop
          One_Hand (K, Sweep_Part);
       end loop;
-      if Natural (Keys.Length) = 1 then
-         One_Hand (Keys.First_Element, Press_Part);
+      if Natural (Lanes.Length) = 1 then
+         Hand_Lane (1);
       else
-         for K of Keys loop
-            Driver.Log.Line (Driver.Log.Robot, "hand: " & Image (K) & " is pressed with the"
-                             & Natural'Image (Natural (Keys.Length)) & " hands at once");
+         for L in Lanes.First_Index .. Lanes.Last_Index loop
+            for K of Lanes (L) loop
+               Driver.Log.Line (Driver.Log.Robot, "hand: " & Image (K) & " is pressed in lane" & L'Image & " of"
+                                & Natural'Image (Natural (Lanes.Length)) & " pressed at once");
+            end loop;
          end loop;
-         Hands_At_Once (Positive (Keys.Length));
+         Hands_At_Once (Positive (Lanes.Length));
       end if;
    end if;
    Hold_Beat (Read_Description'Access);

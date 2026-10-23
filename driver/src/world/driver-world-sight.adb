@@ -1,3 +1,4 @@
+with Ada.Unchecked_Deallocation;
 with Driver.Alignment;
 with Driver.Images;
 
@@ -121,11 +122,21 @@ package body Driver.World.Sight is
         (if Lens = 1 then Now_Cam
          else Camera_Of (B.Kept (Used (Lens - 1)).Eye, B.Kept (Used (Lens - 1)).Seen.Constant_Reference.Element));
 
-      function Lens_Ray (Lens : Positive; U, V : Real) return Vec3 is (Camera_Of_Lens (Lens).Ray_In_Eye (U, V));
+      --  Every lens's camera, made once before the points are placed: the surfaces ask a ray or a projection of a
+      --  lens for every step of every search, from as many tasks at once as the pool has, and a camera made at each
+      --  ask looked its view up in the bank's holder, whose count of readers is no atomic one (Indefinite_Holders:
+      --  "Busy := Busy + 1"); asked side by side, the count was lost and a finalization raised (bd42, 10-23, the
+      --  scene's queries along the grid's diagonals: "finalize/adjust raised exception" with eight workers, none
+      --  with none).
+      type Camera_Access is access Driver.World.Cameras.Camera'Class;
+      procedure Free is new Ada.Unchecked_Deallocation (Driver.World.Cameras.Camera'Class, Camera_Access);
+      Cams : array (1 .. Natural (B.Kept.Length) + 1) of Camera_Access := [others => null];
+
+      function Lens_Ray (Lens : Positive; U, V : Real) return Vec3 is (Cams (Lens).Ray_In_Eye (U, V));
 
       procedure Lens_Project (Lens : Positive; P : Vec3; U, V : out Real; In_Front : out Boolean) is
       begin
-         Camera_Of_Lens (Lens).Project_In_Eye (P, U, V, In_Front);
+         Cams (Lens).Project_In_Eye (P, U, V, In_Front);
       end Lens_Project;
    begin
       for R of Result loop
@@ -166,11 +177,17 @@ package body Driver.World.Sight is
                                  Same_Eye => V.Eye = E);
             end;
          end loop;
+         for Lens in 1 .. Count + 1 loop
+            Cams (Lens) := new Driver.World.Cameras.Camera'Class'(Camera_Of_Lens (Lens));
+         end loop;
          Driver.Robot.Surfaces.Place
            ((Pose => Now_Pose.Pose, Picture => Driver.Alignment.Pyramid_Of (O.Images (E)), Lens => 1,
              Noise => Now_Cam.Noise, Same_Eye => False),
             Elsewhere, Queries, Columns, Table, Lens_Ray'Unrestricted_Access, Lens_Project'Unrestricted_Access, Result,
             Counts);
+         for C of Cams loop
+            Free (C);
+         end loop;
       end;
    end Place;
 
