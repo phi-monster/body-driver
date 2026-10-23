@@ -11,8 +11,10 @@
 # DIR/truth.json each group's role and each camera's mount, for the scorer; the driver sees neither.
 #
 # A beat is BEAT seconds of the world (0.1 unless given); the robot's own loops (a torque-motored joint's position
-# loop, a wheeled base's and a drone's velocity loops) run at the model's step inside it. RATE gives beats a second of
-# the wall (0: as fast as the driver answers). The run ends after BEATS beats or when the STOP file exists.
+# loop, a wheeled base's and a drone's velocity loops, a legged robot's walking program: legged.py) run at the model's
+# step inside it. A legged robot is booted standing on its walking program, settled before the driver's first beat.
+# RATE gives beats a second of the wall (0: as fast as the driver answers). The run ends after BEATS beats or when the
+# STOP file exists.
 import argparse
 import collections
 import io
@@ -31,6 +33,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bodies
+import legged
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--connect", required=True)
@@ -63,6 +66,9 @@ if built["fix"]:
             spec.delete(j)
 m = spec.compile()
 d = mujoco.MjData(m)
+walker = legged.firmware(m, d, built["walker"]) if built.get("walker") else None
+if walker:
+    walker.pose(built["walker"]["height"])
 if built["key"]:
     mujoco.mj_resetDataKeyframe(m, d, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_KEY, built["key"]))
 for name, value in (built.get("init") or {}).items():   # the pose such a robot is booted in
@@ -73,13 +79,14 @@ substeps = max(1, int(round(args.beat / m.opt.timestep)))
 groups = built["groups"]
 for g in groups:
     g["ids"] = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, a) for a in g["actuators"]]
-    if min(g["ids"]) < 0:
+    if g["ids"] and min(g["ids"]) < 0:
         raise SystemExit("robot: %s has no actuator among %s" % (args.kind, g["actuators"]))
-    if g["kind"] == "pd":
+    g["n"] = len(g["ids"]) if g["ids"] else g["channels"]   # a walking program's speeds are no actuator's
+    if g["kind"] in ("pd", "sensor"):
         g["qadr"] = [m.jnt_qposadr[m.actuator_trnid[i, 0]] for i in g["ids"]]
         g["vadr"] = [m.jnt_dofadr[m.actuator_trnid[i, 0]] for i in g["ids"]]
     g["hinge"] = [m.actuator_trntype[i] == mujoco.mjtTrn.mjTRN_JOINT
-                  and m.jnt_type[m.actuator_trnid[i, 0]] == mujoco.mjtJoint.mjJNT_HINGE for i in g["ids"]]
+                  and m.jnt_type[m.actuator_trnid[i, 0]] == mujoco.mjtJoint.mjJNT_HINGE for i in g["ids"]] or [False] * g["n"]
 
 # Each sensor as the real one is (bodies.SENSORS): drawn once from the seed in a stream of its own, and the noise of every
 # beat from another, so the robot, its cameras and its scramble are the same robot whatever its sensors drew.
@@ -88,7 +95,7 @@ noise_rng = np.random.default_rng([args.seed, 11])
 for g in groups:
     s = g["sensor"]
     steps = []
-    for k, i in enumerate(g["ids"]):
+    for k in range(g["n"]):
         if "step" in s:
             steps.append(s["step"])                                     # read in its command's own units
         elif "estimate" in s:
@@ -100,7 +107,7 @@ for g in groups:
         else:
             steps.append(s.get("slide_step", 1.0e-5))                   # a slide's or a tendon's meters a count
     g["steps"] = np.array(steps)
-    g["wander"] = np.zeros(len(g["ids"]))
+    g["wander"] = np.zeros(g["n"])
 
 
 def true_reading(g):
@@ -115,8 +122,10 @@ def true_reading(g):
             # damper) runs at the velocity its damper would hold it at.
             out.append(-(b0 + b1 * d.actuator_length[i]) / g0 if b1 != 0.0 else -(b0 + b2 * d.actuator_velocity[i]) / g0)
         return np.array(out)
-    if g["kind"] == "pd":
+    if g["kind"] in ("pd", "sensor"):
         return np.array([d.qpos[a] for a in g["qadr"]])
+    if g["kind"] == "walk":
+        return walker.odometry()
     if g["kind"] == "velocity":
         return np.array([d.actuator_velocity[i] for i in g["ids"]])
     if g["kind"] == "flight":
@@ -131,7 +140,8 @@ def sensed_reading(g):
     s = g["sensor"]
     if "estimate" in s:
         a = math.exp(-args.beat / s["estimate_time"])
-        g["wander"] = a * g["wander"] + math.sqrt(1.0 - a * a) * s["estimate"] * noise_rng.standard_normal(x.size)
+        g["wander"] = (a * g["wander"] + math.sqrt(1.0 - a * a) * np.asarray(s["estimate"], float)
+                       * noise_rng.standard_normal(x.size))
         return x + g["wander"]
     st = g["steps"]
     return np.round((x + s["jitter"] * st * noise_rng.standard_normal(x.size)) / st) * st
@@ -208,8 +218,8 @@ def flight_control(ref):
 
 for g in groups:
     g["ref"] = true_reading(g).astype(float)   # every group holds where it stands until it is sent elsewhere
-    if g["kind"] == "flight":
-        g["ref"] = np.zeros(4)
+    if g["kind"] in ("flight", "walk"):
+        g["ref"] = np.zeros(g["n"])           # no speed asked
 
 
 def control():
@@ -219,8 +229,9 @@ def control():
             for k, i in enumerate(g["ids"]):
                 d.ctrl[i] = g["ref"][k]
         elif g["kind"] == "pd":
+            kp, kd = np.broadcast_to(g["kp"], g["n"]), np.broadcast_to(g["kd"], g["n"])   # one gain, or one a joint
             for k, i in enumerate(g["ids"]):
-                u = g["kp"] * (g["ref"][k] - d.qpos[g["qadr"][k]]) - g["kd"] * d.qvel[g["vadr"][k]]
+                u = kp[k] * (g["ref"][k] - d.qpos[g["qadr"][k]]) - kd[k] * d.qvel[g["vadr"][k]]
                 d.ctrl[i] = min(max(u, m.actuator_ctrlrange[i, 0]), m.actuator_ctrlrange[i, 1])
         elif g["kind"] == "velocity":
             for k, i in enumerate(g["ids"]):
@@ -228,6 +239,38 @@ def control():
                 d.ctrl[i] = min(max(u, m.actuator_ctrlrange[i, 0]), m.actuator_ctrlrange[i, 1])
         elif g["kind"] == "flight":
             flight_control(g["ref"])
+        elif g["kind"] == "walk":
+            walker.speed = g["ref"]
+    if walker:
+        walker.control()
+
+
+if walker:
+    # Booted standing: the walking program holds it up, nothing asked, every other joint held where it was booted, until
+    # its body stands still: over a whole beat its root moved and turned less than its own odometry could tell (its
+    # errors over a beat), before the driver's first beat. Over a beat, not at an instant: the walking program corrects
+    # fifty times a second, and against its instantaneous turn rate the G1 took 195 s of the world to count as still
+    # (10-23). A robot that cannot stand is no robot to test a driver on.
+    odometer = next(g for g in groups if g["kind"] == "walk")["sensor"]
+    t_settle = 0.0
+    while True:
+        at = d.qpos[walker.root_q: walker.root_q + 3].copy()
+        facing = d.qpos[walker.root_q + 3: walker.root_q + 7].copy()
+        for _ in range(substeps):
+            control()
+            mujoco.mj_step(m, d)
+            t_settle += m.opt.timestep
+            if walker.fallen() or t_settle > 600.0:
+                raise SystemExit("robot: %s did not stand on its walking program (%.1f s, leaning %.1f deg)"
+                                 % (args.kind, t_settle, math.degrees(walker.lean())))
+        back, turned = np.zeros(4), np.zeros(4)
+        mujoco.mju_negQuat(back, facing)
+        mujoco.mju_mulQuat(turned, d.qpos[walker.root_q + 3: walker.root_q + 7], back)
+        moved = np.linalg.norm(d.qpos[walker.root_q: walker.root_q + 2] - at[:2]) / args.beat
+        turn = 2.0 * math.acos(min(1.0, abs(turned[0]))) / args.beat
+        if moved < min(odometer["estimate"][:2]) and turn < odometer["estimate"][2]:
+            break
+    print("robot: %s stands on its walking program after %.2f s of the world" % (args.kind, t_settle), flush=True)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -401,7 +444,8 @@ def call(func, beat, obs=None):
 
 def observation():
     state = {g["name"]: to_wire_units(g, sensed_reading(g)) for g in groups}
-    echo = {g["name"]: to_wire_units(g, g["ref"]) for g in groups}
+    # A group read but never commanded (a legged robot's legs under its walking program) echoes no command.
+    echo = {g["name"]: to_wire_units(g, g["ref"]) for g in groups if g["kind"] != "sensor"}
     return {"vision": pictures(), "state": state, "action": echo, "data_format_version": "v1.0",
             "additional_info": {"frequency": float(1.0 / args.beat), "env_idx": 0}, "instruction": args.instruction}
 
@@ -412,13 +456,13 @@ def take_action(reply):
         return
     for k, v in result[0].items():
         key = back.get(k)
-        target = next((g for g in groups if g["name"] == key), None)
+        target = next((g for g in groups if g["name"] == key and g["kind"] != "sensor"), None)
         if target is None or key not in draws:
             continue
         if isinstance(v, dict) and v.get("nd"):
             v = np.frombuffer(v["data"], dtype=np.dtype(v["type"])).reshape(v["shape"])
         y = unscramble_group(key, v)
-        if y.size == len(target["ids"]):
+        if y.size == target["n"]:
             target["ref"] = from_wire_units(target, y)
 
 
@@ -428,6 +472,7 @@ print("robot: %s seed %d, %d groups, %d cameras of %d x %d, a beat %.3f s of %d 
       % (args.kind, args.seed, len(groups), len(cameras), args.width, args.height, args.beat, substeps), flush=True)
 
 beat, t_step, t_render, t_wire = 0, 0.0, 0.0, 0.0
+fell = [0]
 next_at = time.time()
 while True:
     beat += 1
@@ -449,7 +494,7 @@ while True:
             json.dump({"seed": args.seed, "names": names, "groups": draws}, f)
         with open(os.path.join(args.out, "truth.json"), "w") as f:
             json.dump({"kind": args.kind, "seed": args.seed,
-                       "groups": [{"name": g["name"], "role": g["role"], "channels": len(g["ids"]),
+                       "groups": [{"name": g["name"], "role": g["role"], "channels": g["n"],
                                    "wire": names[g["name"]], "actuators": g["actuators"], "sensor": g["sensor"],
                                    "steps": g["steps"].tolist()} for g in groups]
                        + [{"name": n, "role": "INERT", "channels": 1, "wire": names[n], "actuators": []}
@@ -473,6 +518,10 @@ while True:
         print("robot: beat %d, a beat takes the world %.2f ms (the pictures' %.2f), the readings %.2f ms, the scramble and "
               "the driver %.2f ms%s" % (beat, 1000 * t_step / beat, 1000 * t_capture[0] / beat, 1000 * t_render / beat,
                                        1000 * t_wire / beat, root), flush=True)
+    if walker and walker.fallen() and not fell[0]:
+        fell[0] = beat
+        print("robot: FELL at beat %d, leaning %.1f deg (its training's fell_over: %.1f)"
+              % (beat, math.degrees(walker.lean()), math.degrees(legged.FELL)), flush=True)
     if beat >= args.beats or (args.stop and os.path.exists(args.stop)):
         break
     if args.rate > 0:

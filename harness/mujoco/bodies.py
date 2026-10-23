@@ -95,16 +95,22 @@ def room(spec):
             g.material = "bd_grid"
 
 
-def props(spec, rng, center, size, count):
-    """Boxes of drawn colours and sizes on the floor around the robot: things for its cameras to see move."""
+def props(spec, rng, center, size, count, clear=None):
+    """Boxes of drawn colours and sizes on the floor around the robot: things for its cameras to see move. CLEAR, a
+    place on the floor and a radius, is where a robot stands on its own feet: no box is drawn within it."""
     c = np.asarray(center, float)
-    for i in range(count):
+    i = 0
+    while i < count:
         r = size * rng.uniform(0.35, 1.0)
         a = rng.uniform(-math.pi, math.pi)
         s = size * rng.uniform(0.03, 0.09)
-        b = spec.worldbody.add_body(name="prop%d" % i, pos=[float(c[0] + r * math.cos(a)), float(c[1] + r * math.sin(a)), float(s)])
+        x, y = float(c[0] + r * math.cos(a)), float(c[1] + r * math.sin(a))
+        if clear is not None and math.hypot(x - clear[0][0], y - clear[0][1]) < clear[1] + 1.5 * s:
+            continue
+        b = spec.worldbody.add_body(name="prop%d" % i, pos=[x, y, float(s)])
         b.add_geom(type=mujoco.mjtGeom.mjGEOM_BOX, size=[float(s), float(s * rng.uniform(0.5, 1.5)), float(s)],
                    rgba=[float(x) for x in list(rng.uniform(0.05, 0.95, 3)) + [1.0]])
+        i += 1
     lights(spec, rng)
 
 
@@ -196,28 +202,85 @@ def kind_x2(rng):
     return {"spec": spec, "groups": groups, "cameras": cams, "key": "hover", "fix": None}
 
 
+TRAINED = "/root/mj"   # where export_trained.py wrote the robots of Unitree's walking tasks
+FIRMWARE = "/root/mj/firmware"   # where deploy_params.py wrote the walking programs trained here
+
+
+def trained_scene(name):
+    """A robot of Unitree's walking tasks as its training built it (export_trained.py), and the height its training
+    starts it at (its init_state's root). Its keyframes go: the hall gives the pose (legged.py). MuJoCo's no-slip solver
+    runs after the main one: the training's soft friction let the G1's feet creep while it stood, 30 deg of turn in two
+    minutes with no foot lifted; with ten no-slip iterations it held within 0.1 deg and walked as before (the G1 of
+    Unitree's G1 task, 10-23)."""
+    spec = mujoco.MjSpec.from_file(TRAINED + "/" + name + "/scene.xml")
+    key = next(k for k in spec.keys if k.name == "init_state")
+    height = float(key.qpos[2])
+    for k in list(spec.keys):
+        spec.delete(k)
+    spec.option.noslip_iterations = 10
+    room(spec)   # its training's scene has a floor but no sky: the hall's, as every robot's
+    return spec, height
+
+
+NVIDIA_WBC = "/root/mj/GR00T-WholeBodyControl/decoupled_wbc/sim2mujoco/resources/robots/g1"
+# NVIDIA's real-G1 deployment of its controller (decoupled_wbc/control/main/teleop/configs/g1_gear_wbc.yaml): the arms'
+# position gains, shoulder to wrist.
+G1_ARM_KP = [100.0, 100.0, 40.0, 40.0, 20.0, 20.0, 20.0]
+G1_ARM_KD = [5.0, 5.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+
+
 def kind_g1(rng):
+    """Unitree's G1 (29 joints, Dex3-1 hands) on NVIDIA's decoupled whole-body controller (legged.GearWbc: the
+    controller under NVIDIA's GR00T N1.5 and N1.6 on the real G1, its two policies released), which keeps it standing
+    and walking while its arms are someone else's: the driver is given the walking as the speeds asked of it (forward,
+    left, turning) and read back as its odometry gives them (rt/odommodestate), the arms through position loops at the
+    gains of NVIDIA's real-robot deployment, the hands at those of Unitree's Dex3 example (kp 1.5, kd 0.1), the legs' and
+    the waist's joints read but not commanded (the controller's). The body is the Menagerie's G1 with hands, the one
+    NVIDIA's controller model weighs as (34.394 kg), its joints' armature, damping and friction as NVIDIA's models give
+    them (g1_gear_wbc.xml for the body, its 43-joint model for the hands), every joint a torque motor at its maker's
+    limit, the controller's step (0.005 s, Euler) and its first pose (every joint at zero, the pelvis at 0.793 m). The
+    head camera where the robot's D435 sits (Unitree's URDF: on the torso, 0.0576 0.0175 0.4199 m, pitched 0.8308 rad
+    down), a camera on each wrist."""
     spec = mujoco.MjSpec.from_file(MENAGERIE + "/unitree_g1/scene_with_hands.xml")
-    center, size = [0.0, 0.0, 0.8], 1.4
+    for k in list(spec.keys):
+        spec.delete(k)
+    spec.option.timestep = 0.005
+    spec.option.integrator = mujoco.mjtIntegrator.mjINT_EULER
+    for a in list(spec.actuators):
+        spec.delete(a)
+    for j in spec.joints:
+        if j.type != mujoco.mjtJoint.mjJNT_HINGE:
+            continue
+        hand = "_hand_" in j.name
+        j.armature, j.frictionloss = 0.01, 0.1
+        j.damping = [0.05 if hand else 0.001, 0.0, 0.0]
+        a = spec.add_actuator(name=j.name, target=j.name, trntype=mujoco.mjtTrn.mjTRN_JOINT)
+        a.gainprm[0] = 1.0
+        a.ctrllimited, a.ctrlrange = True, [float(j.actfrcrange[0]), float(j.actfrcrange[1])]
     leg = ["hip_pitch", "hip_roll", "hip_yaw", "knee", "ankle_pitch", "ankle_roll"]
     arm = ["shoulder_pitch", "shoulder_roll", "shoulder_yaw", "elbow", "wrist_roll", "wrist_pitch", "wrist_yaw"]
     hand = ["thumb_0", "thumb_1", "thumb_2", "middle_0", "middle_1", "index_0", "index_1"]
-    groups = [servo("leg_left", "PART", ["left_%s_joint" % j for j in leg]),
-              servo("leg_right", "PART", ["right_%s_joint" % j for j in leg]),
-              servo("waist", "ARM", ["waist_%s_joint" % j for j in ("yaw", "roll", "pitch")]),
-              servo("arm1_joints", "ARM", ["left_%s_joint" % j for j in arm]),
-              servo("arm1_closer", "CLOSER", ["left_hand_%s_joint" % j for j in hand]),
-              servo("arm2_joints", "ARM", ["right_%s_joint" % j for j in arm]),
-              servo("arm2_closer", "CLOSER", ["right_hand_%s_joint" % j for j in hand])]
-    cams = [body_camera(spec, "torso_link", "head_cam", [0.06, 0.0, 0.42], [1.0, 0.0, -0.5], [0.0, 0.0, 1.0], rng,
-                        "ARM_CARRIED", "waist"),
+    groups = [{"name": "legs", "role": "SENSOR", "kind": "sensor", "ticks": None,
+               "actuators": ["%s_%s_joint" % (s, j) for s in ("left", "right") for j in leg]},
+              {"name": "waist", "role": "SENSOR", "kind": "sensor", "ticks": None,
+               "actuators": ["waist_%s_joint" % j for j in ("yaw", "roll", "pitch")]},
+              {"name": "walk", "role": "CARRIER", "kind": "walk", "ticks": None, "actuators": [], "channels": 3},
+              pd("arm1_joints", "ARM", ["left_%s_joint" % j for j in arm], G1_ARM_KP, G1_ARM_KD),
+              pd("arm1_closer", "CLOSER", ["left_hand_%s_joint" % j for j in hand], 1.5, 0.1),
+              pd("arm2_joints", "ARM", ["right_%s_joint" % j for j in arm], G1_ARM_KP, G1_ARM_KD),
+              pd("arm2_closer", "CLOSER", ["right_hand_%s_joint" % j for j in hand], 1.5, 0.1)]
+    tilt = 0.8307767239493009
+    cams = [body_camera(spec, "torso_link", "head_cam", [0.0576235, 0.01753, 0.41987],
+                        [math.cos(tilt), 0.0, -math.sin(tilt)], [math.sin(tilt), 0.0, math.cos(tilt)], rng,
+                        "CARRIER_CARRIED", "walk"),
             body_camera(spec, "left_wrist_yaw_link", "arm1_wrist", [0.0, 0.04, 0.04], [1.0, -0.2, -0.3], [0.0, 0.0, 1.0],
                         rng, "ARM_CARRIED", "arm1_joints"),
             body_camera(spec, "right_wrist_yaw_link", "arm2_wrist", [0.0, -0.04, 0.04], [1.0, 0.2, -0.3], [0.0, 0.0, 1.0],
                         rng, "ARM_CARRIED", "arm2_joints")]
-    props(spec, rng, [0.5, 0.0, 0.0], size, 10)
-    # On a stand: the pelvis held where it stands (no free joint), as a humanoid is first booted in a lab.
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": "pelvis"}
+    props(spec, rng, [0.5, 0.0, 0.0], 1.4, 10, clear=((0.0, 0.0), 0.5))
+    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+            "walker": {"kind": "gear_wbc", "dir": NVIDIA_WBC, "prefix": "", "root": "pelvis", "imu": "imu_in_pelvis",
+                       "height": float(find_body(spec, "pelvis").pos[2])}}
 
 
 def kind_rby1(rng):
@@ -271,15 +334,23 @@ def kind_shadow(rng):
 
 
 def kind_go2(rng):
-    spec = mujoco.MjSpec.from_file(MENAGERIE + "/unitree_go2/scene.xml")
-    center, size = [0.0, 0.0, 0.3], 1.0
-    # Stance gains that hold its weight (at 40 and 1 it sank 5 cm in two seconds and never stopped creeping; at 150 and 8
-    # it settles within the minute, 10-23).
-    groups = [pd("leg_" + l, "CARRIER", [l + "_hip", l + "_thigh", l + "_calf"], 150.0, 8.0) for l in ("FL", "FR", "RL", "RR")]
-    cams = [body_camera(spec, "base", "head_cam", [0.4, 0.0, 0.06], [1.0, 0.0, -0.25], [0.0, 0.0, 1.0], rng,
-                        "CARRIER_CARRIED", "leg_FL")]
-    props(spec, rng, center, size, 10)
-    return {"spec": spec, "groups": groups, "cameras": cams, "key": "home", "fix": None}
+    """Unitree's Go2 as its maker ships it to walk: its twelve joints run by a walking program trained with Unitree's own
+    recipe (unitree_rl_mjlab's Unitree-Go2-Flat: Unitree published the recipe, not the trained program), read but not
+    commanded; the walking the speeds asked of it (forward, left, turning), read back as its sport-mode state gives them
+    (rt/sportmodestate: the velocity in the odometry's frame, and the turn rate). The body is the one the program was
+    trained on (export_trained.py); its front camera on the face of its head (Unitree's URDF: the head 0.285 m ahead of
+    the base's origin and 0.01 m up, a cylinder of 0.05 m radius), looking ahead."""
+    spec, height = trained_scene("go2_trained")
+    leg = ["hip", "thigh", "calf"]
+    groups = [{"name": "legs", "role": "SENSOR", "kind": "sensor", "ticks": None,
+               "actuators": ["robot/%s_%s_joint" % (l, j) for l in ("FL", "FR", "RL", "RR") for j in leg]},
+              {"name": "walk", "role": "CARRIER", "kind": "walk", "ticks": None, "actuators": [], "channels": 3}]
+    cams = [body_camera(spec, "robot/base_link", "head_cam", [0.335, 0.0, 0.01], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], rng,
+                        "CARRIER_CARRIED", "walk")]
+    props(spec, rng, [0.0, 0.0, 0.0], 1.0, 10, clear=((0.0, 0.0), 0.45))
+    return {"spec": spec, "groups": groups, "cameras": cams, "key": None, "fix": None,
+            "walker": {"policy": FIRMWARE + "/go2", "prefix": "robot/", "root": "robot/base_link", "imu": "robot/imu",
+                       "hide": "none", "height": height}}
 
 
 KINDS = {"panda": kind_panda, "ur5e": kind_ur5e, "so101": kind_so101, "aloha": kind_aloha, "stretch": kind_stretch,
@@ -314,6 +385,12 @@ CAMERA_CLASSES = {
 # Hello Robot's lift and telescope, the wheels): drawn over the range of such encoders. Shadow's hand reads its joints by
 # Hall effect sensors, known for a jitter of several counts.
 JITTER = (0.2, 0.6)
+# A legged robot's odometry (its own estimate of how fast it goes, from its IMU and its legs' joints): unpublished by
+# Unitree; the base-velocity errors of legged state estimators are a few to ten centimeters a second (an invariant EKF
+# on a quadruped: about 0.07 m/s RMS, arXiv 2104.04238), wandering over a fraction of a second as a filter's do. Its turn
+# rate is the IMU's gyro: MEMS gyros of such robots are a few thousandths of a radian a second over a beat's bandwidth
+# (Bosch BMI088: 0.014 deg/s/sqrt(Hz), TDK ICM-42688: 0.0028).
+ODOMETRY = {"speeds": (0.03, 0.10), "turn": (0.002, 0.01)}
 SENSORS = {
     "panda": {"cameras": {"arm1_wrist": "depth_rgb", "base_cam": "webcam"},
               "groups": {"arm1_joints": {"bits": (14, 14)}, "arm1_closer": {"step": 0.5}}},
@@ -331,10 +408,9 @@ SENSORS = {
     "x2": {"cameras": {"body_cam": "stream"},
            "groups": {"motors": {"estimate": (0.01, 0.05)}}},
     "go2": {"cameras": {"head_cam": "stream"},
-            "groups": {"leg_FL": {"bits": (14, 16)}, "leg_FR": {"bits": (14, 16)}, "leg_RL": {"bits": (14, 16)},
-                       "leg_RR": {"bits": (14, 16)}}},
+            "groups": {"legs": {"bits": (14, 16)}, "walk": {"estimate": ODOMETRY}}},
     "g1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam"},
-           "groups": {"leg_left": {"bits": (14, 18)}, "leg_right": {"bits": (14, 18)}, "waist": {"bits": (14, 18)},
+           "groups": {"legs": {"bits": (14, 18)}, "waist": {"bits": (14, 18)}, "walk": {"estimate": ODOMETRY},
                       "arm1_joints": {"bits": (14, 18)}, "arm2_joints": {"bits": (14, 18)},
                       "arm1_closer": {"bits": (12, 14)}, "arm2_closer": {"bits": (12, 14)}}},
     "rby1": {"cameras": {"head_cam": "depth_rgb", "arm1_wrist": "webcam", "arm2_wrist": "webcam"},
@@ -368,7 +444,11 @@ def draw_sensors(kind, built, rng):
             s["step"] = float(spec["step"])
         if spec.get("velocity"):
             s["velocity"] = True
-        if "estimate" in spec:
+        if "estimate" in spec and isinstance(spec["estimate"], dict):
+            # An odometry: its speeds' error and its turn rate's, drawn apart.
+            s["estimate"] = [float(rng.uniform(*spec["estimate"]["speeds"]))] * 2 + [float(rng.uniform(*spec["estimate"]["turn"]))]
+            s["estimate_time"] = float(rng.uniform(0.2, 1.0))
+        elif "estimate" in spec:
             s["estimate"] = float(rng.uniform(*spec["estimate"]))
             # A flight controller's estimate (a filter over its IMU and its camera or GPS) errs by much the same over a
             # fraction of a second, not afresh every beat.
