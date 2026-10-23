@@ -1302,7 +1302,6 @@ driver-robot-flows.adb	or else Natural (R.Covariance.Length) /= Terms ** 2 or el
 driver-robot-flows.adb	while Turn > 0.0 and then 2.0 * Turn <= Range_Seen loop	2.0	math	a turn either way spans twice the turn, inside the range seen
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 1);	1	structure	clause 1 of the porting contract (docs/body-protocol.md, 3): the reading does not follow the command
 driver-robot-graph.adb	Gr.Breach.Replace_Element (G, 2);	2	structure	clause 2 of the porting contract (docs/body-protocol.md, 3): nothing any eye sees changes when it moves
-driver-robot-graph.adb	elsif Whole_Eyes = Ridden_Eyes and then Ridden_Eyes >= 2	2	structure	with a single eye, carrying the whole body and carrying that eye cannot be told apart
 driver-robot-graph.adb	if Apart_Eyes >= 2 then	2	structure	two eyes that different channels move are two arms; one such eye is one
 driver-robot-graph.adb	return (if Natural (Sets.Length) >= 2 then Result else [others => False]);	2	structure	one set of channels makes one arm: two different sets tell one body from two
 driver-robot-hand-aims.adb	(if Size > Real'Model_Epsilon then Exp (Arctan (Size, Now * Goal) * ((1.0 / Size) * Axis))	1.0	math	a vector over its length is its unit vector
@@ -3697,6 +3696,7 @@ driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Faile
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-motion.adb	(Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2	2	statistics	a drift lasts when two drifting beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	(Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	(Wire, Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
 driver-robot-motion.adb	(if Noise < Real'Last then Turn + Driver.Conventions.Z * Sqrt (2.0) * Noise else Turn);	2.0	math	the difference of two readings has twice the variance of one
@@ -3745,6 +3745,9 @@ driver-robot-motion.adb	Sign : constant Real := (if Direction > 0.0 then 1.0 els
 driver-robot-motion.adb	Signs : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];	1.0	math	the two directions of a push
 driver-robot-motion.adb	Signs : constant array (Sense) of Real := [Increasing => 1.0, Decreasing => -1.0];	1.0	math	the two directions of a push
 driver-robot-motion.adb	Start : Real_Array (1 .. 1);	1	structure	one channel
+driver-robot-motion.adb	Stood_Since : Integer := -1;	1	format	a negative beat marks a wait whose readings do not all stand
+driver-robot-motion.adb	Stood_Since := -1;	1	format	a negative beat marks a wait whose readings do not all stand
+driver-robot-motion.adb	Stood_Since := -1;	1	format	a negative beat marks a wait whose readings do not all stand
 driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Step);	1	structure	no step before the first: told from its second beat
 driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Step);	2	structure	a push's wait twice the longest before it is told
 driver-robot-motion.adb	Tell_At : Positive := 2 * Natural'Max (1, Longest_Wait);	1	structure	no wait before the first: told from its second beat
@@ -3764,6 +3767,7 @@ driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is cert
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
 driver-robot-motion.adb	if Known (D) and then D.Value > 0.0 and then D.Value < 1.0	1.0	structure	a share below one: the group delivered less than it was asked; one or more is asked as it is
+driver-robot-motion.adb	or else (Anchored and then Driver.Robot.Stillness.Eye_Away_Run (M, E) >= 2));	2	statistics	a drift away from the anchor lasts when two beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);	2.0	math	the landing and the reference it is counted from, each within the dead band of where it was sent
 driver-robot-motion.adb	then "" & Driver.Log.Image (E.Delivered.Value, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	then Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Channels.Noise (M, G, I + 1),	2.0	statistics	the difference of two readings of a channel has the root of two of its noise

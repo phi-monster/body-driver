@@ -25,7 +25,14 @@ package body Driver.Robot.Motion is
    --  (h406 on the big machine, 10-22: from beat 20461 to an estimate at 43146, and from 46635 to the run's end).
    Longest_Wait : Natural := 0;
 
-   procedure Settle (M : in out Model; Beats_Waited : out Natural) is
+   procedure Settle_Body
+     (M            : in out Model;
+      Back         : Driver.Commands.Command;
+      Use_Back     : Boolean;
+      Beats_Waited : out Natural;
+      Kept_Going   : out Boolean;
+      Kept_Eyes    : out Channel_Flags)
+   is
       B : Driver.Clock.Beat;
       --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
       --  picture had not settled (R5 on the Pi, 10-13: the rounds' settling between pushes grew to 24 s a push).
@@ -156,6 +163,21 @@ package body Driver.Robot.Motion is
       Ended_There : array (1 .. Groups) of Boolean := [others => False];   --  the group ended the wait going nowhere
       Tell_At     : Positive := 2 * Natural'Max (1, Longest_Wait);   --  the wait's length at which it is told next
 
+      --  A push that keeps the body going (Use_Back): the beat of the wait the readings last began to stand at, the
+      --  slowest eye's lag (a picture that trails its readings has not drifted on before it has passed), whether
+      --  Back was sent, and whether some eye drifted on once the readings stood after it.
+      Stood_Since   : Integer := -1;
+      Lag           : Natural := 0;
+      Sent_Back     : Boolean := False;
+      Drifted_After : Boolean := False;
+      Anchored      : Boolean := False;   --  every eye's anchor was taken as the readings stood (Stillness.Set_Anchor)
+
+      --  The eye's picture drifts: beat on beat (Stillness.Eye_Drift_Run), or away from its anchor (Eye_Away_Run), two
+      --  beats running, the least that tells a lasting drift from one beat's.
+      function Drifted (E : Eye_Id) return Boolean is
+        (Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2
+         or else (Anchored and then Driver.Robot.Stillness.Eye_Away_Run (M, E) >= 2));
+
       procedure Tell is
          Text : Unbounded_String;
       begin
@@ -174,6 +196,11 @@ package body Driver.Robot.Motion is
       end Tell;
    begin
       Beats_Waited := 0;
+      Kept_Going := False;
+      Kept_Eyes := [others => False];
+      for E in 1 .. Eyes loop
+         Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
+      end loop;
       Driver.Robot.Steps.Body_Delay (M, Delay_Beats, Delay_Known);
       loop
          Driver.Beats.Next (B);
@@ -195,6 +222,13 @@ package body Driver.Robot.Motion is
               M.Beats > 0 and then (for all G in 1 .. Groups => Still_Now (G) or else Nowhere (Group_Id (G)))
               and then (for all E in 1 .. Eyes => Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E))
                           or else (Jittering and then Driver.Robot.Stillness.Eye_Still (M, Eye_Id (E))));
+            --  Every commanded reading stands: a group no command reaches (a legged robot's legs, read only) moves as
+            --  the body goes, and is not waited for here.
+            Standing : constant Boolean :=
+              M.Beats > 0
+              and then (for all G in 1 .. Groups =>
+                          not Is_Commandable (M, Group_Id (G)) or else Still_Now (G) or else Nowhere (Group_Id (G)));
+            Drifting : Boolean;
          begin
             if not Done and then M.Beats > 0 then
                for G in 1 .. Groups loop
@@ -213,7 +247,47 @@ package body Driver.Robot.Motion is
                   Ended_There (G) := not Still_Now (G);
                end loop;
             end if;
-            Driver.Beats.Send (Driver.Commands.Hold);
+            if not Standing then
+               Stood_Since := -1;
+            elsif Stood_Since < 0 then
+               Stood_Since := Beats_Waited;
+            end if;
+            --  Each eye's picture as the readings stood, past the slowest eye's lag: a drift too slow for one beat to
+            --  show goes on away from it (Stillness.Eye_Away_Run; round 1, 10-23: Stretch's base at its first level,
+            --  3 mm a second, drifted no beat's change past its noise).
+            if Anchored and then not Standing then
+               for E in 1 .. Eyes loop
+                  Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
+               end loop;
+               Anchored := False;
+            elsif Use_Back and then not Anchored and then Standing and then Beats_Waited - Stood_Since > Lag then
+               for E in 1 .. Eyes loop
+                  Driver.Robot.Stillness.Set_Anchor (M, Eye_Id (E));
+               end loop;
+               Anchored := True;
+            end if;
+            Drifting := Use_Back and then not Done and then Standing and then Beats_Waited - Stood_Since > Lag
+              and then (for some E in 1 .. Eyes => Drifted (Eye_Id (E)));
+            if Drifting and then not Sent_Back then
+               Sent_Back := True;
+               Stood_Since := -1;
+               declare
+                  Which : Unbounded_String;
+               begin
+                  for E in 1 .. Eyes loop
+                     Kept_Eyes (Kept_Eyes'First + E - 1) := Drifted (Eye_Id (E));
+                     if Kept_Eyes (Kept_Eyes'First + E - 1) then
+                        Append (Which, " eye" & E'Image);
+                     end if;
+                  end loop;
+                  Driver.Log.Line (Driver.Log.Robot, "motion: every reading stands and" & To_String (Which)
+                                   & " drift on: the push keeps the body going; sent back to its hold");
+               end;
+               Driver.Beats.Send (Back);
+            else
+               Drifted_After := Drifted_After or else (Sent_Back and then Drifting);
+               Driver.Beats.Send (Driver.Commands.Hold);
+            end if;
             exit when Done;
          end;
          Beats_Waited := Beats_Waited + 1;
@@ -241,6 +315,29 @@ package body Driver.Robot.Motion is
             Driver.Log.Line (Driver.Log.Robot, "motion: settled after" & Beats_Waited'Image & " beats:" & To_String (Text));
          end;
       end if;
+      if Anchored then
+         for E in 1 .. Eyes loop
+            Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
+         end loop;
+      end if;
+      Kept_Going := Sent_Back and then not Drifted_After;
+   end Settle_Body;
+
+   procedure Settle (M : in out Model; Beats_Waited : out Natural) is
+      Kept : Boolean;
+      Eyes : Channel_Flags (1 .. Eye_Count (M));
+   begin
+      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes);
+   end Settle;
+
+   procedure Settle
+     (M            : in out Model;
+      Back         : Driver.Commands.Command;
+      Beats_Waited : out Natural;
+      Kept_Going   : out Boolean;
+      Kept_Eyes    : out Channel_Flags) is
+   begin
+      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes);
    end Settle;
 
    procedure Judge
@@ -960,6 +1057,12 @@ package body Driver.Robot.Motion is
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real is
       Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
    begin
+      --  A channel that keeps the body going while held is held at its rest command: a speed held anywhere else
+      --  moves the body on (round 0, 10-23: held at its last reading, the Go2 walked 34 to 39 m, the drone flew up to
+      --  365 m away, the G1 walked 7 m and fell).
+      if Keeps_Going (M, G, Channel) then
+         return Rest_Command (M, G, Channel);
+      end if;
       --  The pose a step last sent the group to, as a reading (Group_Stream.Held): the command that holds it there
       --  may stand off it by the servo's steady error (Step sends a step again by its landing's error), and a hold
       --  read from the command would creep by that error at every step. Before any step, the last target (a group
@@ -1639,6 +1742,8 @@ package body Driver.Robot.Motion is
       Start_At  : Natural;                         --  the beat the probe's reading was read at
       Creep     : Real_Array (1 .. 1);             --  its steady change a beat at rest (Channels.Drift)
       Farthest_At : array (Sense) of Natural;      --  the beat each way's farthest reading was read at
+      Last_Offset : Real := 0.0;                   --  the latest level's push and its way: held until the next level
+      Last_Way    : Sense := Increasing;           --  begins, where a speed shows itself (Settle)
    begin
       Report := (others => <>);
       Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
@@ -1682,7 +1787,34 @@ package body Driver.Robot.Motion is
                --  together levels ended, while eye 3 (on the arm those levels swung) still settled, none of them was a
                --  row of eye 3, the closer's column never had a beat there, and the closer, which only eye 3 sees, was
                --  left unclassified. The waits after looks that saw nothing real gave those pictures their rest before.
-               Settle (M, Waited);
+               --  And a push that keeps the body going while held (a speed: a wheel, a walk, a flight) is sent back to the
+               --  hold once every reading stands and the pictures drift on (round 0, 10-23: the Go2 waited here 6800
+               --  beats, walking on, its picture never settling).
+               declare
+                  Kept      : Boolean;
+                  Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+               begin
+                  Settle (M, Base, Waited, Kept, Kept_Eyes);
+                  if Kept then
+                     Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
+                     Report.Keeps_Going := True;
+                     Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
+                                      & " keeps the body going while held: a speed, sent back to its hold after"
+                                      & " every push of it");
+                     --  The last level's push, held, drifted the pictures on and stopped once sent back: seen there; this
+                     --  level is not pushed.
+                     if Last_Offset > 0.0 then
+                        Report.Seen := True;
+                        Report.Excursion := Last_Offset;
+                        Report.Seen_Sense := Last_Way;
+                        if Report.First_Seen = 0.0 or else Last_Offset < Report.First_Seen then
+                           Report.First_Seen := Last_Offset;
+                        end if;
+                        Report.Levels (Way) := Report.Levels (Way) - 1;
+                     end if;
+                  end if;
+               end;
+               exit when Report.Seen;
                --  The level's look begins with its push: the beats since the last look ended (this settle, and the
                --  estimate a sighting before it was confirmed by) showed the pushes before it settling and the eyes at
                --  rest, and every one of them was a verdict that could only be a false alarm of this level. h401 (seed
@@ -1691,6 +1823,8 @@ package body Driver.Robot.Motion is
                --  "seen", and was confirmed by an estimate of 17 to 20 s that saw nothing; 4 channels in 28209 beats.
                Unlooked := M.Beats;
                Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
+               Last_Offset := Offset;
+               Last_Way := Way;
                declare
                   Excursion : constant Real := Signs (Way) * (Now (1) - Start (1));
                   --  Less the creep of the beats since the farthest reading (Channels.Drift): a creeping reading went
@@ -1726,7 +1860,28 @@ package body Driver.Robot.Motion is
                --  kiwi's recognition (10-14). A channel probed alone has a column of its own in the regression,
                --  so the lock-in can tell it from the rest (the levels of every channel together cannot be told
                --  apart that way, and that ladder keeps its runs).
-               if Seen and then (Delivered (Way) or else Did (Way)) then
+               if Keeps_Going (M, Ref.Group, Ref.Channel) then
+                  --  A speed: held until the pictures drift on (seen, and sent back by the settle) or settle (unseen at
+                  --  this level, and sent back): a look of a few beats saw nothing of a walk the body starts some beats
+                  --  after its readings answer (the Go2 in round 1, 10-23: its looks two to three beats long).
+                  declare
+                     Kept      : Boolean;
+                     Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+                  begin
+                     Settle (M, Base, Waited, Kept, Kept_Eyes);
+                     if Kept then
+                        Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
+                        Report.Seen := True;
+                        Report.Excursion := Offset;
+                        Report.Seen_Sense := Way;
+                        if Report.First_Seen = 0.0 or else Offset < Report.First_Seen then
+                           Report.First_Seen := Offset;
+                        end if;
+                     else
+                        Step (M, Base, Report.Last);
+                     end if;
+                  end;
+               elsif Seen and then (Delivered (Way) or else Did (Way)) then
                   if Report.First_Seen = 0.0 or else Offset < Report.First_Seen then
                      Report.First_Seen := Offset;
                   end if;
@@ -1772,6 +1927,33 @@ package body Driver.Robot.Motion is
             end;
          end;
       end loop;
+      --  The last level's push, held: one that keeps the body going drifts the pictures while every commanded reading
+      --  stands, and is sent back (a channel seen at its first level was never held past it: Stretch's base and some
+      --  of the drone's motors in round 1, 10-23).
+      if not Keeps_Going (M, Ref.Group, Ref.Channel) then
+         declare
+            Waited    : Natural;
+            Kept      : Boolean;
+            Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+         begin
+            Settle (M, Base, Waited, Kept, Kept_Eyes);
+            if Kept then
+               Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
+               Report.Keeps_Going := True;
+               Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
+                                & " keeps the body going while held: a speed, sent back to its hold after every push"
+                                & " of it");
+               if not Report.Seen and then Last_Offset > 0.0 then
+                  Report.Seen := True;
+                  Report.Excursion := Last_Offset;
+                  Report.Seen_Sense := Last_Way;
+                  if Report.First_Seen = 0.0 or else Last_Offset < Report.First_Seen then
+                     Report.First_Seen := Last_Offset;
+                  end if;
+               end if;
+            end if;
+         end;
+      end if;
       --  Neither way followed at any level either way: a deadband would have
       --  yielded to a level that large, so the channel is dead or
       --  disconnected, where the noise tells a following from none.

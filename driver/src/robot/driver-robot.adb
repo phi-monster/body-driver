@@ -981,6 +981,56 @@ package body Driver.Robot is
    function Is_Commandable (M : Model; G : Group_Id) return Boolean is
      (G <= M.Groups.Last_Index and then M.Groups (G).Commandable);
 
+   procedure Note_Rest_Commands (M : in out Model) is
+      Last : constant Natural := (if M.Beats > 0 then M.Beats - 1 else 0);
+   begin
+      for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+         M.Groups (G).Rest_Command.Clear;
+         if M.Groups (G).Commandable and then Channels.Has_Reading (M, G, Last) then
+            for C in 1 .. M.Groups (G).Size loop
+               M.Groups (G).Rest_Command.Append
+                 (if Channels.Has_Target (M, G, Last) then Channels.Target (M, G, Last, C)
+                  else Channels.Reading (M, G, Last, C));
+            end loop;
+         end if;
+      end loop;
+   end Note_Rest_Commands;
+
+   function Rest_Command (M : Model; G : Group_Id; Channel : Positive) return Real is
+     (if G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).Rest_Command.Length)
+      then M.Groups (G).Rest_Command (Channel - 1)
+      elsif M.Beats > 0 and then Channels.Has_Reading (M, G, M.Beats - 1)
+      then Channels.Reading (M, G, M.Beats - 1, Channel)
+      else 0.0);
+
+   procedure Note_Keeps_Going (M : in out Model; G : Group_Id; Channel : Positive; Eyes : Channel_Flags) is
+      S : Group_Stream renames M.Groups (G);
+   begin
+      while Natural (S.Keeps_Going.Length) < S.Size loop
+         S.Keeps_Going.Append (False);
+      end loop;
+      S.Keeps_Going.Replace_Element (Channel - 1, True);
+      while Natural (S.Kept_Eyes.Length) < Eyes'Length loop
+         S.Kept_Eyes.Append (False);
+      end loop;
+      for E in Eyes'Range loop
+         if Eyes (E) then
+            S.Kept_Eyes.Replace_Element (E - Eyes'First, True);
+         end if;
+      end loop;
+   end Note_Keeps_Going;
+
+   function Keeps_Going (M : Model; G : Group_Id; Channel : Positive) return Boolean is
+     (G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).Keeps_Going.Length)
+      and then M.Groups (G).Keeps_Going (Channel - 1));
+
+   function Keeps_Going (M : Model; G : Group_Id) return Boolean is
+     (G <= M.Groups.Last_Index and then (for some K of M.Groups (G).Keeps_Going => K));
+
+   function Kept_Eye (M : Model; G : Group_Id; E : Eye_Id) return Boolean is
+     (G <= M.Groups.Last_Index and then Natural (E) <= Natural (M.Groups (G).Kept_Eyes.Length)
+      and then M.Groups (G).Kept_Eyes (Natural (E) - 1));
+
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real is
      (Channels.Noise (M, G, Channel));
 

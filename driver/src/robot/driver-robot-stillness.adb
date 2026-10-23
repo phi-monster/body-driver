@@ -200,11 +200,26 @@ package body Driver.Robot.Stillness is
          if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then
             S.Change_2 := Mean_Change (S.Current.all, S.Before.all, S.Deviations.all);
          end if;
+         --  The change from the anchor, against what rest makes (the stationary beats' median change and its scale): a
+         --  picture farther from it than rest moves one, and farther than at the beat before.
+         if S.Has_Anchor and then S.Anchor /= null and then S.Anchor'Length = S.Current'Length
+           and then S.Watch_Rest < Real'Last
+         then
+            declare
+               Away_Now : constant Real := Mean_Change (S.Current.all, S.Anchor.all, S.Deviations.all);
+               Away     : constant Boolean :=
+                 Away_Now > S.Watch_Rest + Driver.Conventions.Z * S.Watch_Rest_Scale and then Away_Now > S.Away_Last;
+            begin
+               S.Away_Run := (if Away then S.Away_Run + 1 else 0);
+               S.Away_Last := Away_Now;
+            end;
+         end if;
       end if;
       if Began_Moving then
          S.Watch_Have := False;
          S.Watch_Done := False;
          S.Watch_Run := 0;
+         S.Drift_Run := 0;
       end if;
       --  A beat without two frames to compare counts neither way.
       if S.Change_1 >= 0.0 then
@@ -229,8 +244,13 @@ package body Driver.Robot.Stillness is
             --  A drift is converged and not shrinking, and is no rest: what rest makes is measured on beats that add
             --  up as rest does.
             Stationary : constant Boolean := Converged and then not Shrinking and then Adds_As_Rest;
+            --  A drift: the two-beat change adds up as a drift's, the second beat going on the way the first went, and
+            --  not shrinking. A body that keeps going while every reading stands (a speed held: a base, a walk, a
+            --  flight) drifts its eyes' pictures beat after beat; a push settling shrinks.
+            Drifting   : constant Boolean := S.Watch_Have and then not Adds_As_Rest and then not Shrinking;
          begin
             S.Watch_Run := (if Stationary then S.Watch_Run + 1 else 0);
+            S.Drift_Run := (if Drifting then S.Drift_Run + 1 else 0);
             --  The picture has stopped when its change is what rest makes (the median of the change at the stationary
             --  beats so far, Z of their scale allowed: a residual of a move that is many times the noise is not rest,
             --  item 22), or when it has been stationary for two beats running at a level rest never showed (a lasting
@@ -276,6 +296,33 @@ package body Driver.Robot.Stillness is
    end Watch;
 
    function Eye_Settled (M : Model; E : Eye_Id) return Boolean is (M.Eyes (E).Watch_Done);
+
+   function Eye_Drift_Run (M : Model; E : Eye_Id) return Natural is (M.Eyes (E).Drift_Run);
+
+   procedure Set_Anchor (M : in out Model; E : Eye_Id) is
+      S : Eye_Stream renames M.Eyes (E);
+   begin
+      if S.Current = null then
+         S.Has_Anchor := False;
+         return;
+      end if;
+      if S.Anchor = null or else S.Anchor'Length /= S.Current'Length then
+         Free (S.Anchor);
+         S.Anchor := new Real_Array (S.Current'Range);
+      end if;
+      S.Anchor.all := S.Current.all;
+      S.Has_Anchor := True;
+      S.Away_Run := 0;
+      S.Away_Last := 0.0;
+   end Set_Anchor;
+
+   procedure Drop_Anchor (M : in out Model; E : Eye_Id) is
+   begin
+      M.Eyes (E).Has_Anchor := False;
+      M.Eyes (E).Away_Run := 0;
+   end Drop_Anchor;
+
+   function Eye_Away_Run (M : Model; E : Eye_Id) return Natural is (M.Eyes (E).Away_Run);
 
    function All_Still (M : Model) return Boolean is
    begin

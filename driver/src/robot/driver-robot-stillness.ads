@@ -77,6 +77,20 @@ private package Driver.Robot.Stillness is
    function Eye_Settled (M : Model; E : Eye_Id) return Boolean;
    --  The eye's picture has stopped since the body last began to move.
 
+   function Eye_Drift_Run (M : Model; E : Eye_Id) return Natural;
+   --  How many beats in a row, up to the latest, the eye's picture has drifted (Watch): each beat's change going on
+   --  the way the last one went and not shrinking, as a body that keeps going makes it.
+
+   procedure Set_Anchor (M : in out Model; E : Eye_Id);
+   --  The eye's latest frame is the one its picture is compared with from now on (Eye_Away_Run), until Drop_Anchor.
+
+   procedure Drop_Anchor (M : in out Model; E : Eye_Id);
+
+   function Eye_Away_Run (M : Model; E : Eye_Id) return Natural;
+   --  How many beats in a row, up to the latest, the eye's picture went farther from its anchor than at the beat
+   --  before and farther than rest moves a picture (the median change at its stationary beats, Z of their scale
+   --  above): a drift too slow for one beat's change to show, as a body that keeps going slowly makes it.
+
    function Group_Still (M : Model; G : Group_Id; Beat : Natural) return Boolean;
    --  False while the group's noise is not measured or a reading is missing.
 

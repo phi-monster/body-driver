@@ -286,10 +286,30 @@ package Driver.Robot is
 
    --  What the body reported and how each group behaves.
 
+   type Channel_Flags is array (Positive range <>) of Boolean;   --  per channel of a group
+
    function Group_Count (M : Model) return Natural;
    function Group_Size (M : Model; G : Group_Id) return Natural;
    function Is_Commandable (M : Model; G : Group_Id) return Boolean;
    --  A command in effect has carried a target for it.
+
+   procedure Note_Rest_Commands (M : in out Model);
+   --  Every commandable channel's command as the body stands still before any push: its echoed target at the latest
+   --  beat, else its reading. The command that holds the body still (Motion.Hold_Of, for a channel that keeps it going).
+
+   function Rest_Command (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  The channel's rest command (Note_Rest_Commands); its reading at the latest beat before one was noted.
+
+   procedure Note_Keeps_Going (M : in out Model; G : Group_Id; Channel : Positive; Eyes : Channel_Flags);
+   --  The channel, held away from its rest command, kept the body going: Eyes (one a Boolean per eye, from 1) the eyes
+   --  whose pictures drifted then (Motion.Settle).
+
+   function Keeps_Going (M : Model; G : Group_Id; Channel : Positive) return Boolean;
+   function Keeps_Going (M : Model; G : Group_Id) return Boolean;
+   --  The channel (some channel of the group) kept the body going while held (Note_Keeps_Going): a speed, not a place.
+
+   function Kept_Eye (M : Model; G : Group_Id; E : Eye_Id) return Boolean;
+   --  The eye's picture drifted while a channel of the group kept the body going.
 
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  The standard deviation of the channel's reading at rest, in reading
@@ -405,7 +425,6 @@ private
    pragma Suppress (Tampering_Check);
    package Real_Vectors is new Ada.Containers.Vectors (Natural, Real);
    package Flag_Vectors is new Ada.Containers.Vectors (Natural, Boolean);
-   type Channel_Flags is array (Positive range <>) of Boolean;   --  per channel of a group
    type Luma_Access is access Real_Array;
    --  A frame's luma (Driver.Images.Luma), on the heap: two per eye, swapped
    --  every beat, never on a stack.
@@ -529,6 +548,14 @@ private
                                                          --  down and up (End_Of); valid where the flags are
       Has_Stopped_Low, Has_Stopped_High : Flag_Vectors.Vector;   --  an end of that sense was found for the channel
       Stops       : Stop_Vectors.Vector;   --  the stops that have not been found again from another pose
+      Rest_Command : Real_Vectors.Vector;   --  per channel: its command while the body stood still before any push (Boot:
+                                            --  its echoed target then, else its reading), the command that holds the
+                                            --  body still; empty before
+      Keeps_Going  : Flag_Vectors.Vector;   --  per channel: held away from its rest command, it kept the body moving (an
+                                            --  eye's picture drifting while every reading stood), and the body stopped
+                                            --  once it was sent back (Motion.Settle): a speed, not a place; empty before
+      Kept_Eyes    : Flag_Vectors.Vector;   --  per eye (from 0): the eyes whose pictures drifted while one of its channels
+                                            --  kept the body moving; empty before
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);
@@ -570,6 +597,13 @@ private
       Watch_Rest_Counted : Natural := 0;    --  how many those rest on; taken again as they double
       Watch_Run     : Natural := 0;         --  stationary beats in a row, now
       Watch_Done    : Boolean := False;      --  the picture has stopped since then
+      Drift_Run     : Natural := 0;         --  beats in a row whose change went on from the last one's, not shrinking (as
+                                            --  rest's does not): the picture drifting, as a body that keeps going makes it
+      Anchor        : Luma_Access;           --  the frame taken when the readings last stood (Stillness.Set_Anchor), and
+      Has_Anchor    : Boolean := False;      --  it is in effect
+      Away_Last     : Real := 0.0;           --  the picture's change from it at the beat before
+      Away_Run      : Natural := 0;          --  beats in a row the picture went farther from it than the beat before, and
+                                            --  farther than rest moves a picture: a drift too slow for one beat to show
       Run_Moved     : Boolean := False;      --  the still view holds frames the noise called changed, after the
                                              --  picture stopped (Stillness.Judge_Eye): it measures no noise
       Du, Dv        : Real_Vectors.Vector;   --  Cells values per beat

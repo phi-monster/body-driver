@@ -17,6 +17,19 @@ package Driver.Robot.Motion is
    procedure Settle (M : in out Model; Beats_Waited : out Natural);
    --  Holds until Still (M) and returns how many beats that took.
 
+   procedure Settle
+     (M            : in out Model;
+      Back         : Driver.Commands.Command;
+      Beats_Waited : out Natural;
+      Kept_Going   : out Boolean;
+      Kept_Eyes    : out Channel_Flags)
+     with Pre => Kept_Eyes'Length = Eye_Count (M);
+   --  Holds until Still (M), as Settle, the push before it held meanwhile; but when every commanded reading stands
+   --  and some eye's picture goes on drifting (Stillness.Eye_Drift_Run: two beats running, the least that tells a
+   --  lasting drift from one beat's, past the slowest eye's lag), the push is keeping the body going: Back (the holds
+   --  of the groups it pushed) is sent, and the wait goes on. Kept_Going: Back was sent, and once the readings stood
+   --  again no eye drifted on; Kept_Eyes: the eyes that drifted, one a Boolean per eye from 1.
+
    type Step_Outcome is (Reached, Blocked, Short);
    --  Reached  every targeted channel arrived within its noise
    --  Blocked  a channel stopped short and pushing further does not move it
@@ -208,6 +221,8 @@ package Driver.Robot.Motion is
       At_End     : Sense_Flags := [others => False];  --  the way stopped because the other one answered while it delivered nothing
       Dead       : Boolean := False;   --  its reading followed no ask either way, at any level, though its noise is measured
       Blind      : Boolean := False;   --  its reading's noise is not measured: nothing is known of how its reading followed
+      Keeps_Going : Boolean := False;  --  held away from its hold, it kept the body going (Settle): a speed, sent back
+                                       --  to its hold after every push of it
       Last       : Step_Report;        --  the last step's report
    end record;
 

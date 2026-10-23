@@ -195,6 +195,9 @@ package body Driver.Robot.Boot is
          for R of Recognized loop
             if R.Ref.Group = G and then R.Ref.Channel <= Size and then R.Amount > 0.0
               and then (not Any_Only or else (R.Ref.Channel <= Only'Last and then Only (R.Ref.Channel)))
+              --  Not a speed: the lock-in these pushes are for regresses the pictures on the readings' changes, and a
+              --  speed held keeps the body going (Motion.Settle); its sighting was its probe's.
+              and then not Keeps_Going (M, G, R.Ref.Channel)
             then
                Amount (R.Ref.Channel) := Factor * R.Amount;
                for S in Driver.Robot.Motion.Sense loop
@@ -229,7 +232,21 @@ package body Driver.Robot.Boot is
                   Driver.Robot.Motion.Hold (M, Pause);
                   Settled := Settled + Pause;
                end if;
-               Driver.Robot.Motion.Settle (M, Waited);
+               --  Held so, a push that keeps the body going drifts the pictures while every commanded reading stands, and
+               --  is sent back to the hold (Motion.Settle): the Go2 walked 50 m in round 1 (10-23) through these rounds.
+               declare
+                  Back      : Driver.Commands.Command := Driver.Commands.Hold;
+                  Kept      : Boolean;
+                  Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+               begin
+                  Driver.Commands.Set_Target (Back, G, Here);
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes);
+                  if Kept then
+                     Note_Keeps_Going (M, G, P.Channel, Kept_Eyes);
+                     Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
+                                      & " keeps the body going while held: a speed");
+                  end if;
+               end;
                Settled := Settled + Waited;
                --  And back to where it was pushed from, a second push the same size the other way: a round of pushes
                --  that only go on from where the last one left (item 17's chain) gives the lock-in half the evidence a
@@ -279,6 +296,10 @@ package body Driver.Robot.Boot is
                Driver.Robot.Motion.Probe_Both_Ways (M, Ref, From, P);
                if P.Seen then
                   Amount (C) := P.Excursion;
+               end if;
+               if P.Keeps_Going then
+                  Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & C'Image
+                                   & " keeps the body going while held: a speed");
                end if;
                Recognized.Append
                  (Recognized_Channel'(Ref => Ref, Amount => Amount (C), First => P.First_Seen, Ended => P.At_End));
@@ -1437,6 +1458,13 @@ package body Driver.Robot.Boot is
          end if;
       end Read_Rest;
 
+      --  Every commandable channel's command as the body stands still at rest, before any push: the command that
+      --  holds it still (Motion.Hold_Of holds a channel that keeps the body going there).
+      procedure Note_Rest is
+      begin
+         Note_Rest_Commands (M);
+      end Note_Rest;
+
       procedure Read_Body is
       begin
          --  The turn at which the recognition's probes saw each channel move an eye goes to the model
@@ -1588,6 +1616,7 @@ package body Driver.Robot.Boot is
             Driver.Robot.Motion.Settle (M, Waited);
          end loop;
       end;
+      Driver.Beats.Within_A_Beat (Note_Rest'Access);
       Driver.Beats.Within_A_Beat (Read_Count'Access);
       declare
          Recognized_Before, Fitted_Before : Boolean := False;
