@@ -344,6 +344,110 @@ package body Driver.Robot.Boot is
          end;
       end Recognize;
 
+      --  Groups recognized whole (Recognize_Group): the amount each was seen moved by, every channel together; none
+      --  for a group whose channels were probed one at a time.
+      Whole_Amounts : Real_Vectors.Vector;
+
+      function Whole_Amount (G : Group_Id) return Real is
+        (if Natural (G) <= Natural (Whole_Amounts.Length) then Whole_Amounts (Natural (G) - 1) else 0.0);
+
+      procedure Set_Whole_Amount (G : Group_Id; A : Real) is
+      begin
+         while Natural (Whole_Amounts.Length) < Natural (G) loop
+            Whole_Amounts.Append (0.0);
+         end loop;
+         Whole_Amounts.Replace_Element (Natural (G) - 1, A);
+      end Set_Whole_Amount;
+
+      --  Pushes every channel of the group together by Amount, out from its hold and back, one way then the other, for
+      --  the lock-in to see what the group moves, a push held until its pictures settle; a group that keeps the body
+      --  going (a speed) only until its pictures drift, then sent back (Motion.Settle). Moved: some push reached.
+      procedure Push_Group (G : Group_Id; Size : Positive; Amount : Real; Moved : out Boolean; Pause : Natural := 0) is
+         Hold   : constant Real_Array := Holds_Of (G, Size);
+         Back   : Driver.Commands.Command := Driver.Commands.Hold;
+         Report : Driver.Robot.Motion.Step_Report;
+      begin
+         Moved := False;
+         Driver.Commands.Set_Target (Back, G, Hold);
+         for Sign of Real_Array'[1.0, -1.0] loop
+            declare
+               Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * Amount];
+               Kept, Came : Boolean;
+               Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
+            begin
+               Driver.Robot.Motion.Settle (M, Waited);
+               Driver.Robot.Motion.Mark_Origins (M);
+               Go_To (G, Away, Report);
+               Moved := Moved or else Report.Outcome = Driver.Robot.Motion.Reached;
+               if Keeps_Going (M, G) then
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+               else
+                  if Pause > 0 then
+                     Driver.Robot.Motion.Hold (M, Pause);
+                  end if;
+                  Driver.Robot.Motion.Settle (M, Waited);
+               end if;
+               Go_To (G, Hold, Report);
+            end;
+         end loop;
+      end Push_Group;
+
+      --  Recognizes the group as a whole (round 3, 10-23: step 1 asks what each group is and where each eye rides,
+      --  "推一推每组读数"; one channel at a time, 60 to 75 beats a channel, left ALOHA, the G1, RB-Y1 and the Shadow hand,
+      --  14 to 31 channels, unfinished at 1200 beats). Every channel of the group together, by one amount from where
+      --  the whole body was first seen, doubling until an eye sees it and the sighting is confirmed
+      --  (Motion.Probe_Together); then pushed so and held: a body that keeps going is a speed, and every channel of the
+      --  group with it (Motion.Settle); then pushed out and back each way (Push_Group). Each channel keeps the group's
+      --  amount, from which step 2's sweeps begin. A group no level shows whole is probed one channel at a time.
+      procedure Recognize_Group (G : Group_Id; Size : Positive; From : Real) is
+         Refs   : constant Driver.Robot.Motion.Channel_Refs (1 .. Size) := [for C in 1 .. Size => (Group => G, Channel => C)];
+         P      : Driver.Robot.Motion.Probe_Report;
+         Report : Driver.Robot.Motion.Step_Report;
+         Moved  : Boolean;
+      begin
+         Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, From, P);
+         if not P.Seen then
+            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole shows nothing confirmed; its"
+                             & " channels are probed one at a time");
+            Recognize (G, Size, From);
+            return;
+         end if;
+         declare
+            Hold       : constant Real_Array := Holds_Of (G, Size);
+            Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + P.Excursion];
+            Back       : Driver.Commands.Command := Driver.Commands.Hold;
+            Kept, Came : Boolean;
+            Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
+         begin
+            Driver.Commands.Set_Target (Back, G, Hold);
+            Driver.Robot.Motion.Settle (M, Waited);
+            Driver.Robot.Motion.Mark_Origins (M);
+            Go_To (G, Away, Report);
+            Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+            for C in 1 .. Size loop
+               if Kept then
+                  Note_Keeps_Going (M, G, C, Kept_Eyes);
+               elsif Came then
+                  Note_Comes_Back (M, G, C);
+               end if;
+            end loop;
+            if Kept then
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " keeps the body going while held: a speed");
+            end if;
+            Go_To (G, Hold, Report);
+         end;
+         Push_Group (G, Size, P.Excursion, Moved,
+                     Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));
+         for C in 1 .. Size loop
+            Recognized.Append
+              (Recognized_Channel'(Ref => (Group => G, Channel => C), Amount => P.Excursion, First => P.Excursion,
+                                  Ended => [others => False]));
+         end loop;
+         Set_Whole_Amount (G, P.Excursion);
+         Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " is seen when moved whole by "
+                          & Scientific (P.Excursion) & " reading units (after" & P.Steps'Image & " doublings)");
+      end Recognize_Group;
+
       --  Turns every joint of the arm both ways from where it rests, by steps
       --  that double from the smallest one a keyframe counts (Motion.Sweep_Start:
       --  the least turn by the step the fit judges a joint's motion by, or the
@@ -1416,6 +1520,27 @@ package body Driver.Robot.Boot is
       procedure Read_Rest is
          Index : Natural := 0;
          Total : Natural := 0;
+         --  The least change the channel's readings showed from one beat to the next, nought where they never
+         --  changed: one count of a reading that comes in counts. Its noise is told no finer: a robust noise of
+         --  counted readings takes a few levels a count apart (the Shadow hand, round 2b, 10-23: 0.006, 0.013,
+         --  0.026 by turns as the rest doubled, its rest held 1000 to 1200 beats).
+         function Least_Change (G : Group_Id; C : Positive) return Real is
+            Least : Real := Real'Last;
+         begin
+            for B in 1 .. M.Beats - 1 loop
+               if Driver.Robot.Channels.Has_Reading (M, G, B) and then Driver.Robot.Channels.Has_Reading (M, G, B - 1) then
+                  declare
+                     D : constant Real :=
+                       abs (Driver.Robot.Channels.Reading (M, G, B, C) - Driver.Robot.Channels.Reading (M, G, B - 1, C));
+                  begin
+                     if D > 0.0 and then D < Least then
+                        Least := D;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            return (if Least = Real'Last then 0.0 else Least);
+         end Least_Change;
       begin
          Rest_Measured := True;
          Drifting := Ada.Strings.Unbounded.Null_Unbounded_String;
@@ -1451,11 +1576,12 @@ package body Driver.Robot.Boot is
                           (if Index <= Natural (M.Noise_Freedom.Length) then M.Noise_Freedom (Index - 1) else 0);
                      begin
                         if Then_N = Real'Last
-                          or else (if Dof = 0 then Now_N /= Then_N
-                                   else Driver.Uncertain.Significant
-                                          (Now_N - Then_N,
-                                           Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),
-                                           Dof))
+                          or else (abs (Now_N - Then_N) >= Least_Change (Group_Id (G), C)
+                                   and then (if Dof = 0 then Now_N /= Then_N
+                                             else Driver.Uncertain.Significant
+                                                    (Now_N - Then_N,
+                                                     Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),
+                                                     Dof)))
                         then
                            Rest_Stable := False;
                            if Then_N < Real'Last then
@@ -1717,7 +1843,42 @@ package body Driver.Robot.Boot is
                      Driver.Beats.Within_A_Beat (Estimate'Access);
                      for G in 1 .. Count loop
                         if Commandable (G) and then Sizes (G) > 0 then
-                           Recognize (Group_Id (G), Sizes (G), P.Excursion);
+                           Recognize_Group (Group_Id (G), Sizes (G), P.Excursion);
+                        end if;
+                     end loop;
+                     Driver.Beats.Within_A_Beat (Estimate'Access);
+                     --  A group recognized whole that moves two eyes or more whole and keeps no body going may carry
+                     --  them on channels of its own each (one group for two arms): probed again one channel at a time,
+                     --  for the graph to part it (Graph.Derive, channels that move different eyes).
+                     for G in 1 .. Count loop
+                        if Commandable (G) and then Sizes (G) > 1 and then Whole_Amount (Group_Id (G)) > 0.0 then
+                           declare
+                              Whole_Eyes : Natural := 0;
+                              Speed      : Boolean := False;
+                              Amount     : constant Real := Whole_Amount (Group_Id (G));
+                              procedure Read_Whole is
+                              begin
+                                 Speed := Keeps_Going (M, Group_Id (G));
+                                 for E in 1 .. Eye_Count (M) loop
+                                    if Response (M, Group_Id (G), Eye_Id (E)) = Whole then
+                                       Whole_Eyes := Whole_Eyes + 1;
+                                    end if;
+                                 end loop;
+                              end Read_Whole;
+                           begin
+                              Driver.Beats.Within_A_Beat (Read_Whole'Access);
+                              if not Speed and then Whole_Eyes >= 2 then
+                                 Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moves" & Whole_Eyes'Image
+                                                  & " eyes whole: its channels are probed one at a time");
+                                 Set_Whole_Amount (Group_Id (G), 0.0);
+                                 for I in reverse Recognized.First_Index .. Recognized.Last_Index loop
+                                    if Recognized (I).Ref.Group = Group_Id (G) then
+                                       Recognized.Delete (I);
+                                    end if;
+                                 end loop;
+                                 Recognize (Group_Id (G), Sizes (G), Amount);
+                              end if;
+                           end;
                         end if;
                      end loop;
                      Driver.Beats.Within_A_Beat (Estimate'Access);
@@ -1901,7 +2062,12 @@ package body Driver.Robot.Boot is
                                        for C in Only'Range loop
                                           Only (C) := Needed (G, C);
                                        end loop;
-                                       Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved, Only, Pause (G));
+                                       if Whole_Amount (Group_Id (G)) > 0.0 then
+                                          Push_Group (Group_Id (G), Sizes (G), Factor (G) * Whole_Amount (Group_Id (G)), Moved,
+                                                      Pause (G));
+                                       else
+                                          Push_Both_Ways (Group_Id (G), Sizes (G), Factor (G), Moved, Only, Pause (G));
+                                       end if;
                                        if not Moved then
                                           Spent (G) := True;
                                           Driver.Log.Line
