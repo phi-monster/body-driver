@@ -3742,6 +3742,7 @@ driver-robot-motion.adb	Append (Text, "" & E'Image & "" & Driver.Log.Image (Now_
 driver-robot-motion.adb	Creep : Real_Array (1 .. 1);	1	structure	one channel
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Before, 6)	6	format	digits printed in a log line or a message
 driver-robot-motion.adb	Driver.Log.Line (Driver.Log.Robot, Where & "" & Driver.Log.Image (Found_At, 6)	6	format	digits printed in a log line or a message
+driver-robot-motion.adb	Empty_Run := (if Executed_None and then not Seen and then Level > 1 then Empty_Run + 1 else 0);	1	structure	the first level repeats the amount the body was found to execute at; a level past it counts, and each counts one
 driver-robot-motion.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	math	a displacement in the picture has two components, across and down
 driver-robot-motion.adb	L.Append (0.0);	0.0	structure	no steady error known yet
 driver-robot-motion.adb	Largest := Real'Max (Largest, abs Error / (Noise * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
@@ -3801,7 +3802,7 @@ driver-robot-motion.adb	and then Now_Away > (Rest + Pushed_Away (E)) / 2.0;	2.0	
 driver-robot-motion.adb	exit when Again >= 1.0;	1.0	math	a chance of one is certainty of a false alarm: such a look is no evidence
 driver-robot-motion.adb	exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);	2.0	structure	within a doubling, the ladder's own step
 driver-robot-motion.adb	for K in 1 .. 3 loop	3	numerics	the three shares K over four, the quarter, the middle and the three quarters
-driver-robot-motion.adb	if Executed_None and then not Seen and then Level > 1 then	1	structure	the first level repeats the amount the body was found to execute at; a level past it that executes nothing and shows nothing ends the ladder
+driver-robot-motion.adb	if Empty_Run >= 2 then	2	statistics	two levels running, the least that tells the body's having stopped executing from one level's miss (as Drift_Run's two beats)
 driver-robot-motion.adb	if Known (D) and then D.Value > 0.0 and then D.Value < 1.0	1.0	structure	a share below one: the group delivered less than it was asked; one or more is asked as it is
 driver-robot-motion.adb	or else (Anchored and then Driver.Robot.Stillness.Eye_Away_Run (M, E) >= 2));	2	statistics	a drift away from the anchor lasts when two beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);	2.0	math	the landing and the reference it is counted from, each within the dead band of where it was sent

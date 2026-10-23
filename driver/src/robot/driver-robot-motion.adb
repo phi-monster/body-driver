@@ -1671,6 +1671,7 @@ package body Driver.Robot.Motion is
       Other_Way : Real := 0.0)
    is
       Executes  : Boolean := False;   --  some listed reading went along some amount this way
+      Empty_Run : Natural := 0;       --  levels running that moved no reading further and showed nothing
       Sign      : constant Real := (if Direction > 0.0 then 1.0 else -1.0);
       N         : constant Natural := Channels'Length;
       Listed    : constant Channel_Refs (1 .. N) := Channels;
@@ -1857,14 +1858,17 @@ package body Driver.Robot.Motion is
                                 & Scientific (Amount) & " units, was seen by an eye while no reading went along its ask");
             end if;
             exit when Report.Seen or else (for all I in 1 .. N => not (Usable (I) and then Following (I)));
-            --  A level past the first that no reading went further along and no eye saw, the first being where the body
-            --  was found to execute: doubling the ask moves the body no further (a speed at its most, a joint at its end),
-            --  and no level beyond can be seen executed. The Go2's walk, asked down from 0.52 units, went along at no level
-            --  and showed nothing, and the ladder doubled it 50 times, to 1e9 units, a level every two beats (seed 2,
-            --  paced round p62a, 10-23). Not a level an eye saw: the drone's readings, its flight controller's wandering
-            --  estimates, went no further at its second level while its camera saw it fly, and the ladder ended with
-            --  nothing confirmed (seeds 1 and 2, paced round p65a).
-            if Executed_None and then not Seen and then Level > 1 then
+            --  Two levels running past the first that no reading went further along and no eye saw, the first being where
+            --  the body was found to execute: doubling the ask moves the body no further (a speed at its most, a joint at
+            --  its end), and no level beyond can be seen executed. The Go2's walk, asked down from 0.52 units, went along
+            --  at no level and showed nothing, and the ladder doubled it 50 times, to 1e9 units, a level every two beats
+            --  (seed 2, paced round p62a, 10-23). Two, the least that tells the body's having stopped from one level's miss:
+            --  ended at one level an eye saw (the drone's readings, its flight controller's wandering estimates, went no
+            --  further while its camera saw it fly, seeds 1 and 2, paced round p65a), or at one that showed nothing (the
+            --  drone hovering, its camera swaying 163 cells a beat at rest, missed its second level, seed 1, p66a), the
+            --  ladder ended with nothing confirmed and the boot stopped.
+            Empty_Run := (if Executed_None and then not Seen and then Level > 1 then Empty_Run + 1 else 0);
+            if Empty_Run >= 2 then
                Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " moved no reading further along its ask:"
                                 & " the ladder ends");
                exit;
@@ -1957,6 +1961,19 @@ package body Driver.Robot.Motion is
                      Settle (M, Waited);
                   else
                      Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
+                     --  The first level's settle holds the push before this channel's own (the last level of every channel of
+                     --  its group together, sent back to the hold): what the pictures did then tells nothing of this
+                     --  channel. Taken for its own, the jaws of the SO-101 and of ALOHA's second arm were speeds, the
+                     --  together ladder's last level having moved their readings no further: a box the jaw knocked, and
+                     --  the first arm's eye, drifted on as every reading stood and stayed away (seeds 3 and 1, paced round
+                     --  p68a, 10-23).
+                     if not (Last_Offset > 0.0) and then (Kept or else Came) then
+                        Driver.Log.Line (Driver.Log.Robot, "probe: group" & Ref.Group'Image & " channel" & Ref.Channel'Image
+                                         & ": the pictures " & (if Kept then "stayed away" else "came back")
+                                         & " after a push before its own: not told of it");
+                        Kept := False;
+                        Came := False;
+                     end if;
                      if Came then
                         Note_Comes_Back (M, Ref.Group, Ref.Channel);
                      end if;

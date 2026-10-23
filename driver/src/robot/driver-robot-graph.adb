@@ -306,7 +306,7 @@ package body Driver.Robot.Graph is
                Apart_Eyes : Natural := 0;
             begin
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-                  if Effect (M, G, E).Verdict = Whole and then Best_Of (E) = Natural (G) then
+                  if Whole_For (G, E) and then Best_Of (E) = Natural (G) then
                      Whole_Eyes := Whole_Eyes + 1;
                   end if;
                   if Apart (E) then
@@ -424,9 +424,13 @@ package body Driver.Robot.Graph is
                   declare
                      F  : constant Eye_Effect := Effect (M, G, E);
                      Mt : constant Mount := Gr.Mounts (E);
-                     --  A whole view that another group moves more of shows this group a part of it (Best_Of).
+                     --  A whole view that another group moves more of shows this group a part of it (Best_Of); so does a view
+                     --  that another group is the eye's own of, where the lock-in is undecided about this group: the hand in
+                     --  the Shadow's wrist eye, 133 of 253 cells, the eye riding its arm (paced round p67a, 10-23).
                      V  : constant Eye_Response :=
-                       (if F.Verdict = Whole and then Best_Of (E) /= Natural (G) then Patch else F.Verdict);
+                       (if (F.Verdict = Whole and then Best_Of (E) /= Natural (G))
+                          or else (F.Verdict = Undecided and then Best_Of (E) /= 0 and then Best_Of (E) /= Natural (G))
+                        then Patch else F.Verdict);
                   begin
                      case V is
                         when Patch =>
