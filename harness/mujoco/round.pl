@@ -1,12 +1,14 @@
 #!/usr/bin/perl
-# round.pl RUNS: a round of step-1 boots summed up (simulator-side rig code). From RUNS/ledger.txt (batch.sh, score1.pl)
+# round.pl RUNS [CAP]: a round of step-1 boots summed up (simulator-side rig code). CAP: the beats a boot may take (1200:
+# two minutes of a real robot's own time); a boot right only past it counts as not right, whatever the hall's clock. From RUNS/ledger.txt (batch.sh, score1.pl)
 # and each run's driver log: per robot, how many of its boots recognized every group and eye right, what was wrong,
 # whether the same robot booted twice (one seed, copies a and b) came out the same, and where each boot's beats went:
 # held still before the first push (rest), the push of every channel together (together), each channel alone
 # (channels), the pushes again for the eyes still open (again), to the groups as recognized; a boot cut at its cap
 # counts its beats so far.
 use strict; use warnings;
-my $runs = shift or die "round.pl RUNS\n";
+my $runs = shift or die "round.pl RUNS [CAP]\n";
+my $cap = shift;
 my (%line, %ok, %n, %phase);
 open my $l, "<", "$runs/ledger.txt" or die "no ledger in $runs\n";
 while (<$l>) {
@@ -19,6 +21,8 @@ while (<$l>) {
   my ($wrong) = $rest =~ /\[(.*)\]/;
   my ($beat) = $rest =~ /@(\d+)/;
   $line{$kind}{"$seed$copy"} = { verdict => $verdict, wrong => $wrong // "", why => $why, secs => $secs, beat => $beat // 0 };
+  if (defined $cap && $verdict eq "PASS" && ($beat // 0) > $cap) { $verdict = "OVER"; }
+  $line{$kind}{"$seed$copy"}{verdict} = $verdict;
   $n{$kind}++; $ok{$kind}++ if $verdict eq "PASS";
   # the phases from the driver's log
   my $log = -e "$runs/$tag/driver.log.zst" ? "zstd -dc $runs/$tag/driver.log.zst |" : "$runs/$tag/driver.log";

@@ -50,6 +50,7 @@ ap.add_argument("--width", type=int, default=320)
 ap.add_argument("--height", type=int, default=240)
 ap.add_argument("--instruction", default="Pick up the thing by 10 cm.")
 ap.add_argument("--truth", default="")
+ap.add_argument("--show-refs", type=int, default=0)   # every so many beats, a moving body's commands and root (a diagnostic)
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
 rng = np.random.default_rng(args.seed)
@@ -505,6 +506,10 @@ while True:
         print("robot: beat %d, a beat takes the world %.2f ms (the pictures' %.2f), the readings %.2f ms, the scramble and "
               "the driver %.2f ms%s" % (beat, 1000 * t_step / beat, 1000 * t_capture[0] / beat, 1000 * t_render / beat,
                                        1000 * t_wire / beat, root), flush=True)
+    if args.show_refs and beat % args.show_refs == 0 and m.njnt and m.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE:
+        print("robot: beat %d, root %.2f %.2f %.2f, asked %s" % (beat, d.qpos[0], d.qpos[1], d.qpos[2], " ".join(
+            "%s %s" % (g["name"], [round(float(x), 3) for x in g["ref"]]) for g in groups if g["kind"] in ("flight", "walk"))),
+            flush=True)
     if walker and walker.fallen() and not fell[0]:
         fell[0] = beat
         print("robot: FELL at beat %d, leaning %.1f deg (its training's fell_over: %.1f)"
