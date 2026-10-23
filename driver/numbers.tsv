@@ -4311,3 +4311,5 @@ driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Test
 driver-robot-lockin.adb	return Real'Min (1.0, Least * Real (Natural'Max (1, Tests)));	1.0	math	a chance is at most one
 driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in yet: a chance of one
 driver-robot-lockin.adb	X (1) := 1.0;	1.0	math	the mean's regressor: one at every row (as the fit's X has it)
+driver-robot-boot.adb	or else not (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);	0.5	structure	the level below asked half as much: more than half of this ask delivered is further than all of that one (as Push_Group)
+driver-robot-boot.adb	Amount := 2.0 * Amount;	2.0	structure	a level up, as the ladder climbs: each level doubles the one before

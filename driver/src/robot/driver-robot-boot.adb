@@ -471,32 +471,48 @@ package body Driver.Robot.Boot is
          end if;
          declare
             Hold       : constant Real_Array := Holds_Of (G, Size);
-            Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * P.Excursion];
             Back       : Driver.Commands.Command := Driver.Commands.Hold;
-            Kept, Came : Boolean;
+            Kept, Came : Boolean := False;
             Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
+            Returned   : Driver.Robot.Motion.Step_Report;
+            --  A hold that took no eye's picture beyond rest, neither a speed by it nor a joint, tells nothing of the
+            --  group: held again a level up, at twice the amount as the ladder climbs, while the push still went further.
+            --  At the level first seen, 0.14 units, Stretch's base moved its wrist eye 1.99 and 2.09 against a bound of
+            --  rest between them: a speed in one round, a joint in the next (seed 1, paced rounds p80a and p83a, 10-23).
+            Amount     : Real := P.Excursion;
          begin
             Driver.Commands.Set_Target (Back, G, Hold);
-            Driver.Robot.Motion.Settle (M, Waited);
-            Driver.Robot.Motion.Mark_Origins (M);
-            Go_To (G, Away, Report);
-            Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
-            --  What the push left, where the settle did not send the body back.
-            if not Kept and then not Came then
-               Driver.Robot.Motion.Note_Stayed (M, G, Sign);
-               --  And sent back with no drift seen while it was held: where its pictures settle tells what it is all the
-               --  same (Motion.Judge_Sent_Back). The drone, its motors asked 0.06 units at the level the lock-in
-               --  confirmed, flew on for 392 beats, too slowly for a beat to show its drift against its hover's sway, and
-               --  was an arm (seed 1, paced round p73a, 10-23).
+            loop
                declare
-                  Pushed : constant Real_Array := Driver.Robot.Motion.Eyes_From_Origin (M);
+                  Away : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * Amount];
                begin
-                  Go_To (G, Hold, Report);
-                  Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+                  Driver.Robot.Motion.Settle (M, Waited);
+                  Driver.Robot.Motion.Mark_Origins (M);
+                  Go_To (G, Away, Report);
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  --  What the push left, where the settle did not send the body back.
+                  if not Kept and then not Came then
+                     Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+                     --  And sent back with no drift seen while it was held: where its pictures settle tells what it is all
+                     --  the same (Motion.Judge_Sent_Back). The drone, its motors asked 0.06 units at the level the lock-in
+                     --  confirmed, flew on for 392 beats, too slowly for a beat to show its drift against its hover's sway,
+                     --  and was an arm (seed 1, paced round p73a, 10-23).
+                     declare
+                        Pushed : constant Real_Array := Driver.Robot.Motion.Eyes_From_Origin (M);
+                     begin
+                        Go_To (G, Hold, Returned);
+                        Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+                     end;
+                  else
+                     Go_To (G, Hold, Returned);
+                  end if;
                end;
-            else
-               Go_To (G, Hold, Report);
-            end if;
+               exit when Kept or else Came
+                 or else not (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s hold at " & Scientific (Amount)
+                                & " units took no eye's picture beyond rest: held again at twice that");
+               Amount := 2.0 * Amount;
+            end loop;
             for C in 1 .. Size loop
                if Kept then
                   Note_Keeps_Going (M, G, C, Kept_Eyes);
