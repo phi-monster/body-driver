@@ -227,6 +227,7 @@ package body Driver.Robot.Body_File is
                  & ", ""rest_count_level"": " & Num (S.Rest_Count_Level)
                  & ", ""rest_count_beats"": " & Int (S.Rest_Count_Beats)
                  & ", ""rest_count_above"": " & Int (S.Rest_Count_Above)
+                 & ", ""rest_counts"": " & Counts (S.Rest_Counts)
                  & ", ""noise"": " & Reals (S.Noise)
                  & ", ""textured"": " & Flags (S.Textured)
                  & ", ""kept_groups"": " & Counts (S.Kept_Groups)
@@ -669,6 +670,7 @@ package body Driver.Robot.Body_File is
                      S.Rest_Count_Level := Value (Field (X, "rest_count_level"));
                      S.Rest_Count_Beats := Natural'Max (0, Whole (X, "rest_count_beats"));
                      S.Rest_Count_Above := Natural'Max (0, Whole (X, "rest_count_above"));
+                     S.Rest_Counts := Counts_Of (Field (X, "rest_counts"));
                      S.Noise := Reals_Of (Field (X, "noise"));
                      S.Textured := Flags_Of (Field (X, "textured"));
                      S.Kept_Groups := Counts_Of (Field (X, "kept_groups"));

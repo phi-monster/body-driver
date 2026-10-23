@@ -1141,35 +1141,34 @@ package body Driver.Robot.Motion is
 
    function Tail return Real is (Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z));
 
-   --  The chance that one verdict of the eye is a false alarm: of n counts it had at rest, k exceeded the level a
-   --  verdict asks (Rest_Count_Above), and a count at rest exceeds it with chance at most (k + 1) / (n + 1), whatever
-   --  their distribution; without those, the per-cell test's own level. (1 / (n + 1) holds only of a level above
-   --  every count at rest: b06's eye 2, 10-17, called motion above 5.4 cells where its rest counts reached 11.)
-   function False_Alarm (M : Model; E : Eye_Id) return Real is
-     (if M.Eyes (E).Rest_Counts_Known
-      then Real (M.Eyes (E).Rest_Count_Above + 1) / Real (M.Eyes (E).Rest_Count_Beats + 1)
-      else Tail);
-
-   --  Some eye's image moved at a beat from From on, and the chance that a
-   --  look at that many verdicts finds one by noise alone.
+   --  Some eye's image moved at a beat from From on, and the chance that a look at that many verdicts finds one as
+   --  rare at rest by noise alone: the verdict the rarest at rest of those looked at is as rare as its share of the
+   --  rest's counts that reach it (Lockin.Rest_Share: at most (k + 1) / (n + 1) of n counts at rest, k of them as
+   --  high, whatever their distribution), and any of the look's verdicts is that rare by chance with a chance at most
+   --  that share times their number. A look used to charge every verdict the chance of a count at rest passing the
+   --  level a verdict asks (Rest_Count_Above of Rest_Count_Beats), however far above it the count of a beat stood: the
+   --  G1's looks of two beats over three eyes, each of which saw its arm move, were charged 0.636 each, and confirming
+   --  the level took 22 moves back and forth (round 4a, 10-23: 128 of its 1200 beats for one group).
    procedure Look (M : Model; From : Natural; Seen : out Boolean; Chance : out Real) is
+      Verdicts : Natural := 0;
+      Rarest   : Real := 1.0;
    begin
       Seen := False;
-      Chance := 0.0;
       for E in 1 .. Eye_Count (M) loop
          for B in From .. M.Beats - 1 loop
-            Chance := Chance + False_Alarm (M, Eye_Id (E));
+            Verdicts := Verdicts + 1;
+            Rarest := Real'Min (Rarest, Lockin.Rest_Share (M, Eye_Id (E), B));
             if Lockin.Moved (M, Eye_Id (E), B) then
                Seen := True;
             end if;
          end loop;
       end loop;
-      --  The chance that at least one of the verdicts looked at is a false alarm: one less the chance that none
+      --  The chance that at least one of the verdicts looked at is that rare by chance: one less the chance that none
       --  is, the verdicts independent. Summed instead, a look of twenty beats over three eyes with rest counts of
       --  53 beats "had a chance" of 1.1, above one, and no run of moves could make such a
       --  level certain: the ladder doubled past every level an eye saw, to 56 radians and the arm's ends (seed 2
       --  of the fake robot, 10-14: levels 10 to 21 all seen, none confirmed).
-      Chance := 1.0 - Ada.Numerics.Long_Elementary_Functions.Exp (-Chance);
+      Chance := 1.0 - Ada.Numerics.Long_Elementary_Functions.Exp (-Real (Verdicts) * Rarest);
    end Look;
 
    --  The smallest change of the channel's reading that tells from its noise

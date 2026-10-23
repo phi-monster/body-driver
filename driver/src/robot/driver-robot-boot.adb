@@ -20,6 +20,7 @@ with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
 with Driver.Robot.Steps;
+with Driver.Stats;
 with Driver.Uncertain;
 
 package body Driver.Robot.Boot is
@@ -401,11 +402,22 @@ package body Driver.Robot.Boot is
       --  amount, from which step 2's sweeps begin. A group no level shows whole is probed one channel at a time.
       procedure Recognize_Group (G : Group_Id; Size : Positive; From : Real) is
          Refs   : constant Driver.Robot.Motion.Channel_Refs (1 .. Size) := [for C in 1 .. Size => (Group => G, Channel => C)];
+         Sign   : Real := 1.0;   --  the way the group was seen moved
          P      : Driver.Robot.Motion.Probe_Report;
          Report : Driver.Robot.Motion.Step_Report;
          Moved  : Boolean;
       begin
          Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, From, P);
+         --  A group at its end one way (a gripper booted open as far as it goes, the Panda's in round 3, 10-23)
+         --  answers the other.
+         if not P.Seen then
+            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole upwards shows nothing confirmed;"
+                             & " downwards");
+            Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P);
+            if P.Seen then
+               Sign := -1.0;
+            end if;
+         end if;
          if not P.Seen then
             Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole shows nothing confirmed; its"
                              & " channels are probed one at a time");
@@ -414,7 +426,7 @@ package body Driver.Robot.Boot is
          end if;
          declare
             Hold       : constant Real_Array := Holds_Of (G, Size);
-            Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + P.Excursion];
+            Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * P.Excursion];
             Back       : Driver.Commands.Command := Driver.Commands.Hold;
             Kept, Came : Boolean;
             Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
@@ -1521,9 +1533,7 @@ package body Driver.Robot.Boot is
          Index : Natural := 0;
          Total : Natural := 0;
          --  The least change the channel's readings showed from one beat to the next, nought where they never
-         --  changed: one count of a reading that comes in counts. Its noise is told no finer: a robust noise of
-         --  counted readings takes a few levels a count apart (the Shadow hand, round 2b, 10-23: 0.006, 0.013,
-         --  0.026 by turns as the rest doubled, its rest held 1000 to 1200 beats).
+         --  changed: one count of a reading that comes in counts (Differ, below).
          function Least_Change (G : Group_Id; C : Positive) return Real is
             Least : Real := Real'Last;
          begin
@@ -1541,6 +1551,27 @@ package body Driver.Robot.Boot is
             end loop;
             return (if Least = Real'Last then 0.0 else Least);
          end Least_Change;
+
+         --  Whether two measures of a channel's rest noise differ: Then_N over the rest before its last doubling,
+         --  Now_N over the whole of it on Dof degrees of freedom, of a reading whose least change was Least. A counted
+         --  reading's noise is a median of whole counts (Channels.Measure_Channel: the median absolute change at
+         --  rest, as a sigma, over the root of two), on whole and half counts (the median of an even number of them),
+         --  and where the reading's jitter puts that median between two counts it falls on either by chance, however
+         --  long the rest: the Shadow hand's channels came out at a median of one count and of two by turns as the
+         --  rest doubled (round 4a, 10-23: 8.04E-04 and 1.61E-03 of a count of 7.67E-04, 4.19E-05 and 8.39E-05 of
+         --  4.00E-05), and its rest held 940 to 1080 of its 1200 beats. Two noises whose medians are a count apart or
+         --  less are the same noise; farther apart, they differ where the difference is significant.
+         function Differ (Now_N, Then_N, Least : Real; Dof : Natural) return Boolean is
+            Count_Noise : constant Real :=
+              Driver.Stats.Sigma_Of_Deviation (Least) / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);
+         begin
+            if Count_Noise > 0.0 and then Real'Rounding (2.0 * abs (Now_N - Then_N) / Count_Noise) <= 2.0 then
+               return False;
+            end if;
+            return (if Dof = 0 then Now_N /= Then_N
+                    else Driver.Uncertain.Significant
+                           (Now_N - Then_N, Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)), Dof));
+         end Differ;
       begin
          Rest_Measured := True;
          Drifting := Ada.Strings.Unbounded.Null_Unbounded_String;
@@ -1575,19 +1606,13 @@ package body Driver.Robot.Boot is
                         Dof    : constant Natural :=
                           (if Index <= Natural (M.Noise_Freedom.Length) then M.Noise_Freedom (Index - 1) else 0);
                      begin
-                        if Then_N = Real'Last
-                          or else (abs (Now_N - Then_N) >= Least_Change (Group_Id (G), C)
-                                   and then (if Dof = 0 then Now_N /= Then_N
-                                             else Driver.Uncertain.Significant
-                                                    (Now_N - Then_N,
-                                                     Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)),
-                                                     Dof)))
-                        then
+                        if Then_N = Real'Last or else Differ (Now_N, Then_N, Least_Change (Group_Id (G), C), Dof) then
                            Rest_Stable := False;
                            if Then_N < Real'Last then
                               Ada.Strings.Unbounded.Append
-                                (Unrepeated, " group" & G'Image & " channel" & C'Image & " (" & Driver.Log.Image (Then_N, 3)
-                                 & " then, " & Driver.Log.Image (Now_N, 3) & " now, on" & Dof'Image & " degrees)");
+                                (Unrepeated, " group" & G'Image & " channel" & C'Image & " (" & Scientific (Then_N)
+                                 & " then, " & Scientific (Now_N) & " now, on" & Dof'Image & " degrees, the least change "
+                                 & Scientific (Least_Change (Group_Id (G), C)) & ")");
                            end if;
                         end if;
                         Rest_Noises (Index) := Now_N;
@@ -1626,6 +1651,22 @@ package body Driver.Robot.Boot is
                         (if R.First > 0.0 then R.First else R.Amount));
          end loop;
          Driver.Log.Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Describe (M));
+         --  Each group in each eye, for the study of what tells an eye's own motion from a part's in its view (round 3,
+         --  10-23: the Panda's fixed eye called moved whole by its arm, grippers whose fingers fill the view called arms):
+         --  the verdict, the cells that respond, and how far the cells that did not respond moved along the push together.
+         for G in 1 .. Group_Count (M) loop
+            if Is_Commandable (M, Group_Id (G)) then
+               for E in 1 .. Eye_Count (M) loop
+                  Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " eye" & E'Image & ": "
+                                   & Response (M, Group_Id (G), Eye_Id (E))'Image & ","
+                                   & Responding (M, Group_Id (G), Eye_Id (E))'Image & " of"
+                                   & Textured_Cells (M, Group_Id (G), Eye_Id (E))'Image
+                                   & " cells respond, the rest pulled along the push by "
+                                   & Driver.Log.Image (Rest_Pull (M, Group_Id (G), Eye_Id (E)), 2) & " sigmas, moving by "
+                                   & Driver.Log.Image (Resting_Motion (M, Group_Id (G), Eye_Id (E)), 2));
+               end loop;
+            end if;
+         end loop;
          Lockin.Dump_Cells (M, Ada.Strings.Fixed.Trim (M.Beats'Image, Ada.Strings.Left));
          for G in 1 .. Group_Count (M) loop
             if Is_Commandable (M, Group_Id (G)) and then Contract_Breach (M, Group_Id (G)) > 0 then

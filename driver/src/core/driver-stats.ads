@@ -34,6 +34,9 @@ package Driver.Stats with Preelaborate is
    --  The standard deviation implied by the median absolute deviation for
    --  Gaussian data; a minority of outliers does not move it.
 
+   function Sigma_Of_Deviation (D : Real) return Real;
+   --  The standard deviation Robust_Sigma gives for a median absolute deviation of D.
+
    function Median_Sigma (Sigma : Real; N : Positive) return Real;
    --  The standard error of the median of N Gaussian samples whose own
    --  standard deviation is Sigma: the root of pi over two times Sigma over

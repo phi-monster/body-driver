@@ -104,6 +104,12 @@ private package Driver.Robot.Lockin is
    --  can measure; a change the stillness judgment sees (a pixel's rounding
    --  flipping) can be far smaller.
 
+   function Rest_Share (M : Model; E : Eye_Id; Beat : Natural) return Real;
+   --  The chance that a beat of the eye at rest counts as many moved cells as this beat did, or more (Count_Moved):
+   --  of the n counts it had at rest (Rest_Counts), k reached this one, and a count at rest reaches it with chance at
+   --  most (k + 1) / (n + 1), whatever their distribution. Before those are measured, the per-cell test's own level;
+   --  one where the eye tested no cell at the beat.
+
    function Cell_Noise (M : Model; E : Eye_Id) return Real;
    --  How finely one cell of the eye tells a displacement: the median over its
    --  textured cells of the noise of their displacements about the

@@ -231,6 +231,8 @@ package body Driver.Stats is
       return Gaussian_MAD_To_Sigma * Median_Of_Deviations (X);
    end Robust_Sigma;
 
+   function Sigma_Of_Deviation (D : Real) return Real is (Gaussian_MAD_To_Sigma * D);
+
    function Median_Sigma (Sigma : Real; N : Positive) return Real is
    begin
       return Sqrt (Ada.Numerics.Pi / 2.0) * Sigma / Sqrt (Real (N));

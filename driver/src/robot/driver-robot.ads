@@ -659,6 +659,9 @@ private
       Rest_Count_Beats   : Natural := 0;     --  over how many beats
       Rest_Count_Above   : Natural := 0;     --  of those beats, how many counted more than the level: as often a
                                              --  beat at rest is called motion
+      Rest_Counts        : Count_Vectors.Vector;   --  every count of those beats, least first: a beat counting as many
+                                             --  is as rare at rest as the share of them that reach it
+                                             --  (Lockin.Rest_Share)
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)

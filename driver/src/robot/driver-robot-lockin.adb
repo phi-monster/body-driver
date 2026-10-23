@@ -51,6 +51,8 @@ package body Driver.Robot.Lockin is
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
+   package Count_Sorting is new Count_Vectors.Generic_Sorting;
+
    --  An eye mostly sees the world: a whole image moves when a significant majority of what can move does. The same
    --  half is how much of the energy of the cells too noisy to tell the cells far above the rest must carry to be what
    --  moves (Cells_Shown).
@@ -597,21 +599,24 @@ package body Driver.Robot.Lockin is
                end loop;
             end Mark_Motions;
 
-            function Usable (B : Natural) return Boolean is
+            --  What a beat is to the regression: a row, or why not (Usable), for the log as well.
+            type Row_Kind is (Row, No_Picture, Not_Reached, No_Readings, Two_Pushed, Held_Moved, Unsettled_Before,
+                              Another_Group, Unsettled);
+            function Kind_Of (B : Natural) return Row_Kind is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
                Pusher : Group_Id := M.Groups.First_Index;
                Held_Moving : Boolean := False;   --  a group not pushed moved at the beat
             begin
-               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats
-                 or else not Reached (B + 1)
-               then
-                  return False;
+               if B >= Natural (S.Measured.Length) or else not S.Measured (B) or else R < 1 or else R >= M.Beats then
+                  return No_Picture;
+               elsif not Reached (B + 1) then
+                  return Not_Reached;
                end if;
                for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                   if M.Groups (G).Commandable then
                      if not Channels.Has_Reading (M, G, R) or else not Channels.Has_Reading (M, G, R - 1) then
-                        return False;
+                        return No_Readings;
                      elsif Channels.Pushed (M, G, R) then
                         Pushes := Pushes + 1;
                         Pusher := G;
@@ -620,15 +625,17 @@ package body Driver.Robot.Lockin is
                      end if;
                   end if;
                end loop;
-               if Pushes > 1 or else (Pushes = 0 and then Held_Moving) then
-                  return False;
+               if Pushes > 1 then
+                  return Two_Pushed;
+               elsif Pushes = 0 and then Held_Moving then
+                  return Held_Moved;
                elsif Pushes = 1 then
                   declare
                      Began  : constant Natural := Push_Start (Pusher, Natural (R));
                      Before : constant Integer := Integer (Began) - 1;
                   begin
                      if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
-                        return False;
+                        return Unsettled_Before;
                      end if;
                      --  Nor was another group pushed at any beat of the push or
                      --  within the eye's settling tail before it, nor did it move
@@ -648,11 +655,11 @@ package body Driver.Robot.Lockin is
                                        or else (Began > Low and then Mark (Last_Moved, G, Began - 1) > Low)
                                        or else Mark (Last_Seen_Moving, G, Natural (R)) > Began)
                            then
-                              return False;
+                              return Another_Group;
                            end if;
                         end loop;
                      end;
-                     return True;
+                     return Row;
                   end;
                end if;
                --  A beat that no group pushes is at rest only once the eye's picture has settled since the body last
@@ -661,8 +668,10 @@ package body Driver.Robot.Lockin is
                --  for up to 31 beats after each, the cells' noise grew with it, and the eye read as showing a patch
                --  (f15j on 10-15). Asked beat by beat, not as the stream's longest settling: one stretch of a hand
                --  creeping on the table made that 1893 beats (f15f), and would have left out every rest after it.
-               return B < Natural (S.Settled_At.Length) and then S.Settled_At (B);
-            end Usable;
+               return (if B < Natural (S.Settled_At.Length) and then S.Settled_At (B) then Row else Unsettled);
+            end Kind_Of;
+
+            function Usable (B : Natural) return Boolean is (Kind_Of (B) = Row);
          begin
             S.Settling_Tail := Tail;
             S.Noise.Clear;
@@ -942,6 +951,39 @@ package body Driver.Robot.Lockin is
                            Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Motion_Rows'Image & " of" & Rows'Image
                                             & " rows carry a push; the rows' beats run" & (if Rows > 0 then Beat_Of (1)'Image else "")
                                             & " to" & (if Rows > 0 then Beat_Of (Rows)'Image else "") & ", lag" & Lag'Image);
+                           --  How many beats each group was pushed at and how many of them are rows (Usable: one group
+                           --  pushed, the eye settled before it, no other group pushed or moving in its tail): the
+                           --  Shadow's arm, recognized after its hand, had no column in either eye (round 4a, 10-23).
+                           for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                              if M.Groups (G).Commandable then
+                                 declare
+                                    Pushed_Beats : Natural := 0;
+                                    Kinds        : array (Row_Kind) of Natural := [others => 0];
+                                    Why          : Ada.Strings.Unbounded.Unbounded_String;
+                                 begin
+                                    for B in 1 .. M.Beats - 1 loop
+                                       declare
+                                          R : constant Integer := B - Lag;
+                                       begin
+                                          if R >= 1 and then Channels.Pushed (M, G, R) then
+                                             Pushed_Beats := Pushed_Beats + 1;
+                                             Kinds (Kind_Of (B)) := Kinds (Kind_Of (B)) + 1;
+                                          end if;
+                                       end;
+                                    end loop;
+                                    for K in Row_Kind range No_Picture .. Row_Kind'Last loop
+                                       if Kinds (K) > 0 then
+                                          Ada.Strings.Unbounded.Append (Why, ", " & K'Image & Kinds (K)'Image);
+                                       end if;
+                                    end loop;
+                                    if Pushed_Beats > 0 then
+                                       Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
+                                                        & " pushed at" & Pushed_Beats'Image & " beats," & Kinds (Row)'Image
+                                                        & " of them rows" & Ada.Strings.Unbounded.To_String (Why));
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
                         end;
                         declare
                            Started : constant Duration := Driver.Clock.Seconds;
@@ -1342,6 +1384,11 @@ package body Driver.Robot.Lockin is
                         S.Rest_Count_Max := Most;
                         S.Rest_Count_Beats := K - Start + 1;
                         S.Rest_Counts_Known := S.Rest_Count_Beats > 1;
+                        S.Rest_Counts.Clear;
+                        for I in Start .. K loop
+                           S.Rest_Counts.Append (Natural (Counts (I)));
+                        end loop;
+                        Count_Sorting.Sort (S.Rest_Counts);
                         --  Motion is a count significantly above what the rest produces: the rest counts' median
                         --  plus Z of their robust scatter. The most of them is one beat's: a frame that flickered
                         --  once among 116 at rest put it at 273 of 525 cells for the kiwi's wrist eye, and a jaw
@@ -1431,6 +1478,26 @@ package body Driver.Robot.Lockin is
               else Regression.Count_Significant
                      (Count, Tested, Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z)));
    end Moved;
+
+   function Rest_Share (M : Model; E : Eye_Id; Beat : Natural) return Real is
+      S : Eye_Stream renames M.Eyes (E);
+      Count, Tested : Natural;
+      Reached : Natural := 0;
+   begin
+      Count_Moved (S, Beat, Count, Tested);
+      if Tested = 0 then
+         return 1.0;
+      end if;
+      if not S.Rest_Counts_Known or else S.Rest_Counts.Is_Empty then
+         return Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
+      end if;
+      --  Least first: those from the first that reaches the count on.
+      for I in reverse S.Rest_Counts.First_Index .. S.Rest_Counts.Last_Index loop
+         exit when S.Rest_Counts (I) < Count;
+         Reached := Reached + 1;
+      end loop;
+      return Real (Reached + 1) / Real (Natural (S.Rest_Counts.Length) + 1);
+   end Rest_Share;
 
    function Cell_Noise (M : Model; E : Eye_Id) return Real is
       S     : Eye_Stream renames M.Eyes (E);
@@ -1605,6 +1672,37 @@ package body Driver.Robot.Lockin is
             if Natural (S.Shift_U.Length) = N * Kept and then Natural (S.Shift_V.Length) = N * Kept
               and then Natural (S.Col_Responds.Length) = N * Kept
             then
+               --  Each group's cells as the lock-in's test of its block finds them responding (a shift where it does),
+               --  and its channels' shifts summed: what the cell does when the group moves whole.
+               for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+                  if (for some K in 1 .. Kept => S.Kept_Groups (S.Kept_Groups.First_Index + K - 1) = Natural (G)) then
+                     Line := Ada.Strings.Unbounded.Null_Unbounded_String;
+                     for Cell in 0 .. N - 1 loop
+                        Ada.Strings.Unbounded.Append
+                          (Line, (if (for some K in 1 .. Kept =>
+                                        S.Kept_Groups (S.Kept_Groups.First_Index + K - 1) = Natural (G)
+                                        and then S.Shifts (Cell * Kept + K - 1) > 0.0)
+                                  then "1" else "0"));
+                     end loop;
+                     Put_Line (File, "responds " & Img (Natural (G)) & " " & Ada.Strings.Unbounded.To_String (Line));
+                     for Cell in 0 .. N - 1 loop
+                        declare
+                           U, V : Real := 0.0;
+                        begin
+                           for K in 1 .. Kept loop
+                              if S.Kept_Groups (S.Kept_Groups.First_Index + K - 1) = Natural (G) then
+                                 U := U + S.Shift_U (Cell * Kept + K - 1);
+                                 V := V + S.Shift_V (Cell * Kept + K - 1);
+                              end if;
+                           end loop;
+                           if U /= 0.0 or else V /= 0.0 then
+                              Put_Line (File, "whole " & Img (Natural (G)) & " " & Img (Cell) & " " & Driver.Log.Image (U, 6)
+                                        & " " & Driver.Log.Image (V, 6));
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end loop;
                for K in 1 .. Kept loop
                   Put_Line (File, "column " & Img (K) & " group " & Img (S.Kept_Groups (S.Kept_Groups.First_Index + K - 1))
                             & " channel " & Img (S.Kept_Channels (S.Kept_Channels.First_Index + K - 1)));
