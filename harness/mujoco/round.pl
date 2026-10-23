@@ -9,7 +9,7 @@
 use strict; use warnings;
 my $runs = shift or die "round.pl RUNS [CAP]\n";
 my $cap = shift;
-my (%line, %ok, %n, %phase);
+my (%line, %ok, %n, %phase, %groups);
 open my $l, "<", "$runs/ledger.txt" or die "no ledger in $runs\n";
 while (<$l>) {
   next unless /^\d\d:\d\d (\S+) step1 (\S+)(.*?) stop (\S+) (\d+) s$/;
@@ -28,15 +28,21 @@ while (<$l>) {
   my $log = -e "$runs/$tag/driver.log.zst" ? "zstd -dc $runs/$tag/driver.log.zst |" : "$runs/$tag/driver.log";
   open my $d, $log or next;
   my ($first, $together, $last_channel, $recognized, $last) = (0, 0, 0, 0, 0);
+  my ($group_from, @groups) = (0);
   while (<$d>) {
     next unless /^@(\d+) /; my $b = $1; $last = $b;
     $first ||= $b if /probe: level 1 of every channel together/;
     $together ||= $b if /boot: every commandable channel moved together is first seen/;
+    $group_from ||= $together;
+    if (/boot: group (\d+) (is seen when moved whole|moved whole shows nothing confirmed; its channels)/ && !$recognized) {
+      push @groups, "g$1 " . ($b - $group_from) . ($2 =~ /nothing/ ? "+" : ""); $group_from = $b;
+    }
     $last_channel = $b if /boot: group \d+ channel \d+ (is seen when moved|answers neither way|moves nothing any eye sees)/;
     $recognized ||= $b if /boot: the groups as recognized/;
   }
   close $d;
   my $end = $recognized || $last;
+  $groups{$kind}{"$seed$copy"} = join(" ", @groups);
   $phase{$kind}{"$seed$copy"} = [ $first, ($together ? $together - $first : 0),
                                   ($last_channel && $together ? $last_channel - $together : 0),
                                   ($last_channel ? $end - $last_channel : 0), $end ];
@@ -48,6 +54,7 @@ for my $kind (sort keys %line) {
     my $r = $line{$kind}{$sc}; my $p = $phase{$kind}{$sc} // [0, 0, 0, 0, 0];
     printf "   %-3s %-10s %4d s  beats: rest %5d together %5d channels %5d again %5d, in all %5d  %s\n", $sc, $r->{verdict},
       $r->{secs}, @$p, ($r->{why} ne "reached" ? "[$r->{why}] " : "") . $r->{wrong};
+    printf "        groups (beats each, + where it fell to one channel at a time): %s\n", $groups{$kind}{$sc} if $groups{$kind}{$sc};
     my ($seed) = $sc =~ /^(\d+)/; push @{ $by_seed{$seed} }, "$r->{verdict} $r->{wrong}";
   }
   for my $seed (sort keys %by_seed) {

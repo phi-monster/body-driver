@@ -363,7 +363,9 @@ package body Driver.Robot.Boot is
       --  Pushes every channel of the group together by Amount, out from its hold and back, one way then the other, for
       --  the lock-in to see what the group moves, a push held until its pictures settle; a group that keeps the body
       --  going (a speed) only until its pictures drift, then sent back (Motion.Settle). Moved: some push reached.
-      procedure Push_Group (G : Group_Id; Size : Positive; Amount : Real; Moved : out Boolean; Pause : Natural := 0) is
+      procedure Push_Group
+        (G : Group_Id; Size : Positive; Amount : Real; Moved : out Boolean; Pause : Natural := 0; Way : Real := 0.0)
+      is
          Hold   : constant Real_Array := Holds_Of (G, Size);
          Back   : Driver.Commands.Command := Driver.Commands.Hold;
          Report : Driver.Robot.Motion.Step_Report;
@@ -371,6 +373,7 @@ package body Driver.Robot.Boot is
          Moved := False;
          Driver.Commands.Set_Target (Back, G, Hold);
          for Sign of Real_Array'[1.0, -1.0] loop
+            if Way = 0.0 or else Sign = Way then
             declare
                Away       : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * Amount];
                Kept, Came : Boolean;
@@ -390,6 +393,7 @@ package body Driver.Robot.Boot is
                end if;
                Go_To (G, Hold, Report);
             end;
+            end if;
          end loop;
       end Push_Group;
 
@@ -413,7 +417,13 @@ package body Driver.Robot.Boot is
          if not P.Seen then
             Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moved whole upwards shows nothing confirmed;"
                              & " downwards");
-            Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P);
+            declare
+               --  Where the upward ladder first moved a reading: downwards, a way that moves none up to it is at its
+               --  end (Motion.Probe_Together).
+               Up : constant Real := P.Answered;
+            begin
+               Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P, Other_Way => Up);
+            end;
             if P.Seen then
                Sign := -1.0;
             end if;
@@ -448,8 +458,11 @@ package body Driver.Robot.Boot is
             end if;
             Go_To (G, Hold, Report);
          end;
+         --  The hold's push went out and back one way; the other way's completes the pair. Both again after it, the
+         --  group waited for its pictures to settle six times, the G1's 40 to 60 beats each after every move of its
+         --  balance, 150 to 260 beats a group of its seven (round 4c, 10-23).
          Push_Group (G, Size, P.Excursion, Moved,
-                     Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));
+                     Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))), Way => -Sign);
          for C in 1 .. Size loop
             Recognized.Append
               (Recognized_Channel'(Ref => (Group => G, Channel => C), Amount => P.Excursion, First => P.Excursion,
@@ -1896,19 +1909,53 @@ package body Driver.Robot.Boot is
                            declare
                               Whole_Eyes : Natural := 0;
                               Speed      : Boolean := False;
+                              Alike      : Boolean := True;   --  no two of those eyes moved by shares apart
                               Amount     : constant Real := Whole_Amount (Group_Id (G));
+                              --  Two eyes' shares of their textured cells that respond, apart by more than chance:
+                              --  their difference over its pooled standard error beyond Z.
+                              function Apart (K1, N1, K2, N2 : Natural) return Boolean is
+                                 P  : constant Real := Real (K1 + K2) / Real (N1 + N2);
+                                 SE : constant Real :=
+                                   Ada.Numerics.Long_Elementary_Functions.Sqrt
+                                     (P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));
+                              begin
+                                 return SE > 0.0
+                                   and then abs (Real (K1) / Real (N1) - Real (K2) / Real (N2)) > Driver.Conventions.Z * SE;
+                              end Apart;
                               procedure Read_Whole is
                               begin
                                  Speed := Keeps_Going (M, Group_Id (G));
                                  for E in 1 .. Eye_Count (M) loop
                                     if Response (M, Group_Id (G), Eye_Id (E)) = Whole then
                                        Whole_Eyes := Whole_Eyes + 1;
+                                       for F in 1 .. E - 1 loop
+                                          if Response (M, Group_Id (G), Eye_Id (F)) = Whole
+                                            and then Textured_Cells (M, Group_Id (G), Eye_Id (E)) > 0
+                                            and then Textured_Cells (M, Group_Id (G), Eye_Id (F)) > 0
+                                            and then Apart (Responding (M, Group_Id (G), Eye_Id (E)),
+                                                            Textured_Cells (M, Group_Id (G), Eye_Id (E)),
+                                                            Responding (M, Group_Id (G), Eye_Id (F)),
+                                                            Textured_Cells (M, Group_Id (G), Eye_Id (F)))
+                                          then
+                                             Alike := False;
+                                          end if;
+                                       end loop;
                                     end if;
                                  end loop;
                               end Read_Whole;
                            begin
                               Driver.Beats.Within_A_Beat (Read_Whole'Access);
-                              if not Speed and then Whole_Eyes >= 2 then
+                              --  Only alike: one group for two arms moves each arm's eye whole alike, and a group
+                              --  that moves one eye's view significantly more than another's carries the one and
+                              --  sweeps a part across the other (the Panda's arm, 246 and 204 of 255 cells in its
+                              --  wrist's eye and its base camera's, its shadow and its reflection on the floor
+                              --  sweeping the base camera's view; probed one channel at a time, round 4d, 10-23,
+                              --  four of six boots out of beats).
+                              if not Speed and then Whole_Eyes >= 2 and then not Alike then
+                                 Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moves" & Whole_Eyes'Image
+                                                  & " eyes whole, by shares apart: not probed one channel at a time");
+                              end if;
+                              if not Speed and then Whole_Eyes >= 2 and then Alike then
                                  Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " moves" & Whole_Eyes'Image
                                                   & " eyes whole: its channels are probed one at a time");
                                  Set_Whole_Amount (Group_Id (G), 0.0);

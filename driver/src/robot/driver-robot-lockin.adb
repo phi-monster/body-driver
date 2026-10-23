@@ -139,7 +139,13 @@ package body Driver.Robot.Lockin is
                              & Driver.Log.Image (Typical, 4) & " (their energies sum to " & Driver.Log.Image (Sum_Energy, 4)
                              & ", their variances to " & Driver.Log.Image (Sum_Variance, 4) & ";" & Far'Image & " far above)");
             end if;
-            return (Least => Counted + Natural (Real'Floor (Low * Real (Rest))),
+            --  Toward the whole view only when together they show as much as the cells that can tell do: a share
+            --  of the typical energy below it is a part of them moving with the others or all of them moving a
+            --  little, and of the second a group shows a whole view it does not ride: a closer's push that shakes its
+            --  own wrist's camera, Stretch's and ALOHA's jaws called arms by it (round 4a, 10-23: 86 to 123 of 255
+            --  cells responding, the rest pulled along by 2 to 8 sigmas), and an arm that fills half a fixed eye's
+            --  view, the Panda's base camera called ridden and its arm probed channel by channel (146 of 255).
+            return (Least => Counted + (if Mean + Z * Sigma >= Typical then Natural (Real'Floor (Low * Real (Rest))) else 0),
                     Most  => Counted + Natural (Real'Ceiling (High * Real (Rest))));
          end;
       end;
@@ -601,7 +607,7 @@ package body Driver.Robot.Lockin is
 
             --  What a beat is to the regression: a row, or why not (Usable), for the log as well.
             type Row_Kind is (Row, No_Picture, Not_Reached, No_Readings, Two_Pushed, Held_Moved, Unsettled_Before,
-                              Another_Group, Unsettled);
+                              Another_Pushed, Another_Moved_Before, Another_Moving, Unsettled);
             function Kind_Of (B : Natural) return Row_Kind is
                R      : constant Integer := B - Lag;
                Pushes : Natural := 0;
@@ -650,12 +656,14 @@ package body Driver.Robot.Lockin is
                         Low : constant Natural := Natural (Integer'Max (0, Integer (Began) - Tail));
                      begin
                         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-                           if G /= Pusher and then M.Groups (G).Commandable
-                             and then (Mark (Last_Pushed, G, Natural (R)) > Low
-                                       or else (Began > Low and then Mark (Last_Moved, G, Began - 1) > Low)
-                                       or else Mark (Last_Seen_Moving, G, Natural (R)) > Began)
-                           then
-                              return Another_Group;
+                           if G /= Pusher and then M.Groups (G).Commandable then
+                              if Mark (Last_Pushed, G, Natural (R)) > Low then
+                                 return Another_Pushed;
+                              elsif Began > Low and then Mark (Last_Moved, G, Began - 1) > Low then
+                                 return Another_Moved_Before;
+                              elsif Mark (Last_Seen_Moving, G, Natural (R)) > Began then
+                                 return Another_Moving;
+                              end if;
                            end if;
                         end loop;
                      end;

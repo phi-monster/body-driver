@@ -157,6 +157,7 @@ package Driver.Robot.Motion is
       Excursion : Real := 0.0;        --  how far it was taken, in reading units, when seen
       Steps     : Natural := 0;       --  how many doublings that took
       Last      : Step_Report;        --  the last step's report
+      Answered  : Real := 0.0;        --  the least amount some listed reading went along its ask at; 0 where none did
    end record;
 
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real;
@@ -176,8 +177,9 @@ package Driver.Robot.Motion is
       Channels  : Channel_Refs;
       Direction : Real;
       First     : Real;
-      Report    : out Probe_Report)
-     with Pre => Direction /= 0.0 and then First >= 0.0;
+      Report    : out Probe_Report;
+      Other_Way : Real := 0.0)
+     with Pre => Direction /= 0.0 and then First >= 0.0 and then Other_Way >= 0.0;
    --  Takes every listed channel away from its hold by one common amount, in
    --  the sign of Direction, doubling the amount from First (from the
    --  smallest step every listed reading can tell from its noise when First
@@ -185,9 +187,9 @@ package Driver.Robot.Motion is
    --  pushing by, found without knowing any unit. A level counts as seen when
    --  that many moves in a row, alternating between the hold and the amount,
    --  were each seen as make such a run rarer than Z's tail over every level
-   --  a probe may try; one move is a false alarm with a chance of at most the
-   --  sum, over the verdicts it looked at, of one in (rest counts + 1) for an
-   --  eye whose counts at rest are measured, else Z's tail (Lockin.Moved).
+   --  a probe may try; one move is a false alarm with a chance of at most its
+   --  rarest verdict's share of the rest's counts times the verdicts it looked
+   --  at (Lockin.Rest_Share).
    --  Each move looks for as long as a response takes to show: the longest
    --  measured push delay of a listed group, plus the longest image lag, plus
    --  the beat itself. A channel stops following at its own end: asked
@@ -195,7 +197,11 @@ package Driver.Robot.Motion is
    --  far as anything can tell (by a step an eye watching it can see, or,
    --  watched by none, significantly against the readings' noise), and no
    --  longer moves; it is held where it last followed and takes no further
-   --  part. A reading whose noise the model has not measured tells nothing of
+   --  part. Where the body begins to execute is found first: the amount doubles
+   --  until some listed reading goes along its ask; where none does as far as
+   --  the ladder doubles, or as far as Other_Way (the amount the other way
+   --  first went along at: a limit is one-sided), no level is climbed and
+   --  Report.Answered is 0. A reading whose noise the model has not measured tells nothing of
    --  whether it followed (the test above is against the noise), so a listed
    --  channel in that state has the noise measured first, from every beat so
    --  far (Estimate_Now), before anything is moved. The probe ends when an

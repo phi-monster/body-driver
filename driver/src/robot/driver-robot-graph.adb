@@ -82,6 +82,7 @@ package body Driver.Robot.Graph is
       end Told_Eye;
 
       Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Boolean := [others => False];
+      Best_Of : array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Natural := [others => 0];   --  each eye's own group
 
       type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
 
@@ -241,6 +242,26 @@ package body Driver.Robot.Graph is
          end if;
       end;
 
+      --  Each eye's own group: of the groups that move its view whole, the one that moves the most of it (not the
+      --  carrier, which moves every eye on the body). A group that moves an eye's view whole and less of it than
+      --  another group does moves a part of that eye's view, as a jaw shakes the camera on the hand that carries it:
+      --  Stretch's jaw moved 132 of its wrist eye's 255 cells, its arm 203, and every group that moved some eye
+      --  whole was an arm (round 4d, 10-23, five of six boots with the jaw an arm; ALOHA's and the Shadow's too).
+      for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
+         declare
+            Best_Share : Real := 0.0;
+         begin
+            for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+               if Own (G) and then G /= Gr.Carrier and then Effect (M, G, E).Verdict = Whole
+                 and then Effect (M, G, E).Fraction.Value > Best_Share
+               then
+                  Best_Share := Effect (M, G, E).Fraction.Value;
+                  Best_Of (E) := Natural (G);
+               end if;
+            end loop;
+         end;
+      end loop;
+
       --  Arms: every other group that moves some eye whole, or that some eye's keyframes tell it carries.
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          if Own (G) and then G /= Gr.Carrier then
@@ -250,7 +271,7 @@ package body Driver.Robot.Graph is
                Apart_Eyes : Natural := 0;
             begin
                for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-                  if Effect (M, G, E).Verdict = Whole then
+                  if Effect (M, G, E).Verdict = Whole and then Best_Of (E) = Natural (G) then
                      Whole_Eyes := Whole_Eyes + 1;
                   end if;
                   if Apart (E) then
@@ -371,8 +392,11 @@ package body Driver.Robot.Graph is
                   declare
                      F  : constant Eye_Effect := Effect (M, G, E);
                      Mt : constant Mount := Gr.Mounts (E);
+                     --  A whole view that another group moves more of shows this group a part of it (Best_Of).
+                     V  : constant Eye_Response :=
+                       (if F.Verdict = Whole and then Best_Of (E) /= Natural (G) then Patch else F.Verdict);
                   begin
-                     case F.Verdict is
+                     case V is
                         when Patch =>
                            Patched := True;
                            if Mt.Kind = Arm_Carried and then F.Responding > Best_Count then
@@ -415,7 +439,9 @@ package body Driver.Robot.Graph is
                   null;
                elsif M.Groups (G).Closer_Eye > 0
                  and then Gr.Mounts (M.Groups (G).Closer_Eye).Kind = Arm_Carried
-                 and then Effect (M, G, M.Groups (G).Closer_Eye).Verdict in Unmeasured | Undecided | Patch
+                 and then (Effect (M, G, M.Groups (G).Closer_Eye).Verdict in Unmeasured | Undecided | Patch
+                           or else (Effect (M, G, M.Groups (G).Closer_Eye).Verdict = Whole
+                                    and then Best_Of (M.Groups (G).Closer_Eye) /= Natural (G)))
                  and then not Clearer (M.Groups (G).Closer_Eye)
                then
                   Gr.Roles.Replace_Element (G, Closer);

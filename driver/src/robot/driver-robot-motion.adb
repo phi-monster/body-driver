@@ -1585,8 +1585,10 @@ package body Driver.Robot.Motion is
       Channels  : Channel_Refs;
       Direction : Real;
       First     : Real;
-      Report    : out Probe_Report)
+      Report    : out Probe_Report;
+      Other_Way : Real := 0.0)
    is
+      Executes  : Boolean := False;   --  some listed reading went along some amount this way
       Sign      : constant Real := (if Direction > 0.0 then 1.0 else -1.0);
       N         : constant Natural := Channels'Length;
       Listed    : constant Channel_Refs (1 .. N) := Channels;
@@ -1672,13 +1674,27 @@ package body Driver.Robot.Motion is
                end if;
                exit when Hi > 0.0 and then (Lo = 0.0 or else Hi <= 2.0 * Lo);
                exit when Hi = 0.0 and then Lo >= Most;
+               --  A limit is one-sided: a way that moved no reading up to the amount the other way first moved one
+               --  at is at its end.
+               exit when Hi = 0.0 and then Other_Way > 0.0 and then Lo >= Other_Way;
             end;
          end loop;
-         if Hi > 0.0 then
+         Executes := Hi > 0.0;
+         if Executes then
             Amount := Hi;
+            Report.Answered := Hi;
          end if;
          Farthest_At := [others => Start_At];
       end;
+      --  Nothing it was asked moved a listed reading: no level can be seen executed (below), and none is climbed. RB-Y1's
+      --  jaw at its end was asked shut from 0.017 to 1.5e14 units and then up the ladder's levels, 190 of its 1200
+      --  beats (round 4c, 10-23).
+      if not Executes then
+         Driver.Log.Line (Driver.Log.Robot, "probe: every channel together moved no reading along its ask, up to "
+                          & Scientific (Amount) & " units: no level is climbed");
+         Step (M, Base, Report.Last);
+         return;
+      end if;
       for Level in 1 .. Levels loop
          Report.Steps := Level;
          declare

@@ -1094,6 +1094,8 @@ driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numeri
 driver-robot-boot.adb	("" & Driver.Log.Image (Driver.Robot.Kinematics.Counted_Turn (M, A, C), 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	(Now_N - Then_N, Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)), Dof));	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
+driver-robot-boot.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
+driver-robot-boot.adb	(P * (1.0 - P) * (1.0 / Real (N1) + 1.0 / Real (N2)));	1.0	math	the variance of a difference of two proportions, pooled: p (1 - p) (1/n1 + 1/n2)
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
@@ -1107,7 +1109,7 @@ driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a ro
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Descending : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	two pushes per joint, one each way
 driver-robot-boot.adb	Driver.Robot.Motion.Gather_Rest (M, 1);	1	structure	one probe runs moves back and forth on the eyes' verdicts: the ladder of every channel togetherdriver-robot-boot.adb
-driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P);	1.0	structure	the other way: a ladder that showed nothing increasing is asked decreasing
+driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, -1.0, From, P, Other_Way => Up);	1.0	structure	the other way: a ladder that showed nothing increasing is asked decreasing
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	0.0	structure	from zero: the first step is the smallest every reading can tell
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, 0.0, P);	1.0	structure	the positive direction for every channel
 driver-robot-boot.adb	Driver.Robot.Motion.Probe_Together (M, Refs, 1.0, From, P);	1.0	structure	the sign a ladder pushes its channels by: increasing (any sign would do; the group is pushed both ways after)
@@ -1144,7 +1146,7 @@ driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes
 driver-robot-boot.adb	Order : Push_Array (1 .. 2 * Size);	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Patch := 2.0 * Real (Driver.Alignment.Half_Patch (M.Eyes (Eye_Id (Eye)).Grid.Width,	2.0	math	a patch of view is twice its half (Alignment.Half_Patch)
 driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));	1	structure	at least one beat of hold after a push, as Recognize's pushes are held
-driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))));	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag
+driver-robot-boot.adb	Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))), Way => -Sign);	1	structure	the guessed hold begins at one beat, the unit, while the stream can tell no lag
 driver-robot-boot.adb	Place : constant Natural := Turns.First_Index + 2 * K;	2	structure	two turns to a pair, its earlier joint's and its later one's
 driver-robot-boot.adb	Push_Both_Ways (G, Size, 1.0, Moved,	1.0	structure	the first round pushes by the amounts as recognized, once
 driver-robot-boot.adb	R := R / 2;	2	math	the parity and the next bit of a row and a column
@@ -1188,7 +1190,8 @@ driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the pari
 driver-robot-boot.adb	if R mod 2 = 1 and then Col mod 2 = 1 then	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	if Reached (P.Channel) = 0.0 and then Offset (I) / 2.0 >= Least (P.Channel)	2.0	structure	the ladder goes down by halving, to the least turn a keyframe counts
 driver-robot-boot.adb	if not Fitted_Now and then Motion > 2.0 * Patch and then Motion > Fixed then	2.0	structure	a doubled level's increment is the level before it: two patches of whole motion is one patch beyond the followed level
-driver-robot-boot.adb	if not Speed and then Whole_Eyes >= 2 then	2	structure	two eyes moved whole: the least a group carrying eyes on channels of their own shows
+driver-robot-boot.adb	if not Speed and then Whole_Eyes >= 2 and then Alike then	2	structure	two eyes moved whole: the least a group carrying eyes on channels of their own shows
+driver-robot-boot.adb	if not Speed and then Whole_Eyes >= 2 and then not Alike then	2	structure	two eyes moved whole: the least a group carrying eyes on channels of their own shows
 driver-robot-boot.adb	or else (Lost_Least (I) - Followed_Most (I)) / 2.0 * Per_Unit (Channel) > Patch));	2.0	structure	half the gap's view motion against a patch
 driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	math	Park and Miller's minimal standard generator: the modulus 2^31 - 1
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Channels.Noise (M, G, C), 4) else ""));	4	format	digits printed in a log line or a message
