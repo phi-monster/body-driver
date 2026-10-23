@@ -22,7 +22,8 @@ package Driver.Robot.Motion is
       Back         : Driver.Commands.Command;
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
-      Kept_Eyes    : out Channel_Flags)
+      Kept_Eyes    : out Channel_Flags;
+      Came_Back    : out Boolean)
      with Pre => Kept_Eyes'Length = Eye_Count (M);
    --  Holds until Still (M), as Settle, the push before it held meanwhile; but when every commanded reading stands
    --  and some eye's picture goes on drifting (Stillness.Eye_Drift_Run: two beats running, the least that tells a
@@ -30,6 +31,7 @@ package Driver.Robot.Motion is
    --  and the wait goes on. Kept_Going: Back was sent, and once settled some eye's picture stayed away from where the
    --  push began (Mark_Origins) rather than came back: a body a speed carried stops where it got to, a joint sent
    --  back comes back; Kept_Eyes: the eyes that stayed away, one a Boolean per eye from 1.
+   --  Came_Back: Back was sent and every eye came back: a joint's push.
 
    procedure Mark_Origins (M : in out Model);
    --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).

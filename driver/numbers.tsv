@@ -1074,6 +1074,7 @@ driver-robot-body_file.ads	Noise_Method : constant := 3;	3	format	the third vers
 driver-robot-body_file.ads	Steps_Method : constant := 3;	3	format	the third version of this method; the body file records per channel the least ask a push moved it for (Steps.Executed_Least)
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
+driver-robot-boot.adb	& "" & Driver.Log.Image (Now_N, 3) & "" & Dof'Image & "");	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Rests (G, E), 2)	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Share (P.Earlier), 3) & ""	3	format	digits printed in a log line or a message
@@ -1092,6 +1093,7 @@ driver-robot-boot.adb	& Scientific (From * 2.0 ** (P.Levels (S) - 1))	2.0	numeri
 driver-robot-boot.adb	("" & Driver.Log.Image (Driver.Robot.Kinematics.Counted_Turn (M, A, C), 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	(Unrepeated, "" & G'Image & "" & C'Image & "" & Driver.Log.Image (Then_N, 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	2	math	the parity of the bits two indices share (Sylvester-Hadamard)

@@ -1027,6 +1027,19 @@ package body Driver.Robot is
    function Keeps_Going (M : Model; G : Group_Id) return Boolean is
      (G <= M.Groups.Last_Index and then (for some K of M.Groups (G).Keeps_Going => K));
 
+   procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive) is
+      S : Group_Stream renames M.Groups (G);
+   begin
+      while Natural (S.Comes_Back.Length) < S.Size loop
+         S.Comes_Back.Append (False);
+      end loop;
+      S.Comes_Back.Replace_Element (Channel - 1, True);
+   end Note_Comes_Back;
+
+   function Comes_Back (M : Model; G : Group_Id; Channel : Positive) return Boolean is
+     (G <= M.Groups.Last_Index and then Channel <= Natural (M.Groups (G).Comes_Back.Length)
+      and then M.Groups (G).Comes_Back (Channel - 1));
+
    function Kept_Eye (M : Model; G : Group_Id; E : Eye_Id) return Boolean is
      (G <= M.Groups.Last_Index and then Natural (E) <= Natural (M.Groups (G).Kept_Eyes.Length)
       and then M.Groups (G).Kept_Eyes (Natural (E) - 1));

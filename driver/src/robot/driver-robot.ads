@@ -311,6 +311,10 @@ package Driver.Robot is
    function Kept_Eye (M : Model; G : Group_Id; E : Eye_Id) return Boolean;
    --  The eye's picture drifted while a channel of the group kept the body going.
 
+   procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive);
+   function Comes_Back (M : Model; G : Group_Id; Channel : Positive) return Boolean;
+   --  A push of the channel, held and sent back, came back with the eyes' pictures (Motion.Settle): a joint.
+
    function Reading_Noise (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  The standard deviation of the channel's reading at rest, in reading
    --  units; zero for a reading that repeats exactly.
@@ -556,6 +560,8 @@ private
                                             --  once it was sent back (Motion.Settle): a speed, not a place; empty before
       Kept_Eyes    : Flag_Vectors.Vector;   --  per eye (from 0): the eyes whose pictures drifted while one of its channels
                                             --  kept the body moving; empty before
+      Comes_Back   : Flag_Vectors.Vector;   --  per channel: a push of it, held and sent back, came back (Motion.Settle): a
+                                            --  joint, whose pushes need no holding to tell a speed; empty before
    end record;
 
    package Group_Stream_Vectors is new Ada.Containers.Vectors (Group_Id, Group_Stream);

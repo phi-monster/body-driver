@@ -31,7 +31,8 @@ package body Driver.Robot.Motion is
       Use_Back     : Boolean;
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
-      Kept_Eyes    : out Channel_Flags)
+      Kept_Eyes    : out Channel_Flags;
+      Came_Back    : out Boolean)
    is
       B : Driver.Clock.Beat;
       --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
@@ -199,6 +200,7 @@ package body Driver.Robot.Motion is
       Beats_Waited := 0;
       Kept_Going := False;
       Kept_Eyes := [others => False];
+      Came_Back := False;
       for E in 1 .. Eyes loop
          Lag := Natural'Max (Lag, Natural'Max (0, Image_Lag (M, Eye_Id (E))));
       end loop;
@@ -356,6 +358,7 @@ package body Driver.Robot.Motion is
                              & (if Kept_Going then " the push kept the body going" else " no speed"));
          end;
       end if;
+      Came_Back := Sent_Back and then not Kept_Going;
    end Settle_Body;
 
    procedure Mark_Origins (M : in out Model) is
@@ -366,10 +369,10 @@ package body Driver.Robot.Motion is
    end Mark_Origins;
 
    procedure Settle (M : in out Model; Beats_Waited : out Natural) is
-      Kept : Boolean;
-      Eyes : Channel_Flags (1 .. Eye_Count (M));
+      Kept, Back : Boolean;
+      Eyes       : Channel_Flags (1 .. Eye_Count (M));
    begin
-      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes);
+      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes, Back);
    end Settle;
 
    procedure Settle
@@ -377,9 +380,10 @@ package body Driver.Robot.Motion is
       Back         : Driver.Commands.Command;
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
-      Kept_Eyes    : out Channel_Flags) is
+      Kept_Eyes    : out Channel_Flags;
+      Came_Back    : out Boolean) is
    begin
-      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes);
+      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes, Came_Back);
    end Settle;
 
    procedure Judge
@@ -1833,10 +1837,19 @@ package body Driver.Robot.Motion is
                --  hold once every reading stands and the pictures drift on (round 0, 10-23: the Go2 waited here 6800
                --  beats, walking on, its picture never settling).
                declare
-                  Kept      : Boolean;
-                  Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+                  Kept, Came    : Boolean := False;
+                  Kept_Eyes     : Channel_Flags (1 .. Eye_Count (M));
                begin
-                  Settle (M, Base, Waited, Kept, Kept_Eyes);
+                  --  A channel whose held push came back once is a joint: no hold to tell it from a speed (round 1,
+                  --  10-23: ALOHA's sagging arms were held and sent back some twenty times a boot).
+                  if Comes_Back (M, Ref.Group, Ref.Channel) then
+                     Settle (M, Waited);
+                  else
+                     Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
+                     if Came then
+                        Note_Comes_Back (M, Ref.Group, Ref.Channel);
+                     end if;
+                  end if;
                   if Kept then
                      Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
                      Report.Keeps_Going := True;
@@ -1908,10 +1921,10 @@ package body Driver.Robot.Motion is
                   --  this level, and sent back): a look of a few beats saw nothing of a walk the body starts some beats
                   --  after its readings answer (the Go2 in round 1, 10-23: its looks two to three beats long).
                   declare
-                     Kept      : Boolean;
-                     Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+                     Kept, Came : Boolean;
+                     Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
                   begin
-                     Settle (M, Base, Waited, Kept, Kept_Eyes);
+                     Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
                      if Kept then
                         Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
                         Report.Seen := True;
@@ -1973,13 +1986,16 @@ package body Driver.Robot.Motion is
       --  The last level's push, held: one that keeps the body going drifts the pictures while every commanded reading
       --  stands, and is sent back (a channel seen at its first level was never held past it: Stretch's base and some
       --  of the drone's motors in round 1, 10-23).
-      if not Keeps_Going (M, Ref.Group, Ref.Channel) then
+      if not Keeps_Going (M, Ref.Group, Ref.Channel) and then not Comes_Back (M, Ref.Group, Ref.Channel) then
          declare
-            Waited    : Natural;
-            Kept      : Boolean;
-            Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+            Waited     : Natural;
+            Kept, Came : Boolean;
+            Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
          begin
-            Settle (M, Base, Waited, Kept, Kept_Eyes);
+            Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
+            if Came then
+               Note_Comes_Back (M, Ref.Group, Ref.Channel);
+            end if;
             if Kept then
                Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);
                Report.Keeps_Going := True;

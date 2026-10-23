@@ -236,12 +236,19 @@ package body Driver.Robot.Boot is
                --  Held so, a push that keeps the body going drifts the pictures while every commanded reading stands, and
                --  is sent back to the hold (Motion.Settle): the Go2 walked 50 m in round 1 (10-23) through these rounds.
                declare
-                  Back      : Driver.Commands.Command := Driver.Commands.Hold;
-                  Kept      : Boolean;
-                  Kept_Eyes : Channel_Flags (1 .. Eye_Count (M));
+                  Back       : Driver.Commands.Command := Driver.Commands.Hold;
+                  Kept, Came : Boolean := False;
+                  Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
                begin
-                  Driver.Commands.Set_Target (Back, G, Here);
-                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes);
+                  if Comes_Back (M, G, P.Channel) then
+                     Driver.Robot.Motion.Settle (M, Waited);
+                  else
+                     Driver.Commands.Set_Target (Back, G, Here);
+                     Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                     if Came then
+                        Note_Comes_Back (M, G, P.Channel);
+                     end if;
+                  end if;
                   if Kept then
                      Note_Keeps_Going (M, G, P.Channel, Kept_Eyes);
                      Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
@@ -1405,6 +1412,7 @@ package body Driver.Robot.Boot is
       Rest_Noises : Noise_Access;
       Rest_Beats  : Natural := 0;     --  the beats the body had seen at the last comparison
       Rest_Stable : Boolean := False;
+      Unrepeated  : Ada.Strings.Unbounded.Unbounded_String;   --  the channels whose noise did not repeat, for the log
       procedure Read_Rest is
          Index : Natural := 0;
          Total : Natural := 0;
@@ -1431,6 +1439,7 @@ package body Driver.Robot.Boot is
          end if;
          if M.Beats >= 2 * Rest_Beats then
             Rest_Stable := Rest_Beats > 0;
+            Unrepeated := Ada.Strings.Unbounded.Null_Unbounded_String;
             for G in 1 .. Group_Count (M) loop
                for C in 1 .. Group_Size (M, Group_Id (G)) loop
                   Index := Index + 1;
@@ -1449,6 +1458,11 @@ package body Driver.Robot.Boot is
                                            Dof))
                         then
                            Rest_Stable := False;
+                           if Then_N < Real'Last then
+                              Ada.Strings.Unbounded.Append
+                                (Unrepeated, " group" & G'Image & " channel" & C'Image & " (" & Driver.Log.Image (Then_N, 3)
+                                 & " then, " & Driver.Log.Image (Now_N, 3) & " now, on" & Dof'Image & " degrees)");
+                           end if;
                         end if;
                         Rest_Noises (Index) := Now_N;
                      end;
@@ -1609,6 +1623,13 @@ package body Driver.Robot.Boot is
             Driver.Beats.Within_A_Beat (Estimate'Access);
             Driver.Beats.Within_A_Beat (Read_Rest'Access);
             exit when Rest_Measured and then Rest_Stable;
+            --  Which channels' noise did not repeat as the rest doubled: the Shadow hand held still here for 1000 to
+            --  1200 beats with no channel drifting (round 1, 10-23).
+            if Ada.Strings.Unbounded.Length (Unrepeated) > 0 then
+               Driver.Log.Line (Driver.Log.Robot, "boot: at rest, the noise did not repeat at" & M.Beats'Image & " beats:"
+                                & Ada.Strings.Unbounded.To_String (Unrepeated) & "; holding still on");
+               Unrepeated := Ada.Strings.Unbounded.Null_Unbounded_String;
+            end if;
             if Ada.Strings.Unbounded."/=" (Drifting, Last) then
                Driver.Log.Line (Driver.Log.Robot, "boot: still moving at rest:"
                                 & Ada.Strings.Unbounded.To_String (Drifting) & "; holding still on");
