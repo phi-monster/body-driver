@@ -1,7 +1,9 @@
 #!/usr/bin/perl
 # score1.pl RUN: step 1 of a run on a MuJoCo robot against its truth (RUN/truth.json, written by robot.py): every group's
 # role as the driver recognized it (the groups as recognized) against the role its truth gives it, every camera's mount
-# against its truth's, and every camera an arm carries carried by the group that truly carries it. The driver's group N
+# against its truth's, every camera an arm carries carried by the group that truly carries it, and every closer the closer
+# of the arm that truly bears it (its truth names it ARM_closer beside its arm's ARM_joints, as bodies.py names them: on a
+# robot of two arms, the closer of the wrong arm leaves step 4 to look for its tips in the other arm's eye). The driver's group N
 # and eye N are matched to the truth by the drawn keys the robot reported them under (the robot reports), never by order.
 # One line: NAME step1 PASS|FAIL|UNFINISHED, then each wrong group and eye as truth->seen, then the beat it recognized at.
 use strict; use warnings; use JSON::PP;
@@ -53,5 +55,15 @@ for my $c (@{$truth->{cameras}}) {
     push @wrong, "$c->{name}:on $c->{by}->on " . (defined $carrier ? "group $carrier" : "none")
       unless defined $carrier && defined $truly && $carrier == $truly;
   }
+}
+for my $g (grep { $_->{role} eq "CLOSER" } @{$truth->{groups}}) {
+  my $i = $g_by_key{$g->{wire}};
+  next unless defined $i && ($role{$i} // "") eq "CLOSER";   # a wrong role is told above
+  (my $arm = $g->{name}) =~ s/_closer$/_joints/;
+  my $j = defined $truth_group_by_name{$arm} ? $g_by_key{$truth_group_by_name{$arm}{wire}} : undef;
+  my $bears = defined $arm_of_group{$i}
+    ? (grep { ($role{$_} // "") eq "ARM" && defined $arm_of_group{$_} && $arm_of_group{$_} == $arm_of_group{$i} } keys %role)[0] : undef;
+  push @wrong, "$g->{name}:of $arm->of " . (defined $bears ? "group $bears" : "no arm")
+    unless defined $bears && defined $j && $bears == $j;
 }
 printf "%s step1 %s%s \@%s\n", $name, (@wrong ? "FAIL" : "PASS"), (@wrong ? " [" . join("; ", @wrong) . "]" : ""), $at;
