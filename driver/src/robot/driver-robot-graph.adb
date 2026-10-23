@@ -107,11 +107,29 @@ package body Driver.Robot.Graph is
          then M.Eyes (E).Stayed_Far (Natural (G) - 1) / Real (M.Eyes (E).Stayed_Pushes (Natural (G) - 1)) else 0.0);
 
       --  The cells of eye E group G's pushes left moved, and the textured cells they were counted of, summed over the
-      --  pushes Motion.Note_Stayed measured.
+      --  pushes Motion.Note_Stayed measured; and of them, those moved beyond the flow's reach.
       function Moved_Of (G : Group_Id; E : Eye_Id) return Natural is
         (if Natural (G) <= Natural (M.Eyes (E).Stayed_Moved.Length) then M.Eyes (E).Stayed_Moved (Natural (G) - 1) else 0);
       function Cells_Of (G : Group_Id; E : Eye_Id) return Natural is
         (if Natural (G) <= Natural (M.Eyes (E).Stayed_Cells.Length) then M.Eyes (E).Stayed_Cells (Natural (G) - 1) else 0);
+
+      --  Group G's pushes left most of eye E's view unmoved: even the push of it that left the largest share moved left
+      --  significantly more than half the textured cells unmoved. Not their sum: a push into an end, or one the body
+      --  answered late, leaves nothing, and the test rig's arm, its push up leaving its eye's 48 cells unmoved and its
+      --  push down 31 of them moved, was a part by the sum (robot.boot, 10-24).
+      function Unmoved (G : Group_Id; E : Eye_Id) return Boolean is
+        (Natural (G) <= Natural (M.Eyes (E).Stayed_Best_Cells.Length)
+         and then Natural (G) <= Natural (M.Eyes (E).Stayed_Best_Moved.Length)
+         and then M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1) > 0
+         and then Lockin.Mostly (M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1) - M.Eyes (E).Stayed_Best_Moved (Natural (G) - 1),
+                                 M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1)));
+
+      --  Group G may carry eye E: one of its own, not the carrier, that moves the eye's view whole.
+      function Candidate (G : Group_Id; E : Eye_Id) return Boolean is
+        (Own (G) and then G /= Gr.Carrier and then Whole_For (G, E));
+      function Far_Cells_Of (G : Group_Id; E : Eye_Id) return Natural is
+        (if Natural (G) <= Natural (M.Eyes (E).Stayed_Far_Cells.Length) then M.Eyes (E).Stayed_Far_Cells (Natural (G) - 1)
+         else 0);
 
       type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
 
@@ -285,50 +303,48 @@ package body Driver.Robot.Graph is
       --  further beyond the flow's reach (Far_Of: a camera carried is turned and moved by the whole push, a part, its
       --  shadow and its reflection in a fixed eye sweep a share of its view, and a body that sways or rocks shifts a
       --  view by a little; an eye moved by a group that turns another eye further rides on neither, as far as that
-      --  group goes). A group carries an eye when it moves its view whole and its pushes left no significantly
-      --  smaller share of the view moved, of its textured cells, than the most a group moving the eye most left
-      --  (Regression.Shares_Apart): a camera carried is displaced whole, where a part in its view (an arm in the head
-      --  camera's, a hand before a wrist camera) or a view that swayed and came back is left moved in part; with no
-      --  counts there is nothing against it. Of the groups that move an eye most and carry it, the eye rides the one
+      --  group goes). A group carries an eye when it moves its view whole and no other group that does left
+      --  significantly more of the view moved, of its textured cells (Regression.Shares_Apart), while moving it at least
+      --  as far beyond reach: a camera carried is displaced whole, where a part in its view (an arm in the head
+      --  camera's, a hand before a wrist camera) or a view that swayed and came back is left moved in part; a body that
+      --  rocks as another group moves leaves most of a view moved by little (Stretch's head camera as its arm moved,
+      --  96 % of the cells moved and 8 % beyond reach, its head's own pushes 75 % and 38 %) and takes no carrier from it;
+      --  and no group carries an eye whose view its pushes left mostly unmoved (significantly more than half its
+      --  textured cells, Lockin.Mostly): the Panda's gripper, before its arm was recognized, whole by the lock-in in
+      --  both its eyes as their views shook, its pushes leaving 10 and 2 % of them moved, carried both and rode the
+      --  base camera on (seed 2, paced rounds p90a and p91b, 10-24); with no counts there is nothing against a group.
+      --  Of the groups that move an eye most and carry it, the eye rides the one
       --  that carries the fewest eyes, the one whose pushes left the most of its view beyond reach of those that carry
       --  as many: a group carries every eye carried by a group it carries, RB-Y1's torso its head's camera and both
       --  wrists', its head the head's camera alone. By the most beyond reach alone, the torso took the head's camera
       --  in every boot of RB-Y1 that finished (paced rounds p79 to p87, 10-23 and 10-24), its pushes turning it six to fifteen
       --  times as far as the head's; and a wrist eye whose farthest-moving group, the torso, turned another eye
-      --  further rode on nothing, its arm moving no eye further. By the most beyond reach, of 1062 eyes of twelve
-      --  paced rounds (p82 to p87) the own group was right in 987, by this in 1023, no other robot's eye wrong that
-      --  was right.
+      --  further rode on nothing, its arm moving no eye further. Replayed over twenty paced rounds (p82 to p91, 10-23
+      --  and 10-24), the own group of 1792 eyes was right in 1677 by the most beyond reach, in 1755 this way; of the
+      --  eyes right before, two of the G1's are wrong now and one of Stretch's, its gripper filling its wrist eye's view
+      --  as its arm did and its arm rocking the head's camera too (seed 2, round p89b).
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-            Most (G, E) := Own (G) and then G /= Gr.Carrier and then Whole_For (G, E)
+            Most (G, E) := Candidate (G, E)
               and then (for all F in M.Eyes.First_Index .. M.Eyes.Last_Index =>
                           F = E or else not (Far_Of (G, F) > Far_Of (G, E)));
          end loop;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-         declare
-            Most_Moved, Most_Cells : Natural := 0;   --  the largest share a group moving the eye most left moved
-         begin
-            for H in M.Groups.First_Index .. M.Groups.Last_Index loop
-               if Most (H, E) and then Cells_Of (H, E) > 0
-                 and then (Most_Cells = 0
-                           or else Real (Moved_Of (H, E)) / Real (Cells_Of (H, E)) > Real (Most_Moved) / Real (Most_Cells))
-               then
-                  Most_Moved := Moved_Of (H, E);
-                  Most_Cells := Cells_Of (H, E);
-               end if;
-            end loop;
-            for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-               Carries (G, E) := Own (G) and then G /= Gr.Carrier and then Whole_For (G, E)
-                 and then not (Most_Cells > 0 and then Cells_Of (G, E) > 0
-                               and then Real (Most_Moved) / Real (Most_Cells) > Real (Moved_Of (G, E)) / Real (Cells_Of (G, E))
-                               and then Driver.Robot.Regression.Shares_Apart
-                                          (Most_Moved, Most_Cells, Moved_Of (G, E), Cells_Of (G, E)));
-               if Carries (G, E) then
-                  Carried (G) := Carried (G) + 1;
-               end if;
-            end loop;
-         end;
+         for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+            Carries (G, E) := Candidate (G, E)
+              and then not Unmoved (G, E)
+              and then not (for some H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                              H /= G and then Candidate (H, E) and then Cells_Of (H, E) > 0 and then Cells_Of (G, E) > 0
+                              and then Real (Moved_Of (H, E)) / Real (Cells_Of (H, E))
+                                       > Real (Moved_Of (G, E)) / Real (Cells_Of (G, E))
+                              and then not (Far_Of (H, E) < Far_Of (G, E))
+                              and then Driver.Robot.Regression.Shares_Apart
+                                         (Moved_Of (H, E), Cells_Of (H, E), Moved_Of (G, E), Cells_Of (G, E)));
+            if Carries (G, E) then
+               Carried (G) := Carried (G) + 1;
+            end if;
+         end loop;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          declare
@@ -469,21 +485,22 @@ package body Driver.Robot.Graph is
                Best_Arm   : Arm_Id'Base := 0;
                Best_Eye   : Eye_Id'Base := 0;
                Best_Count : Natural := 0;
+               Best_Far   : Real := -1.0;
                Patched    : Boolean := False;
                Unsure     : Boolean := False;   --  some eye has not told
                Undecided_Eye : Boolean := False;   --  some eye told, but not enough to decide
                Shown      : Eye_Flags := [others => False];   --  eyes on an arm that show the group a patch
 
-               --  Another eye on an arm shows the group a patch of significantly more cells than Kept shows it now (a
-               --  sign test: each cell that responds in either is as likely in both where the two show the group
-               --  alike). Not where Kept was not measured: it then tells nothing.
+               --  Another eye on an arm shows the group a patch, and the group's pushes left significantly more of its
+               --  view moved beyond the flow's reach than of Kept's (Regression.Shares_Apart). Not where the lock-in has
+               --  not measured the group in Kept: it then tells nothing.
                function Clearer (Kept : Eye_Id) return Boolean is
-                  Now : constant Eye_Effect := Effect (M, G, Kept);
-               begin
-                  return Best_Eye > 0 and then Best_Eye /= Kept and then Now.Verdict /= Unmeasured
-                    and then Real (Best_Count) - Real (Now.Responding)
-                             > Driver.Conventions.Z * Sqrt (Real (Best_Count + Now.Responding));
-               end Clearer;
+                 (Best_Eye > 0 and then Best_Eye /= Kept and then Effect (M, G, Kept).Verdict /= Unmeasured
+                  and then Cells_Of (G, Kept) > 0 and then Cells_Of (G, Best_Eye) > 0
+                  and then Real (Far_Cells_Of (G, Best_Eye)) / Real (Cells_Of (G, Best_Eye))
+                           > Real (Far_Cells_Of (G, Kept)) / Real (Cells_Of (G, Kept))
+                  and then Driver.Robot.Regression.Shares_Apart
+                             (Far_Cells_Of (G, Best_Eye), Cells_Of (G, Best_Eye), Far_Cells_Of (G, Kept), Cells_Of (G, Kept)));
 
                --  An eye on an arm that shows the group a patch and rode none when the remembered eye was chosen: the
                --  remembered eye was never weighed against it (RB-Y1's right finger, seed 2, paced round p87b, 10-23:
@@ -511,14 +528,25 @@ package body Driver.Robot.Graph is
                         when Patch =>
                            Patched := True;
                            Shown (E) := Mt.Kind = Arm_Carried;
-                           if Mt.Kind = Arm_Carried and then F.Responding > Best_Count then
+                           --  Of the eyes on arms, the one whose view the group's pushes left most beyond the flow's
+                           --  reach, the most cells responding between eyes left as far: a closer's own wrist eye sees
+                           --  it near, its fingers sweeping cells by more than the flow reaches, where an eye that sees
+                           --  it from afar, or a body that rocks as it moves, has many cells respond and few moved far
+                           --  (Stretch's gripper, seed 2, paced round p89a, 10-24: in its wrist's eye 107 of 255 cells
+                           --  responding and 14 % of the view left beyond reach, in the head's eye 216 and 1 %, the robot
+                           --  rocking as the gripper moved; by the cells responding, it went to the head's arm).
+                           if Mt.Kind = Arm_Carried
+                             and then (Far_Of (G, E) > Best_Far
+                                       or else (Far_Of (G, E) = Best_Far and then F.Responding > Best_Count))
+                           then
+                              Best_Far := Far_Of (G, E);
                               Best_Count := F.Responding;
                               Best_Arm := Mt.Arm;
                               Best_Eye := E;
                            end if;
                         when Undecided =>
                            Unsure := True;
-                           Undecided_Eye := Undecided_Eye or else F.Could_Be_Whole;
+                           Undecided_Eye := Undecided_Eye or else (F.Could_Be_Whole and then not Unmoved (G, E));
                         when Unmeasured =>
                            Unsure := True;
                         when Nothing | Whole =>
@@ -535,6 +563,9 @@ package body Driver.Robot.Graph is
                --  patch of 11 cells in its own eye, the other arm's eye undecided
                --  between 19 and 133 cells of 255; no closer, no hand, the brain
                --  given only speech).
+               --  Nor an eye the group's pushes left mostly unmoved (Unmoved): no group carries it (Best_Of), and the
+               --  Shadow's hand stayed unclassified while its base camera, undecided about it as its fingers flexed in
+               --  view, was left 7 to 11 % moved by its pushes (seed 1, paced rounds p86, p89, p92, 10-23 and 10-24).
                --  The eye on an arm that last showed the group a closer of it (Group_Stream.Closer_Eye) still does while
                --  it tells nothing against it: not measured (the lock-in kept no column of the group at an estimate:
                --  s38, servo seed 6 of the fake robot, 10-17, replayed: at beat 2145 every eye UNMEASURED on its closer,
@@ -542,8 +573,8 @@ package body Driver.Robot.Graph is
                --  same day), undecided, or a patch. An eye that may ride the group (undecided, its view possibly
                --  whole: the rule above) still leaves it unclassified; an eye in which the group moves nothing, or
                --  moves the whole view, takes the role off, and so does the eye leaving the arm. So does another eye
-               --  on an arm whose patch of the group significantly outnumbers in cells what the eye that showed it
-               --  shows now (Clearer): the eye that showed a closer first may have been the only eye then known to
+               --  on an arm whose view the group's pushes left significantly more of beyond reach (Clearer): the eye
+               --  that showed a closer first may have been the only eye then known to
                --  ride an arm (w11, servo seed 11 of the fake robot, 10-19: arm 1's closer a patch of 6 to 8 cells in
                --  arm 2's eye and of 36 in arm 1's own, which was known to ride arm 1 from beat 2543 on; the
                --  remembered eye kept the closer on arm 2, and arm 1 was given none). Nor does it hold against an eye on an

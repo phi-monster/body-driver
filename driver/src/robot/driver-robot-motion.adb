@@ -503,12 +503,21 @@ package body Driver.Robot.Motion is
                         S.Stayed_Moved.Append (0);
                         S.Stayed_Cells.Append (0);
                         S.Stayed_Far_Cells.Append (0);
+                        S.Stayed_Best_Moved.Append (0);
+                        S.Stayed_Best_Cells.Append (0);
                      end loop;
                      S.Stayed_Pushes.Replace_Element (Natural (G) - 1, S.Stayed_Pushes (Natural (G) - 1) + 1);
                      S.Stayed_Far.Replace_Element (Natural (G) - 1, S.Stayed_Far (Natural (G) - 1) + Real (Far) / Real (Textured));
                      S.Stayed_Moved.Replace_Element (Natural (G) - 1, S.Stayed_Moved (Natural (G) - 1) + Moved);
                      S.Stayed_Cells.Replace_Element (Natural (G) - 1, S.Stayed_Cells (Natural (G) - 1) + Textured);
                      S.Stayed_Far_Cells.Replace_Element (Natural (G) - 1, S.Stayed_Far_Cells (Natural (G) - 1) + Far);
+                     if S.Stayed_Best_Cells (Natural (G) - 1) = 0
+                       or else Real (Moved) / Real (Textured)
+                               > Real (S.Stayed_Best_Moved (Natural (G) - 1)) / Real (S.Stayed_Best_Cells (Natural (G) - 1))
+                     then
+                        S.Stayed_Best_Moved.Replace_Element (Natural (G) - 1, Moved);
+                        S.Stayed_Best_Cells.Replace_Element (Natural (G) - 1, Textured);
+                     end if;
                   end if;
                   Driver.Log.Line (Driver.Log.Robot, "motion: group" & G'Image & "'s push "
                                    & (if Way > 0.0 then "upwards" else "downwards") & " left eye" & E'Image
@@ -2235,6 +2244,13 @@ package body Driver.Robot.Motion is
             Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
             if Came then
                Note_Comes_Back (M, Ref.Group, Ref.Channel);
+            end if;
+            --  What the last level's push left, held and neither sent back nor come back (Note_Stayed), as a group's
+            --  recognition notes it: the graph tells an eye's own group and a closer's eye by it (Graph.Best_Of), and a
+            --  group recognized one channel at a time had none. RB-Y1's left finger, probed so, went to the arm whose
+            --  wrist's eye showed it in 43 cells against its own wrist's 42 (seed 1, paced rounds p89c and p96b, 10-24).
+            if not Kept and then not Came and then Last_Offset > 0.0 then
+               Note_Stayed (M, Ref.Group, Signs (Last_Way));
             end if;
             if Kept then
                Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);

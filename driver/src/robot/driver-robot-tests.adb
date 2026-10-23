@@ -739,20 +739,45 @@ package body Driver.Robot.Tests is
              "a derivation with no channel told lost the split: " & Natural'Image (Arms_Of_Group (M)) & " arms");
    end Group_Of_Different_Eyes_Has_An_Arm_Each;
 
-   --  A closer's remembered eye (Group_Stream.Closer_Eye) yields to another eye on an arm whose patch of the group
-   --  significantly outnumbers its own in cells, and only to such a one; where the remembered eye was not measured it
-   --  tells nothing and keeps the group (w11, servo seed 11 of the fake robot, 10-19: arm 1's closer stayed on arm 2
-   --  by arm 2's eye, 6 to 8 cells, though arm 1's own eye showed it in 36).
+   --  A closer's remembered eye (Group_Stream.Closer_Eye) yields to another eye on an arm whose view the group's pushes
+   --  left significantly more of beyond the flow's reach, and only to such a one; where the lock-in has not measured
+   --  the group in the remembered eye, it tells nothing and keeps the group (w11, servo seed 11 of the fake robot, 10-19:
+   --  arm 1's closer stayed on arm 2 by arm 2's eye, 6 to 8 cells, though arm 1's own eye showed it in 36; Stretch's
+   --  gripper, seed 2, paced round p89a, 10-24: on the head's arm by 216 cells responding in the head's eye to 107 in
+   --  its wrist's, the robot rocking as it moved, where its pushes left 1 % and 14 % of the two views beyond reach).
    procedure Clearer_Eye_Takes_A_Closer is
       M     : Model;
       Group : constant Group_Id := 3;   --  the rig's closer
       Own   : Eye_Effect;
-      Least : Natural := 0;   --  the fewest cells of a patch in eye 2 that significantly outnumber eye 1's
+      Cells : constant Natural := 1000;   --  the textured cells the group's pushes were counted over, in each eye
+      Kept  : constant Natural := 100;    --  of them, those its pushes left beyond the flow's reach in eye 1
+      Least : Natural := 0;   --  the fewest left beyond reach in eye 2 that are significantly more than eye 1's
       function Index_Of (E : Eye_Id) return Positive is ((Natural (Group) - 1) * Eye_Count (M) + Natural (E));
-      function Patch_Of (Cells : Natural) return Eye_Effect is
-        (Verdict => Patch, Responding => Cells, Textured => Own.Textured,
-         Fraction => (Value => Real (Cells) / Real (Own.Textured), Sigma => 0.07, Degrees_Of_Freedom => 0),
-         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => False, Far_Chance => 1.0);
+      --  The group's pushes left Far of eye E's textured cells beyond the flow's reach (Motion.Note_Stayed).
+      procedure Leave (E : Eye_Id; Far : Natural) is
+         S : Eye_Stream renames M.Eyes (E);
+      begin
+         while Natural (S.Stayed_Far.Length) < Natural (Group) loop
+            S.Stayed_Far.Append (0.0);
+         end loop;
+         while Natural (S.Stayed_Pushes.Length) < Natural (Group) loop
+            S.Stayed_Pushes.Append (0);
+         end loop;
+         while Natural (S.Stayed_Cells.Length) < Natural (Group) loop
+            S.Stayed_Cells.Append (0);
+         end loop;
+         while Natural (S.Stayed_Far_Cells.Length) < Natural (Group) loop
+            S.Stayed_Far_Cells.Append (0);
+         end loop;
+         while Natural (S.Stayed_Moved.Length) < Natural (Group) loop
+            S.Stayed_Moved.Append (0);
+         end loop;
+         S.Stayed_Far.Replace_Element (Natural (Group) - 1, Real (Far) / Real (Cells));
+         S.Stayed_Pushes.Replace_Element (Natural (Group) - 1, 1);
+         S.Stayed_Cells.Replace_Element (Natural (Group) - 1, Cells);
+         S.Stayed_Far_Cells.Replace_Element (Natural (Group) - 1, Far);
+         S.Stayed_Moved.Replace_Element (Natural (Group) - 1, Far);
+      end Leave;
    begin
       Exercise_Rig (M);
       Own := M.Graph.Effects (Index_Of (1));
@@ -764,30 +789,39 @@ package body Driver.Robot.Tests is
       if Own.Verdict /= Patch or else Eye_Mount (M, 2).Kind /= Arm_Carried then
          return;
       end if;
-      for N in Own.Responding + 1 .. Own.Textured loop
-         if Real (N) - Real (Own.Responding) > Driver.Conventions.Z * Sqrt (Real (N + Own.Responding)) then
+      for N in Kept + 1 .. Cells loop
+         if Driver.Robot.Regression.Shares_Apart (N, Cells, Kept, Cells) then
             Least := N;
             exit;
          end if;
       end loop;
-      Check (Least > Own.Responding + 1,
-             "of" & Own.Textured'Image & " cells, none outnumber eye 1's" & Own.Responding'Image
+      Check (Least > Kept + 1,
+             "of" & Cells'Image & " cells, none left beyond reach outnumber eye 1's" & Kept'Image
              & " both by one at least and not significantly");
-      if Least <= Own.Responding + 1 then
+      if Least <= Kept + 1 then
          return;
       end if;
-      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least - 1));
+      --  Eye 2 shows the group a patch as eye 1 does, its pushes leaving none of it beyond reach: eye 1 keeps it, weighed
+      --  against eye 2 from here on.
+      M.Graph.Effects.Replace_Element (Index_Of (2), Own);
+      Leave (1, Kept);
+      Leave (2, 0);
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
-             "a patch of" & Natural'Image (Least - 1) & " cells in eye 2 against" & Own.Responding'Image
-             & " in eye 1 moved the closer, " & Role (M, Group)'Image);
-      M.Graph.Effects.Replace_Element (Index_Of (2), Patch_Of (Least));
+             "eye 2 left none beyond reach against" & Kept'Image & " in eye 1 and took the closer, "
+             & Role (M, Group)'Image);
+      Leave (2, Least - 1);
+      Driver.Robot.Graph.Derive (M);
+      Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 1).Arm,
+             "eye 2 left" & Natural'Image (Least - 1) & " of" & Cells'Image & " beyond reach against" & Kept'Image
+             & " in eye 1 and took the closer, " & Role (M, Group)'Image);
+      Leave (2, Least);
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
-             "a patch of" & Least'Image & " cells in eye 2 against" & Own.Responding'Image
-             & " in eye 1 left the closer on eye 1's arm, " & Role (M, Group)'Image);
+             "eye 2 left" & Least'Image & " of" & Cells'Image & " beyond reach against" & Kept'Image
+             & " in eye 1 and the closer stayed on eye 1's arm, " & Role (M, Group)'Image);
       M.Graph.Effects.Replace_Element (Index_Of (2), (Verdict => Unmeasured, others => <>));
-      M.Graph.Effects.Replace_Element (Index_Of (1), Patch_Of (Own.Textured));
+      Leave (1, Cells);
       Driver.Robot.Graph.Derive (M);
       Check (Role (M, Group) = Closer and then M.Graph.Arm_Of (Group) = Eye_Mount (M, 2).Arm,
              "eye 2 not measured, the closer left its arm for eye 1's, " & Role (M, Group)'Image);
