@@ -149,6 +149,26 @@ package body Driver.Robot.Boot is
          Driver.Robot.Motion.Step (M, C, Report, Land => Land);
       end Go_To;
 
+      --  A push some listed reading went along, significantly: its readings say the body made it.
+      function Answered (R : Driver.Robot.Motion.Step_Report) return Boolean is
+        (R.Delivered.Value > 0.0
+         and then Driver.Uncertain.Significant (R.Delivered.Value, R.Delivered.Sigma, R.Delivered.Degrees_Of_Freedom));
+
+      --  A stay of the pictures told only once the group was sent back (Motion.Judge_Sent_Back) is no speed where the
+      --  group's own readings went out with the push and did not come back more than half way (the way back reached and
+      --  more than half of it delivered; a way back nothing answered is none): a joint left within its servo's dead
+      --  band short of its hold, its own pose keeping the pictures away. Where the readings did not go along the push
+      --  by more than their noise (the drone's flight controller's wandering estimates, 0.36 of an ask out), they
+      --  tell nothing of it and the pictures decide. Stretch's arm, asked 2.4e-3 units, delivered 0.29 of it: its lift,
+      --  pressed down 0.45 mm of the 0.6 asked, stayed there as it was sent back, its readings none of the way back,
+      --  and its head camera stayed 1.66 from where the push began against rest's 1.56, a speed (seed 1, paced rounds
+      --  p106xa to p108xb and the world's truth, d108x, 10-24); ALOHA's gripper, asked 1.07e-3 units, delivered 0.90,
+      --  its way back unanswered, its wrist eye 0.96 from where the push began against rest's 0.61 (seed 1, p113a).
+      --  (Experiment bd116.)
+      function Readings_Allow_Stay (Out_Report, Back_Report : Driver.Robot.Motion.Step_Report) return Boolean is
+        (not Answered (Out_Report)
+         or else (Back_Report.Outcome = Driver.Robot.Motion.Reached and then Back_Report.Delivered.Value > 0.5));
+
       --  What Recognize found of each channel: the amount an eye sees it move
       --  at (0 when none does) and the ways found at their ends.
       type Recognized_Channel is record
@@ -182,6 +202,7 @@ package body Driver.Robot.Boot is
          --  The round's cost, for the log: the beats it took, and those spent settling between the pushes.
          Began_At, Ended_At : Natural := 0;
          Settled  : Natural := 0;
+         Out_Report : Driver.Robot.Motion.Step_Report;   --  the latest push's, before it was sent back
          procedure Read_Beat is
          begin
             Began_At := M.Beats;
@@ -230,6 +251,7 @@ package body Driver.Robot.Boot is
                --  45 to 55 beats each (ALOHA seed 1, round 4h2, 10-23: 400 of its 1200 beats, out of beats).
                Moved := Moved
                  or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
+               Out_Report := Report;
                --  Held after the push for Pause beats before the pictures are asked to settle: a picture that trails
                --  the readings (an eye of the rig ten beats behind them) is settled the beat after they stop, before it
                --  has moved, and pushes a few beats apart make one burst that no lag longer than their spacing can be
@@ -289,6 +311,14 @@ package body Driver.Robot.Boot is
                      Driver.Robot.Motion.Settle (M, Waited);
                   else
                      Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+                     if Kept and then not Readings_Allow_Stay (Out_Report, Report) then
+                        Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
+                                         & "'s pictures stayed once sent back, its readings "
+                                         & Driver.Log.Image (Out_Report.Delivered.Value, 2) & " of the ask out and "
+                                         & Driver.Log.Image (Report.Delivered.Value, 2) & " of the way back ("
+                                         & Report.Outcome'Image & "): no speed by it");
+                        Kept := False;
+                     end if;
                      Note;
                   end if;
                   Settled := Settled + Waited;
@@ -486,12 +516,16 @@ package body Driver.Robot.Boot is
             --  At the level first seen, 0.14 units, Stretch's base moved its wrist eye 1.99 and 2.09 against a bound of
             --  rest between them: a speed in one round, a joint in the next (seed 1, paced rounds p80a and p83a, 10-23).
             Amount     : Real := P.Excursion;
+            Doubled    : Natural := 0;       --  the hold's doublings, no more than a float has bits
+            Denied     : Boolean := False;   --  its pictures stayed once sent back, its readings out and not half way
+                                             --  back: held again at twice the amount, out of the servos' dead band
          begin
             Driver.Commands.Set_Target (Back, G, Hold);
             loop
                declare
                   Away : constant Real_Array := [for C in 1 .. Size => Hold (C) + Sign * Amount];
                begin
+                  Denied := False;
                   Driver.Robot.Motion.Settle (M, Waited);
                   Driver.Robot.Motion.Mark_Origins (M);
                   Go_To (G, Away, Report);
@@ -508,6 +542,15 @@ package body Driver.Robot.Boot is
                      begin
                         Go_To (G, Hold, Returned);
                         Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
+                        if Kept and then not Readings_Allow_Stay (Report, Returned) then
+                           Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s pictures stayed once sent"
+                                            & " back, its readings " & Driver.Log.Image (Report.Delivered.Value, 2)
+                                            & " of the ask out (" & Report.Outcome'Image & ") and "
+                                            & Driver.Log.Image (Returned.Delivered.Value, 2) & " of the way back ("
+                                            & Returned.Outcome'Image & "): no speed by it");
+                           Kept := False;
+                           Denied := True;
+                        end if;
                      end;
                   else
                      Go_To (G, Hold, Returned);
@@ -518,8 +561,12 @@ package body Driver.Robot.Boot is
                                 & " of its ask delivered; "
                                 & (if Kept then "it kept the body going" elsif Came then "the pictures came back"
                                    else "no eye's picture beyond rest"));
-               exit when Kept or else Came
-                 or else not (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
+               exit when Doubled >= Real'Machine_Mantissa
+                 or else (not Denied
+                          and then (Kept or else Came
+                                    or else not (Report.Outcome = Driver.Robot.Motion.Reached
+                                                 and then Report.Delivered.Value > 0.5)));
+               Doubled := Doubled + 1;
                Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s hold at " & Scientific (Amount)
                                 & " units took no eye's picture beyond rest: held again at twice that");
                Amount := 2.0 * Amount;
