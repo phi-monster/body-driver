@@ -1,14 +1,10 @@
 with Ada.Containers.Vectors;
-with Ada.Numerics.Long_Elementary_Functions;
-with Driver.Conventions;
 with Driver.Robot.Channels;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Regression;
 
 package body Driver.Robot.Graph is
-
-   use Ada.Numerics.Long_Elementary_Functions;
 
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
@@ -130,6 +126,16 @@ package body Driver.Robot.Graph is
       function Far_Cells_Of (G : Group_Id; E : Eye_Id) return Natural is
         (if Natural (G) <= Natural (M.Eyes (E).Stayed_Far_Cells.Length) then M.Eyes (E).Stayed_Far_Cells (Natural (G) - 1)
          else 0);
+
+      --  Group G's pushes left eye E's cells beyond the flow's reach in a larger share than group H's pushes left eye F's,
+      --  by more than chance (Regression.Shares_Apart on the cells counted): a push just seen leaves a view moved by a
+      --  few tenths of a pixel and a cell or two beyond reach by noise, and by a cell the Shadow's hand, 3 to 7 of its
+      --  wrist eye's 246 cells beyond reach against its arm's 0 to 2, moved that eye further than the arm whose camera
+      --  it is, which moved 127 of them against the hand's 52 (seed 1, paced round p113a, 10-24).
+      function Further (G : Group_Id; E : Eye_Id; H : Group_Id; F : Eye_Id) return Boolean is
+        (Far_Of (G, E) > Far_Of (H, F)
+         and then Driver.Robot.Regression.Shares_Apart
+                    (Far_Cells_Of (G, E), Cells_Of (G, E), Far_Cells_Of (H, F), Cells_Of (H, F)));
 
       type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
 
@@ -327,20 +333,21 @@ package body Driver.Robot.Graph is
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
             Most (G, E) := Candidate (G, E)
               and then (for all F in M.Eyes.First_Index .. M.Eyes.Last_Index =>
-                          F = E or else not (Far_Of (G, F) > Far_Of (G, E)));
+                          F = E or else not (Further (G, F, G, E)));
          end loop;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
             Carries (G, E) := Candidate (G, E)
               and then not Unmoved (G, E)
-              and then not (for some H in M.Groups.First_Index .. M.Groups.Last_Index =>
-                              H /= G and then Candidate (H, E) and then Cells_Of (H, E) > 0 and then Cells_Of (G, E) > 0
+              and then not (Cells_Of (G, E) > 0
+                            and then (for some H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                              H /= G and then Candidate (H, E) and then Cells_Of (H, E) > 0
                               and then Real (Moved_Of (H, E)) / Real (Cells_Of (H, E))
                                        > Real (Moved_Of (G, E)) / Real (Cells_Of (G, E))
-                              and then not (Far_Of (H, E) < Far_Of (G, E))
+                              and then not Further (G, E, H, E)
                               and then Driver.Robot.Regression.Shares_Apart
-                                         (Moved_Of (H, E), Cells_Of (H, E), Moved_Of (G, E), Cells_Of (G, E)));
+                                         (Moved_Of (H, E), Cells_Of (H, E), Moved_Of (G, E), Cells_Of (G, E))));
             if Carries (G, E) then
                Carried (G) := Carried (G) + 1;
             end if;
