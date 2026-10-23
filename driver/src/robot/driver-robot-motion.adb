@@ -230,6 +230,17 @@ package body Driver.Robot.Motion is
       Anchored      : Boolean := False;   --  every eye's anchor was taken as the readings stood (Stillness.Set_Anchor)
       Stood_Before  : Natural := 0;       --  the beats the readings stood, past the lag, before the drift was told
       Pushed_Away   : Real_Array (1 .. Eyes) := [others => Real'Last];
+      --  Each eye's farthest change from its anchor, and the beat of the wait it was reached at: an eye whose picture went
+      --  no farther from where it was as the readings stood, for as long again as it took to get there, the body's delay,
+      --  and the longest any wait of the body took before, is as settled as it will be, as a group going nowhere is
+      --  (Nowhere); the last, so that a picture this body settles in time is waited for as before: a push that began
+      --  from one not yet settled is no row of the lock-in. The G1 held an arm out, its balance swaying that arm's eye,
+      --  and waited here 505 beats for it to settle, its longest wait before 75 (seed 1, paced round p75a, 10-23).
+      Eye_Far       : array (1 .. Eyes) of Real := [others => 0.0];
+      Eye_Far_At    : array (1 .. Eyes) of Natural := [others => 0];
+      function Eye_Nowhere (E : Positive) return Boolean is
+        (Anchored
+         and then Beats_Waited - Eye_Far_At (E) > Natural'Max (Natural'Max (Eye_Far_At (E), Delay_Beats), Longest_Wait));
 
       --  The eye's picture drifts: beat on beat (Stillness.Eye_Drift_Run), or away from its anchor (Eye_Away_Run), two
       --  beats running, the least that tells a lasting drift from one beat's.
@@ -270,6 +281,14 @@ package body Driver.Robot.Motion is
                Follow (Group_Id (G));
             end loop;
          end if;
+         if Anchored then
+            for E in 1 .. Eyes loop
+               if Driver.Robot.Stillness.Eye_From_Anchor (M, Eye_Id (E)) > Eye_Far (E) then
+                  Eye_Far (E) := Driver.Robot.Stillness.Eye_From_Anchor (M, Eye_Id (E));
+                  Eye_Far_At (E) := Beats_Waited;
+               end if;
+            end loop;
+         end if;
          declare
             --  An eye settles as its watch tells (Stillness.Eye_Settled). A group going nowhere restarts that watch at
             --  every beat it jitters back into motion (the body beginning to move, by the one test of motion), and the
@@ -281,7 +300,8 @@ package body Driver.Robot.Motion is
             Done : constant Boolean :=
               M.Beats > 0 and then (for all G in 1 .. Groups => Still_Now (G) or else Nowhere (Group_Id (G)))
               and then (for all E in 1 .. Eyes => Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E))
-                          or else (Jittering and then Driver.Robot.Stillness.Eye_Still (M, Eye_Id (E))));
+                          or else (Jittering and then Driver.Robot.Stillness.Eye_Still (M, Eye_Id (E)))
+                          or else Eye_Nowhere (E));
             --  Every commanded reading stands: a group no command reaches (a legged robot's legs, read only) moves as
             --  the body goes, and is not waited for here.
             Standing : constant Boolean :=
@@ -320,9 +340,11 @@ package body Driver.Robot.Motion is
                   Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
                end loop;
                Anchored := False;
-            elsif Use_Back and then not Anchored and then Standing and then Beats_Waited - Stood_Since > Lag then
+            elsif not Anchored and then Standing and then Beats_Waited - Stood_Since > Lag then
                for E in 1 .. Eyes loop
                   Driver.Robot.Stillness.Set_Anchor (M, Eye_Id (E));
+                  Eye_Far (E) := 0.0;
+                  Eye_Far_At (E) := Beats_Waited;
                end loop;
                Anchored := True;
             end if;

@@ -374,6 +374,17 @@ def kind_rby1(rng):
     for g in groups:
         if g["name"] != "base":
             g["plan"] = {"limits": RBY1_LIMITS, "gravity": True}
+    # Its joints' rotors at the inertia the menagerie gives every other arm it has (Panda, UR5e, Kinova Gen3, SO-100:
+    # 0.1 kg m2, a harmonic drive's rotor through its reduction) where the maker's model leaves 0.01, and the world
+    # stepped at 1 ms: at 0.01 and 2 ms its wrist servos (kp 4000 against limits of 8 to 10 N m) chattered between their
+    # limits and crept, a wrist 0.035 rad on from a held step of 0.0085 in 4 s (10-23: of its 24 position servos each
+    # asked that step, 10 off or moving after a second, 2 with both: the torso's first under the robot's weight, and the
+    # fingers, whose asks are of another scale), and the driver waited 38 beats for every push of an arm to rest.
+    for a in spec.actuators:
+        if a.biasprm[1] != 0.0 and not a.name.endswith("_wheel_act"):
+            j = spec.joint(a.target)
+            j.armature = max(float(j.armature), 0.1)
+    spec.option.timestep = 0.001
     # Each wrist camera on the side of the gripper toward its front, looking past the fingers at what they reach, as
     # a wrist camera of a hand that works is mounted (the gripper points along the wrist link's -z: its body 0.126 m
     # out, its fingers 0.2 m, opening along x). Mounted behind the gripper's body looking along it, it saw the body's

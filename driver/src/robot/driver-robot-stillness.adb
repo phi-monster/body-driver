@@ -328,6 +328,9 @@ package body Driver.Robot.Stillness is
 
    function Eye_Away_Run (M : Model; E : Eye_Id) return Natural is (M.Eyes (E).Away_Run);
 
+   function Eye_From_Anchor (M : Model; E : Eye_Id) return Real is
+     (if M.Eyes (E).Has_Anchor then M.Eyes (E).Away_Last else 0.0);
+
    procedure Set_Origin (M : in out Model; E : Eye_Id) is
       S : Eye_Stream renames M.Eyes (E);
    begin

@@ -176,8 +176,13 @@ package body Driver.Robot.Graph is
       --  arm 2's eye whole at the recognition and undecided, 33 of 48 cells, at an estimate between its sweep's third
       --  and fourth passes; the arm was taken for a part and its sweep cut at 16 poses, in two runs of three). Only
       --  an eye in which the group moves nothing (Nothing), or that another arm moves whole, takes it off.
+      --  A group an eye rode in an earlier derivation stays its arm while the eye is undecided about it or sees a patch of
+      --  it, and while no other group is that eye's own now (Best_Of): ridden early by the wrist eye that its hand
+      --  or its jaw filled half of, on few rows, the Shadow's hand and Stretch's gripper stayed arms once the eye rode its
+      --  arm (seeds 1 and 2, paced round p76a, 10-23).
       function Still_Ridden (G : Group_Id) return Boolean is
-        (M.Groups (G).Rider > 0 and then Effect (M, G, M.Groups (G).Rider).Verdict in Undecided | Patch);
+        (M.Groups (G).Rider > 0 and then Effect (M, G, M.Groups (G).Rider).Verdict in Undecided | Patch
+         and then Best_Of (M.Groups (G).Rider) in 0 | Natural (G));
    begin
       --  Once a push of the group was its own it stays so: the longest lag the stream can tell of is the median gap
       --  between its bursts, which the arms' sweeps, their pushes far apart, widen, and the recognition's pushes of a

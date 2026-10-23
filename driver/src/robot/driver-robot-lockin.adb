@@ -704,6 +704,40 @@ package body Driver.Robot.Lockin is
                end loop;
                Marks_Took := Driver.Clock.Seconds - Eye_Began;
             end if;
+            --  How many beats each group was pushed at and how many of them are rows (Usable: one group pushed, the eye
+            --  settled before it, no other group pushed or moving in its tail): the Shadow's arm, recognized after its hand,
+            --  had no column in either eye (round 4a, 10-23). Told before the regression is asked, which too few rows do not
+            --  get to (the Shadow's seed 3, no regression in a whole boot, paced rounds p69 to p78).
+            for G in M.Groups.First_Index .. M.Groups.Last_Index loop
+               if M.Groups (G).Commandable then
+                  declare
+                     Pushed_Beats : Natural := 0;
+                     Kinds        : array (Row_Kind) of Natural := [others => 0];
+                     Why          : Ada.Strings.Unbounded.Unbounded_String;
+                  begin
+                     for B in 1 .. M.Beats - 1 loop
+                        declare
+                           R : constant Integer := B - Lag;
+                        begin
+                           if R >= 1 and then Channels.Pushed (M, G, R) then
+                              Pushed_Beats := Pushed_Beats + 1;
+                              Kinds (Kind_Of (B)) := Kinds (Kind_Of (B)) + 1;
+                           end if;
+                        end;
+                     end loop;
+                     for K in Row_Kind range No_Picture .. Row_Kind'Last loop
+                        if Kinds (K) > 0 then
+                           Ada.Strings.Unbounded.Append (Why, ", " & K'Image & Kinds (K)'Image);
+                        end if;
+                     end loop;
+                     if Pushed_Beats > 0 then
+                        Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
+                                         & " pushed at" & Pushed_Beats'Image & " beats," & Kinds (Row)'Image
+                                         & " of them rows" & Ada.Strings.Unbounded.To_String (Why));
+                     end if;
+                  end;
+               end if;
+            end loop;
             --  A regression needs more observations than coefficients: the channels pushed over its rows, and the mean
             --  (below, Kept). Not every commandable channel, pushed or not: asked for the Shadow's 26 rows and more, the
             --  lock-in measured nothing in a whole boot of its arm's and its hand's pushes, every group unmeasured in both
@@ -987,39 +1021,6 @@ package body Driver.Robot.Lockin is
                            Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ":" & Motion_Rows'Image & " of" & Rows'Image
                                             & " rows carry a push; the rows' beats run" & (if Rows > 0 then Beat_Of (1)'Image else "")
                                             & " to" & (if Rows > 0 then Beat_Of (Rows)'Image else "") & ", lag" & Lag'Image);
-                           --  How many beats each group was pushed at and how many of them are rows (Usable: one group
-                           --  pushed, the eye settled before it, no other group pushed or moving in its tail): the
-                           --  Shadow's arm, recognized after its hand, had no column in either eye (round 4a, 10-23).
-                           for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-                              if M.Groups (G).Commandable then
-                                 declare
-                                    Pushed_Beats : Natural := 0;
-                                    Kinds        : array (Row_Kind) of Natural := [others => 0];
-                                    Why          : Ada.Strings.Unbounded.Unbounded_String;
-                                 begin
-                                    for B in 1 .. M.Beats - 1 loop
-                                       declare
-                                          R : constant Integer := B - Lag;
-                                       begin
-                                          if R >= 1 and then Channels.Pushed (M, G, R) then
-                                             Pushed_Beats := Pushed_Beats + 1;
-                                             Kinds (Kind_Of (B)) := Kinds (Kind_Of (B)) + 1;
-                                          end if;
-                                       end;
-                                    end loop;
-                                    for K in Row_Kind range No_Picture .. Row_Kind'Last loop
-                                       if Kinds (K) > 0 then
-                                          Ada.Strings.Unbounded.Append (Why, ", " & K'Image & Kinds (K)'Image);
-                                       end if;
-                                    end loop;
-                                    if Pushed_Beats > 0 then
-                                       Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
-                                                        & " pushed at" & Pushed_Beats'Image & " beats," & Kinds (Row)'Image
-                                                        & " of them rows" & Ada.Strings.Unbounded.To_String (Why));
-                                    end if;
-                                 end;
-                              end if;
-                           end loop;
                         end;
                         declare
                            Started : constant Duration := Driver.Clock.Seconds;

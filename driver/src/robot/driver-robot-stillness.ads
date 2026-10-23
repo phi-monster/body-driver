@@ -91,6 +91,9 @@ private package Driver.Robot.Stillness is
    --  before and farther than rest moves a picture (the median change at its stationary beats, Z of their scale
    --  above): a drift too slow for one beat's change to show, as a body that keeps going slowly makes it.
 
+   function Eye_From_Anchor (M : Model; E : Eye_Id) return Real;
+   --  The eye's picture's change from its anchor at the latest beat, in units of its pixels' noise; zero without one.
+
    procedure Set_Origin (M : in out Model; E : Eye_Id);
    --  The eye's latest frame is the one a push begins from: its picture is compared with it from now on
    --  (Eye_From_Origin), until the next push's.

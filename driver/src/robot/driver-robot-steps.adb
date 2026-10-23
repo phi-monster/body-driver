@@ -32,6 +32,16 @@ package body Driver.Robot.Steps is
       E.End_At := Beat;
       E.Settled := Settled;
       E.Rested := Rested;
+      --  How each push ended and when, for the log: where a boot's beats go (RB-Y1's arm, paced round p75a, 10-23: its
+      --  pushes out took 39 beats, its pushes back 4).
+      Driver.Log.Line (Driver.Log.Robot, "steps: group" & G'Image & "'s push of beat" & E.Start'Image & " ended at"
+                       & Beat'Image & ", "
+                       & (if not Settled then "cut short by the next"
+                          elsif not Answered then "unanswered"
+                          elsif Rested then "its readings at rest"
+                          else "given up by its own progress")
+                       & (if E.Moved then ", moving from" & E.Moved_At'Image & ", nearer or farther last at"
+                                         & E.Progress_At'Image else ""));
       --  What the push executed, channel by channel: a channel that went along its ask by a step its readings tell
       --  (Z of the noise of two readings), and further than it fell short of the ask, executed an ask of that
       --  size, and the least such ask of the channel is kept (Group_Stream.Executed, Executed_Least). Moving at all
