@@ -2282,6 +2282,30 @@ package body Driver.Alignment.Keyframes is
                   end if;
                   Result.Told :=
                     Real (Result.Own) - Real (Result.Other) > Z * Sqrt (Real (Result.Own + Result.Other));
+                  --  Where the moving points tell no field, the field of no motion competes as the drawn ones do: a
+                  --  point that stood votes for it, its best place being where it stood, as every other point votes for
+                  --  the field whose place it correlates with better. Where significantly more points stood than prefer
+                  --  the field drawn best (the same sign test), the view moved by less than this size resolves, as where
+                  --  most points stayed (above), and at the finest size the field is none. A turn of a joint at its
+                  --  least step left RB-Y1's wrist eye's view all but unmoved, 79 to 88 of its 229 points where they
+                  --  stood, and two fields drawn of the others' lookalike places, their corners 50 to 130 px apart,
+                  --  neither told: no point was asked, and every keyframe of the arm's last three joints had none (seed
+                  --  2, paced round p196s2r, 10-24: of the 83 untold fields of the finest size, no motion won the test
+                  --  in 31). Not where a field is told: the points that stood then ride with the eye (a hand before a
+                  --  wrist eye), and in the G1's wrist eyes they outvoted the field the world moved by, more keyframes
+                  --  left with no point (seeds 1 to 3 of the same round, replayed).
+                  if not Result.Told and then Size = Finest_Size
+                    and then Real (Result.Unmoved) - Real (Result.Own) > Z * Sqrt (Real (Result.Unmoved + Result.Own))
+                  then
+                     Best := (others => 0.0);
+                     Best_N := Result.Unmoved;
+                     Result.Points := Result.Unmoved;
+                     Result.Agree := Best_N;
+                     Result.Own := Best_N;
+                     Result.Other := 0;
+                     Result.Told := True;
+                     On_Best := Stayed;
+                  end if;
                   --  Where the field is told, a point whose best place was where it stood while the field moves it
                   --  there beyond a place the size resolves stood against the view; one on the field that moved
                   --  moved with it.
