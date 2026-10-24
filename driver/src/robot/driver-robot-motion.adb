@@ -847,6 +847,11 @@ package body Driver.Robot.Motion is
             end if;
          end loop;
          M.Stepping := True;
+         --  Noted for a replay (Driver.Recording, kind N): no keyframe is taken while a step is under way
+         --  (Kinematics.Observe), and a replay that did not know it took keyframes the run had not (RB-Y1 seed 3,
+         --  paced round p205s2r replayed, 10-24: its arm 3 first fitted 1100 beats earlier from other keyframes, its
+         --  focal 183 px where the run's was 173).
+         Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("stepping 1"));
          Driver.Beats.Send (Sent);
          --  The push starts at the beat whose observation was taken under the
          --  new targets; it is over when the step tracker has seen it end.
@@ -928,6 +933,7 @@ package body Driver.Robot.Motion is
             end;
          end loop;
          M.Stepping := False;
+         Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("stepping 0"));
          Longest_Step := Natural'Max (Longest_Step, Waited);
       end;
    end One_Step;
