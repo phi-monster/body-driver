@@ -84,9 +84,12 @@ package body Driver.Robot.Kinematics is
       H    : constant Natural := Driver.Images.Height (Picture);
       --  Where in a cell the aligner can place a patch best, and whether it can at all: the pixel whose patch (the
       --  aligner's, Half_Patch either side) holds the most slope energy, the quantity the aligner's own Newton step
-      --  rests on, kept where the patch has texture across both directions, the smaller eigenvalue of its gradient
-      --  tensor (along an edge or a smooth gradient a patch slides, and any place along it answers), above what the
-      --  eye's resting noise alone gives a patch by Z of its spread. A cell's centre lies on a flat place as often as
+      --  rests on, among the places whose patch has texture across both directions, the smaller eigenvalue of its
+      --  gradient tensor (along an edge or a smooth gradient a patch slides, and any place along it answers), above
+      --  what the eye's resting noise alone gives a patch by Z of its spread. Placed by the slope energy alone and
+      --  kept only where that one place was so textured, Shadow seed 2a's arm (p273s2, 10-24) kept 71 of its 136
+      --  sound tracks, the slope's greatest on edges, and its joints' order came out wrong, its focal length 5.6 %
+      --  short. A cell's centre lies on a flat place as often as
       --  not (the kiwi's white table: of the points asked, 19 % failed for want of texture and 17 % for a patch over
       --  the picture's edge, R6's seventh and eighth starts, 10-14), and the patch with the most slope energy in a
       --  cell of a smooth sky, a plain floor or the arm's own jaws was matched where no point of the world was:
@@ -177,8 +180,9 @@ package body Driver.Robot.Kinematics is
                   Best_X : Natural := (X0 + X1) / 2;
                   Best_Y : Natural := (Y0 + Y1) / 2;
                   Best   : Real := -1.0;
-                  --  A rig's eye without pictures keeps its cells' centres; a picture's cell its best place where the
-                  --  whole patch lies in the picture and is textured above the resting noise, and none elsewhere.
+                  --  A rig's eye without pictures keeps its cells' centres; a picture's cell its best place among those
+                  --  whose whole patch lies in the picture and is textured above the resting noise, and none where no
+                  --  place is.
                   Keep   : Boolean := not Pictured;
                begin
                   if Pictured and then W > 2 * Half and then H > 2 * Half then
@@ -187,15 +191,15 @@ package body Driver.Robot.Kinematics is
                            declare
                               Energy : constant Real := Box (Txx, X, Y) + Box (Tyy, X, Y);
                            begin
-                              if Energy > Best then
+                              if Energy > Best and then Noise_Known and then Textured_Patch (X, Y, Least (X, Y)) then
                                  Best := Energy;
                                  Best_X := X;
                                  Best_Y := Y;
+                                 Keep := True;
                               end if;
                            end;
                         end loop;
                      end loop;
-                     Keep := Noise_Known and then Textured_Patch (Best_X, Best_Y, Least (Best_X, Best_Y));
                   end if;
                   if Keep then
                      U.Append (Real (Best_X) + 0.5);
