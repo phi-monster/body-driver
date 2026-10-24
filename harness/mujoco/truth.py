@@ -4,7 +4,7 @@
 #   {"kind": "observation", "call": BEAT, "state": {group: [values as they went into the scramble]},
 #    "links": {body: [x, y, z, qw, qx, qy, qz]},
 #    "cameras": {name: {"pose": its optical frame (+x right, +y down, +z forward), "resolution": [w, h],
-#                       "K": [[f, 0, w/2], [0, f, h/2], [0, 0, 1]], "lens": null}},
+#                       "K": [[fx, 0, w/2], [0, fy, h/2], [0, 0, 1]], "lens": null}},
 #    "objects": {name: {"label": name, "type": "rigid", "pose": [...]}}},
 # the first line of a run {"kind": "geometry", "store": DIR, "links": {body: KEY}, "joints": [{"parent", "child",
 # "type"}], "objects": {name: KEY}}: each KEY names DIR/KEY.json, a body's geometry in its own frame, written once
@@ -152,9 +152,20 @@ class Truth:
             R = d.cam_xmat[c["id"]].reshape(3, 3) @ np.diag([1.0, -1.0, -1.0])   # MuJoCo's camera looks down -z, y up
             q = np.zeros(4)
             mujoco.mju_mat2Quat(q, R.ravel())
-            f = 0.5 * height / np.tan(np.radians(m.cam_fovy[c["id"]]) / 2.0)
+            # A camera with a sensor of its own (focal and sensorsize in the model, as ALOHA's) is drawn with that
+            # sensor's frustum into the picture whatever its aspect: the pixels' focal lengths are the focal over the
+            # sensor's width and height times the picture's (ALOHA's wrist eyes, a 16:9 sensor in 320 by 240: 158.5 by
+            # 216.4 px, which the driver's fits found, where the fovy alone said 216.4 for both, 10-24). Else the fovy's,
+            # square pixels.
+            ss, fi = m.cam_sensorsize[c["id"]], m.cam_intrinsic[c["id"]]
+            if ss[0] > 0.0 and ss[1] > 0.0:
+                if fi[2] != 0.0 or fi[3] != 0.0:
+                    raise ValueError(c["name"] + ": a principal point off the centre, whose sign the truth does not know")
+                fx, fy = float(fi[0] / ss[0] * width), float(fi[1] / ss[1] * height)
+            else:
+                fx = fy = 0.5 * height / np.tan(np.radians(m.cam_fovy[c["id"]]) / 2.0)
             cams[c["name"]] = {"pose": _pose(d.cam_xpos[c["id"]], q), "resolution": [width, height],
-                               "K": [[f, 0.0, width / 2.0], [0.0, f, height / 2.0], [0.0, 0.0, 1.0]], "lens": None}
+                               "K": [[fx, 0.0, width / 2.0], [0.0, fy, height / 2.0], [0.0, 0.0, 1.0]], "lens": None}
         line = {"kind": "observation", "call": beat,
                 "state": {k: np.asarray(v).tolist() for k, v in state.items()},
                 "links": {self.names[b]: _pose(d.xpos[b], d.xquat[b]) for b in self.links},
