@@ -3750,6 +3750,8 @@ driver-robot-motion.adb	& Driver.Log.Image (Kinematics.Conditioning (M, A, Faile
 driver-robot-motion.adb	& Driver.Log.Image (Largest, 1) & "" & To_String (Off_By)	1	format	digits printed in a log line or a message
 driver-robot-motion.adb	& Driver.Log.Image (Share, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-motion.adb	(Advance > 0.0 and then Driver.Uncertain.Significant (Advance, Noise * Sqrt (2.0)));	2.0	math	the difference of two readings has twice the variance of one
+driver-robot-motion.adb	(Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("" & G'Image & (if Way > 0.0 then "" else "")));	"1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot-motion.adb	(Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("" & G'Image & (if Way > 0.0 then "" else "")));	"1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot-motion.adb	(Driver.Robot.Stillness.Eye_Drift_Run (M, E) >= 2	2	statistics	a drift lasts when two drifting beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	(Error, Noise * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-motion.adb	(Wire, Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate) * Sigma * Sqrt (2.0));	2.0	math	a change is the difference of two readings
@@ -3985,20 +3987,32 @@ driver-robot.adb	(Driver.Log.Image (Real (Observe_Spent (P)) * 1000.0 / Real (Na
 driver-robot.adb	(Driver.Log.Image (Real (Observe_Spent (P)) * 1000.0 / Real (Natural'Max (1, Observed)), 3));	1000.0	format	seconds to milliseconds
 driver-robot.adb	(Driver.Log.Image (Real (Observe_Spent (P)) * 1000.0 / Real (Natural'Max (1, Observed)), 3));	3	format	digits printed in a log line or a message
 driver-robot.adb	A : constant Arm_Id := Arm_Id'Value (Word (2));	2	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
+driver-robot.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"0	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Change (M, G, B, C) / Channels.Noise (M, G, C), 1));	1	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Reading (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Append (Text, "" & Driver.Log.Image (Channels.Target (M, G, B, C), 6));	6	format	digits printed in a log line or a message
 driver-robot.adb	Best := (Value => Step, Sigma => Step * Sqrt (Spread) / (2.0 * Gain), Degrees_Of_Freedom => 0);	2.0	math	the sigma of Z / sqrt (G) from that of G: half its relative error
 driver-robot.adb	Best.Value := Real'Max (Best.Value, Driver.Conventions.Z * Noise * Sqrt (2.0));	2.0	math	a change is the difference of two readings, whose variance is twice one reading's
 driver-robot.adb	Centre : constant Vec3 := (1.0 / Scale) * (Rt * Lever);	1.0	math	the reciprocal of the scale
+driver-robot.adb	Eyes (K) := Word (K + 3) = "";	"1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Eyes (K) := Word (K + 3) = "";	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Eyes : Channel_Flags (1 .. Count - 3);	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	Flags (K) := Word (K + 3) = "";	"1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Flags (K) := Word (K + 3) = "";	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Flags : Channel_Flags (1 .. Natural'Max (0, Count - 3));	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Mean : constant Real := (P.Tilt_11 + P.Tilt_22) / 2.0;	2.0	math	the larger eigenvalue of a symmetric 2 x 2: the mean of the diagonal plus the root of the half difference squared and the off diagonal squared
+driver-robot.adb	Motion.Note_Stayed (M, Group_Id'Value (Word (2)), Real'Value (Word (3)));	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Motion.Note_Stayed (M, Group_Id'Value (Word (2)), Real'Value (Word (3)));	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	Moving_Since : Integer := -1;	1	structure	sentinel: no move began whose settling is still open (beats are never negative)
 driver-robot.adb	Moving_Since := -1;	1	structure	sentinel: the move settled, none open
 driver-robot.adb	Next_Told : Positive := 1;	1	structure	the first line at the first beat
 driver-robot.adb	Next_Told := 2 * Next_Told;	2	structure	a line at every doubling of the beats: logarithmic in them, as the estimates are made again
+driver-robot.adb	Note_Channels_Alone (M, Group_Id'Value (Word (2)));	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Note_Comes_Back (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)));	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Note_Comes_Back (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)));	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Note_Keeps_Going (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)), Eyes);	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	Note_Keeps_Going (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)), Eyes);	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	Piece : String (1 .. 4096);	4096	format	the piece a body file is read in: a line of any length is read by a loop in pieces, never by the recursive function form (a megabyte of line overflowed the stack)
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (Cells (S.Grid) * M.Beats));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
 driver-robot.adb	S.Condition.Append (0.0, Ada.Containers.Count_Type (N));	0.0	structure	a placeholder for beats without a displacement; Measured marks them absent
@@ -4011,6 +4025,15 @@ driver-robot.adb	and then (Past >= 0.0 or else not Driver.Uncertain.Significant 
 driver-robot.adb	else "" & Driver.Log.Image (Largest (M.Eyes (E).Rest_Factors), 1) & "")	1	format	digits printed in a log line or a message
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	format	digits printed in a log line or a message
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	structure	the middle cell of the grid, for the log line
+driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
 driver-robot.adb	if Count < 2 or else Word (1) /= "" then	1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	if Count < 2 or else Word (1) /= "" then	2	format	the words of a record Q: "arm", its number, "asked", then one flag a channel

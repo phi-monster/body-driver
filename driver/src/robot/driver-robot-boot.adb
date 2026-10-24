@@ -422,7 +422,7 @@ package body Driver.Robot.Boot is
            (if S = Driver.Robot.Motion.Increasing then "upwards" else "downwards");
          procedure Mark_Alone is
          begin
-            M.Groups (G).Channels_Alone := True;
+            Note_Channels_Alone (M, G);
          end Mark_Alone;
       begin
          Driver.Beats.Within_A_Beat (Mark_Alone'Access);

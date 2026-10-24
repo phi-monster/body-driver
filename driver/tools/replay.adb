@@ -1,5 +1,5 @@
 --  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
---         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only]
+--         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only] [--graphs]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -37,6 +37,9 @@
 --  still and settled, and how far its cells moved; with --readings GROUP, one
 --  on that group (Driver.Robot.Group_Watch): its readings, their change in
 --  units of their noise, whether it moved and was pushed, and its target.
+--  With --graphs, after every estimate a decider asked for (kind E) and every return of those computed apart (kind
+--  B), the groups as recognized as the boot prints them
+--  (Driver.Robot.Describe; with --body, once more at the end): score1.pl scores a replay's graph as the boot's.
 --  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
 --  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
 --  With --sweeping ARM@BEAT (repeatable), the arm's sweep is said to begin at
@@ -311,6 +314,7 @@ procedure Replay is
    Dump_Eye   : Natural := 0;
    Dump_Every : Natural := 0;
    Dump_Only  : Boolean := False;   --  with --dump-only, nothing else is estimated
+   Graphs     : Boolean := False;   --  with --graphs, the groups as recognized after every estimate a decider asked for
 
    procedure Write_Ppm (File : String; I : Driver.Images.Image) is
       F    : Ada.Streams.Stream_IO.File_Type;
@@ -455,6 +459,11 @@ procedure Replay is
          end if;
       end loop;
    end Say_Sweeps;
+
+   procedure Model_Noted (Data : Driver.Bytes.Byte_Array) is
+   begin
+      Driver.Robot.Replay_Note (Robot, Data);
+   end Model_Noted;
 
    procedure Robot_Message (Data : Driver.Bytes.Byte_Array) is
       Req : Driver.Protocol.Request;
@@ -646,11 +655,16 @@ procedure Replay is
 begin
    if Argument_Count < 1 then
       Line (Core, "usage: replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT]"
-            & " [--watch EYE] [--readings GROUP]");
+            & " [--watch EYE] [--readings GROUP] [--graphs]");
       Set_Exit_Status (Failure);
       return;
    end if;
    Path := To_Unbounded_String (Argument (1));
+   for I in 2 .. Argument_Count loop
+      if Argument (I) = "--graphs" then
+         Graphs := True;
+      end if;
+   end loop;
    for I in 2 .. Argument_Count - 1 loop
       if Argument (I) = "--body" then
          Body_File := To_Unbounded_String (Argument (I + 1));
@@ -704,13 +718,23 @@ begin
          when Driver.Recording.Service_Request => Payload.Query (Service_Request'Access);
          when Driver.Recording.Service_Reply   => Payload.Query (Service_Reply'Access);
          when Driver.Recording.File_Read       => Apart.Replay_Decider; Payload.Query (File_Read'Access);
-         when Driver.Recording.Estimates_Asked => Apart.Replay_Decider; Compute_Robot;
+         when Driver.Recording.Estimates_Asked =>
+            Apart.Replay_Decider;
+            Compute_Robot;
+            if Graphs then
+               Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Driver.Robot.Describe (Robot));
+            end if;
          when Driver.Recording.World_Written   => Apart.Replay_Decider; Payload.Query (World_Write'Access);
          when Driver.Recording.Sweep_Begun | Driver.Recording.Channels_Asked =>
             Apart.Replay_Decider; Payload.Query (Sweep_Told'Access);
+         when Driver.Recording.Model_Noted     => Apart.Replay_Decider; Payload.Query (Model_Noted'Access);
          when Driver.Recording.Estimates_Apart => Apart.Replay_Apart;
          when Driver.Recording.Taken_In        => Taken_In;
-         when Driver.Recording.Estimates_Back  => Back;
+         when Driver.Recording.Estimates_Back  =>
+            Back;
+            if Graphs then
+               Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Driver.Robot.Describe (Robot));
+            end if;
          when others                          => null;
       end case;
    end loop;
@@ -737,6 +761,8 @@ begin
       --  body would miss what the last beats added (the final keyframes).
       Compute;
       Driver.Robot.Boot.Save (Robot, Hands, To_String (Body_File));
+      --  The groups as the replay derived them at its end, as the boot prints them (score1.pl reads the last such block).
+      Line (Driver.Log.Robot, "boot: the groups as recognized:" & ASCII.LF & Driver.Robot.Describe (Robot));
    end if;
    if Length (Estimates) > 0 then
       if Driver.Robot.Booted (Robot) then

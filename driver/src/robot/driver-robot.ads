@@ -89,6 +89,12 @@ package Driver.Robot is
    procedure Replay_Sweep (M : in out Model; Kind : Driver.Recording.Record_Kind; Data : Driver.Bytes.Byte_Array);
    --  Applies the boot's word to the kinematics as the run said it (a recording's kind G, "arm N", or Q,
    --  "arm N asked 0 1 ...": Kinematics.Begin_Anew, Kinematics.Asking); anything else is ignored.
+
+   procedure Replay_Note (M : in out Model; Data : Driver.Bytes.Byte_Array);
+   --  Makes a decider's note into the model as the run made it (a recording's kind N): "keeps G C" and a 0 or 1 an eye
+   --  (Note_Keeps_Going), "back G C" (Note_Comes_Back), "origins" (Motion.Mark_Origins), "stayed G W" with W 1 or -1
+   --  (Motion.Note_Stayed), "alone G" (Note_Channels_Alone); anything else is ignored. A replay of the estimators alone
+   --  derives the graph from the notes as the run did.
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
    --  minutes, during which the robot holds. The call goes into the
@@ -310,6 +316,9 @@ package Driver.Robot is
 
    function Kept_Eye (M : Model; G : Group_Id; E : Eye_Id) return Boolean;
    --  The eye's picture drifted while a channel of the group kept the body going.
+
+   procedure Note_Channels_Alone (M : in out Model; G : Group_Id);
+   --  The group's channels are pushed one at a time (Group_Stream.Channels_Alone).
 
    procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive);
    function Comes_Back (M : Model; G : Group_Id; Channel : Positive) return Boolean;

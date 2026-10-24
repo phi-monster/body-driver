@@ -92,7 +92,7 @@ package Driver.Apart is
 
    procedure Replay_Message (M : Message);
    --  A robot message (kind R): given to the models, or kept back while they
-   --  are apart.
+   --  are apart, without its pictures (Lighten), as the main loop keeps it.
 
    procedure Replay_Decider;
    --  Before a record a decider wrote in its beat (kinds E, F, W): a recording

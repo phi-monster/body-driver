@@ -301,7 +301,16 @@ package body Driver.Apart is
    procedure Replay_Message (M : Message) is
    begin
       if Replaying_Apart then
-         Replay_Queue.Append (M);
+         --  Kept back without its pictures, as the main loop keeps it (Hold_Back): given them, a replay's eyes saw
+         --  frames at every beat the run's missed while the estimates were apart, and its eyes' watch, lags and lock-in
+         --  rows went their own way (UR5e seed 1, paced round p188rec, 10-24: the run's first lock-in rows from beat 12,
+         --  the replay's from 21; 31 of 52 finished boots' graphs differed from the run's in some line).
+         declare
+            Kept : Message := M;
+         begin
+            Lighten (Kept);
+            Replay_Queue.Append (Kept);
+         end;
       else
          Flush_In_Place;
          Replay_Take (M);

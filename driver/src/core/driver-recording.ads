@@ -11,7 +11,9 @@
 --  decider's write into the world (Driver.World.Replay_Write), G the boot's
 --  word to the kinematics that an arm's sweep begins ("arm N": Kinematics.Begin_Anew)
 --  and Q the channels it is turning for the keyframes from then on ("arm N asked 0 1
---  0 ...": Kinematics.Asking; Driver.Robot.Replay_Sweep applies both), and, while the
+--  0 ...": Kinematics.Asking; Driver.Robot.Replay_Sweep applies both), N a decider's note into the robot's model
+--  that the graph reads ("keeps G C 0 1 ...", "back G C", "origins", "stayed G W", "alone G": Driver.Robot.Replay_Note),
+--  and, while the
 --  heavier estimates are computed apart from the main loop (Driver.Apart, no
 --  payloads), K where the models went apart, A each part of a message the
 --  estimator gave them and B where the main loop took them back. A service record starts
@@ -32,7 +34,7 @@ package Driver.Recording is
    type Record_Kind is
      (Robot_Message, Driver_Message, Robot_Text, Driver_Text, Connection, Service_Request, Service_Reply,
       File_Read, Estimates_Asked, World_Written, Estimates_Apart, Taken_In, Estimates_Back, Sweep_Begun,
-      Channels_Asked);
+      Channels_Asked, Model_Noted);
 
    type Reader is limited private;
 

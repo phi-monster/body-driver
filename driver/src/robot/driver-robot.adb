@@ -15,6 +15,7 @@ with Driver.Robot.Graph;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
+with Driver.Robot.Motion;
 with Driver.Robot.Steps;
 with Driver.Robot.Stillness;
 
@@ -310,6 +311,51 @@ package body Driver.Robot is
    --  after the beat's observation and before its reply, so a replay
    --  recomputes at the same point; Observe's own recomputations are not
    --  recorded, since a replay makes them itself.
+   procedure Replay_Note (M : in out Model; Data : Driver.Bytes.Byte_Array) is
+      Text  : constant String := Driver.Bytes.To_String (Data);
+      Words : array (1 .. Text'Length) of Natural := [others => 0];   --  where each word starts
+      Count : Natural := 0;
+      In_Word : Boolean := False;
+      function Word (K : Positive) return String is
+         Stop : Natural := Words (K);
+      begin
+         while Stop <= Text'Last and then Text (Stop) /= ' ' loop
+            Stop := Stop + 1;
+         end loop;
+         return Text (Words (K) .. Stop - 1);
+      end Word;
+   begin
+      for I in Text'Range loop
+         if Text (I) = ' ' then
+            In_Word := False;
+         elsif not In_Word then
+            In_Word := True;
+            Count := Count + 1;
+            Words (Count) := I;
+         end if;
+      end loop;
+      if Count = 0 then
+         return;
+      elsif Word (1) = "origins" then
+         Motion.Mark_Origins (M);
+      elsif Count >= 2 and then Word (1) = "alone" then
+         Note_Channels_Alone (M, Group_Id'Value (Word (2)));
+      elsif Count >= 3 and then Word (1) = "back" then
+         Note_Comes_Back (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)));
+      elsif Count >= 3 and then Word (1) = "stayed" then
+         Motion.Note_Stayed (M, Group_Id'Value (Word (2)), Real'Value (Word (3)));
+      elsif Count >= 3 and then Word (1) = "keeps" then
+         declare
+            Eyes : Channel_Flags (1 .. Count - 3);
+         begin
+            for K in Eyes'Range loop
+               Eyes (K) := Word (K + 3) = "1";
+            end loop;
+            Note_Keeps_Going (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)), Eyes);
+         end;
+      end if;
+   end Replay_Note;
+
    procedure Replay_Sweep (M : in out Model; Kind : Driver.Recording.Record_Kind; Data : Driver.Bytes.Byte_Array) is
       Text  : constant String := Driver.Bytes.To_String (Data);
       --  The words of the text: "arm", the arm, and for Q "asked" and a 0 or 1 a channel.
@@ -1011,6 +1057,18 @@ package body Driver.Robot is
    procedure Note_Keeps_Going (M : in out Model; G : Group_Id; Channel : Positive; Eyes : Channel_Flags) is
       S : Group_Stream renames M.Groups (G);
    begin
+      if Driver.Recording.Shared_Started then
+         declare
+            Text : Ada.Strings.Unbounded.Unbounded_String :=
+              Ada.Strings.Unbounded.To_Unbounded_String ("keeps" & G'Image & Channel'Image);
+         begin
+            for F of Eyes loop
+               Ada.Strings.Unbounded.Append (Text, (if F then " 1" else " 0"));
+            end loop;
+            Driver.Recording.Write_Shared
+              (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes (Ada.Strings.Unbounded.To_String (Text)));
+         end;
+      end if;
       while Natural (S.Keeps_Going.Length) < S.Size loop
          S.Keeps_Going.Append (False);
       end loop;
@@ -1032,9 +1090,16 @@ package body Driver.Robot is
    function Keeps_Going (M : Model; G : Group_Id) return Boolean is
      (G <= M.Groups.Last_Index and then (for some K of M.Groups (G).Keeps_Going => K));
 
+   procedure Note_Channels_Alone (M : in out Model; G : Group_Id) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("alone" & G'Image));
+      M.Groups (G).Channels_Alone := True;
+   end Note_Channels_Alone;
+
    procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive) is
       S : Group_Stream renames M.Groups (G);
    begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("back" & G'Image & Channel'Image));
       while Natural (S.Comes_Back.Length) < S.Size loop
          S.Comes_Back.Append (False);
       end loop;

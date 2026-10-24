@@ -2,11 +2,13 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
+with Driver.Bytes;
 with Driver.Beats;
 with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Clock;
 with Driver.Log;
+with Driver.Recording;
 with Driver.Observations;
 with Driver.Robot.Channels;
 with Driver.Robot.Flow;
@@ -492,6 +494,7 @@ package body Driver.Robot.Motion is
 
    procedure Mark_Origins (M : in out Model) is
    begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("origins"));
       for E in 1 .. Eye_Count (M) loop
          Driver.Robot.Stillness.Set_Origin (M, Eye_Id (E));
       end loop;
@@ -580,6 +583,8 @@ package body Driver.Robot.Motion is
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real) is
       Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
    begin
+      Driver.Recording.Write_Shared
+        (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("stayed" & G'Image & (if Way > 0.0 then " 1" else " -1")));
       for E in 1 .. Eye_Count (M) loop
          declare
             S : Eye_Stream renames M.Eyes (Eye_Id (E));
