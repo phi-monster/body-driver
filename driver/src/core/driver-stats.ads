@@ -29,6 +29,11 @@ package Driver.Stats with Preelaborate is
    --  Median's value, X's elements reordered: no copy, for an array that is the caller's scratch (the many medians
    --  of a few values each a search takes, whose heap copies were a tenth of the arm fit's stage 1, 10-20).
 
+   function Ranked_In_Place (X : in out Real_Array; Rank : Positive) return Real
+     with Pre => Rank <= X'Length;
+   --  The Rank-th least of X's values, X's elements reordered so that it stands at X'First + Rank - 1, every one
+   --  before it no greater and every one after it no less (Median_In_Place's partition).
+
    function Robust_Sigma (X : Real_Array) return Real
      with Pre => X'Length > 0;
    --  The standard deviation implied by the median absolute deviation for

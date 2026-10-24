@@ -92,16 +92,36 @@ package body Driver.Numerics is
       [V (3), 0.0, -V (1)],
       [-V (2), V (1), 0.0]];
 
+   --  Written out, as Times is: the general operators' sums each a result on the secondary stack, and the arm fit
+   --  composes hundreds of thousands of turns a second (Eye_At: of the main task's samples of Panda 1a's last fit of
+   --  round p314s2, replayed on the Mac, 10-25, a sixth were the general operators under this).
    function Exp (Rotation_Vector : Vec3) return Mat3 is
-      Theta : constant Real := abs Rotation_Vector;
+      Theta : constant Real := Sqrt (Dot (Rotation_Vector, Rotation_Vector));
       K     : constant Mat3 := Skew (Rotation_Vector);
+      Turn  : Mat3 := Identity3;
    begin
       if Theta = 0.0 then
-         return Identity3 + K;
+         for I in 1 .. 3 loop
+            for J in 1 .. 3 loop
+               Turn (I, J) := Turn (I, J) + K (I, J);
+            end loop;
+         end loop;
+         return Turn;
       end if;
       --  sin and 1 - cos lose no precision until theta is far below 1e-8,
       --  where the first-order term above is exact to double precision.
-      return Identity3 + (Sin (Theta) / Theta) * K + ((1.0 - Cos (Theta)) / (Theta * Theta)) * Times (K, K);
+      declare
+         A  : constant Real := Sin (Theta) / Theta;
+         B  : constant Real := (1.0 - Cos (Theta)) / (Theta * Theta);
+         KK : constant Mat3 := Times (K, K);
+      begin
+         for I in 1 .. 3 loop
+            for J in 1 .. 3 loop
+               Turn (I, J) := (Turn (I, J) + A * K (I, J)) + B * KK (I, J);
+            end loop;
+         end loop;
+      end;
+      return Turn;
    end Exp;
 
    function Log (R : Mat3) return Vec3 is

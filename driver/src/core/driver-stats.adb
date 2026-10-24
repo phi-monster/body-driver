@@ -156,18 +156,33 @@ package body Driver.Stats is
 
    function Median_In_Place (X : in out Real_Array) return Real is
       N       : constant Positive := X'Length;
-      Rank    : constant Positive := X'First + (N + 1) / 2 - 1;
-      Lo      : Integer := X'First;
-      Hi      : Integer := X'Last;
-      Lower   : Real;
+      Lower   : constant Real := Ranked_In_Place (X, (N + 1) / 2);
       At_Most : Natural := 0;
       Above   : Real := Real'Last;
+   begin
+      if N mod 2 = 1 then
+         return Lower;
+      end if;
+      --  The next order statistic, as Median_Of has it.
+      for V of X loop
+         if V <= Lower then
+            At_Most := At_Most + 1;
+         else
+            Above := Real'Min (Above, V);
+         end if;
+      end loop;
+      return (Lower + (if At_Most > N / 2 then Lower else Above)) / 2.0;
+   end Median_In_Place;
+
+   function Ranked_In_Place (X : in out Real_Array; Rank : Positive) return Real is
+      At_Rank : constant Positive := X'First + Rank - 1;
+      Lo      : Integer := X'First;
+      Hi      : Integer := X'Last;
    begin
       --  Select_Rank's three-way partition, on the values themselves.
       loop
          if Lo >= Hi then
-            Lower := X (Rank);
-            exit;
+            return X (At_Rank);
          end if;
          declare
             Mid   : constant Integer := Lo + (Hi - Lo) / 2;
@@ -199,29 +214,17 @@ package body Driver.Stats is
                   end if;
                end;
             end loop;
-            if Rank < Lt then
+            if At_Rank < Lt then
                Hi := Lt - 1;
-            elsif Rank > Gt then
+            elsif At_Rank > Gt then
                Lo := Gt + 1;
             else
-               Lower := Pivot;
-               exit;
+               --  Every value in Lt .. Gt is the pivot: the one at At_Rank is it.
+               return Pivot;
             end if;
          end;
       end loop;
-      if N mod 2 = 1 then
-         return Lower;
-      end if;
-      --  The next order statistic, as Median_Of has it.
-      for V of X loop
-         if V <= Lower then
-            At_Most := At_Most + 1;
-         else
-            Above := Real'Min (Above, V);
-         end if;
-      end loop;
-      return (Lower + (if At_Most > N / 2 then Lower else Above)) / 2.0;
-   end Median_In_Place;
+   end Ranked_In_Place;
 
    function Robust_Sigma (X : Real_Array) return Real is
       Center : constant Real := Median (X);
