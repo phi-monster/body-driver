@@ -82,27 +82,52 @@ package body Driver.Robot.Kinematics is
       Kept : constant Natural := Natural (S.Kept_Groups.Length);
       W    : constant Natural := Driver.Images.Width (Picture);
       H    : constant Natural := Driver.Images.Height (Picture);
-      --  Where in a cell the aligner can place a patch best: the pixel whose patch (the aligner's, Half_Patch
-      --  either side) holds the most slope energy, the quantity the aligner's own Newton step rests on. A cell's
-      --  centre lies on a flat place as often as not (the kiwi's white table: of the points asked, 19 % failed
-      --  for want of texture and 17 % for a patch over the picture's edge, R6's seventh and eighth starts,
-      --  10-14), and a point put on the cell's texture is the same spread over the picture at no extra cost.
-      --  The slope energy is summed over each patch through an integral image of the squared differences
-      --  between a pixel's neighbours, one pass over the picture.
+      --  Where in a cell the aligner can place a patch best, and whether it can at all: the pixel whose patch (the
+      --  aligner's, Half_Patch either side) holds the most slope energy, the quantity the aligner's own Newton step
+      --  rests on, kept where the patch has texture across both directions, the smaller eigenvalue of its gradient
+      --  tensor (along an edge or a smooth gradient a patch slides, and any place along it answers), above what the
+      --  eye's resting noise alone gives a patch by Z of its spread. A cell's centre lies on a flat place as often as
+      --  not (the kiwi's white table: of the points asked, 19 % failed for want of texture and 17 % for a patch over
+      --  the picture's edge, R6's seventh and eighth starts, 10-14), and the patch with the most slope energy in a
+      --  cell of a smooth sky, a plain floor or the arm's own jaws was matched where no point of the world was:
+      --  RB-Y1 seed 2b's arm 3 (p207s2, 10-24) had 13 of its 140 tracks wrong in most of their sightings against the
+      --  world's truth, every one of them below that noise, and 76 of its 86 sound tracks above it by a median of 55
+      --  of its spreads; such tracks pulled arms' focal lengths 3 to 8 times off (SO-101 seeds 1b and 3b, RB-Y1 2b
+      --  and 3a). Placed by that eigenvalue instead, the points sat on a checkered texture's corners, each like the
+      --  next, and no common motion of the view was told (robot.sweep.start, 10-24). The sums over each patch come
+      --  from integral images, one pass over the picture.
       Half : constant Natural := Driver.Alignment.Half_Patch (W, H);
       type Reals_Access is access Real_Array;
       procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
-      --  The integral image of the squared differences; none without a picture (a rig's eye without pictures,
-      --  whose cells keep their centres).
+      function Sqrt (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Sqrt;
+      --  The integral images of the products of the differences between a pixel's neighbours across (Dx) and down
+      --  (Dy), and of each pixel's resting variance (the eye's stillness test, Stillness); none without a picture (a
+      --  rig's eye without pictures, whose cells keep their centres).
       Pictured : constant Boolean := W > 0 and then H > 0;
-      Total : Reals_Access := (if Pictured then new Real_Array'(1 .. (W + 1) * (H + 1) => 0.0) else null);
+      Noise_Known : constant Boolean := Pictured and then S.Variances /= null and then S.Variances'Length = W * H;
+      Size : constant Natural := (if Pictured then (W + 1) * (H + 1) else 0);
+      Txx, Tyy, Txy, Tv : Reals_Access := (if Pictured then new Real_Array'(1 .. Size => 0.0) else null);
       --  The integral image's entry for the box up to column X and row Y (exclusive), from 1.
       function Place (X, Y : Natural) return Positive is (Y * (W + 1) + X + 1);
-      function At_Total (X, Y : Natural) return Real is (Total (Place (X, Y)));
-      --  The slope energy summed over the patch around (X, Y): the integral image's box.
-      function Energy (X, Y : Natural) return Real is
-        (At_Total (X + Half + 1, Y + Half + 1) - At_Total (X - Half, Y + Half + 1)
-         - At_Total (X + Half + 1, Y - Half) + At_Total (X - Half, Y - Half));
+      --  A sum over the patch around (X, Y): the integral image's box.
+      function Box (T : Reals_Access; X, Y : Natural) return Real is
+        (T (Place (X + Half + 1, Y + Half + 1)) - T (Place (X - Half, Y + Half + 1))
+         - T (Place (X + Half + 1, Y - Half)) + T (Place (X - Half, Y - Half)));
+      --  The smaller eigenvalue of the patch's gradient tensor around (X, Y).
+      function Least (X, Y : Natural) return Real is
+        ((Box (Txx, X, Y) + Box (Tyy, X, Y)) / 2.0
+         - Sqrt (((Box (Txx, X, Y) - Box (Tyy, X, Y)) / 2.0) ** 2 + Box (Txy, X, Y) ** 2));
+      --  Whether a patch's smaller eigenvalue stands above the resting noise's: a difference of two pixels has twice
+      --  a pixel's variance (the noise at rest and the rounding of the level, Driver.Alignment.Quantization), so a
+      --  sum of Count squared differences averages Count times twice it, its square spreading by twice its variance
+      --  squared over each (a Gaussian's square has twice its variance squared): the root of eight times Count times
+      --  the pixel's variance.
+      function Textured_Patch (X, Y : Natural; Smaller : Real) return Boolean is
+         Count : constant Real := Real ((2 * Half + 1) ** 2);
+         Pixel : constant Real := Box (Tv, X, Y) / Count + Driver.Alignment.Quantization;
+      begin
+         return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;
+      end Textured_Patch;
    begin
       U.Clear;
       V.Clear;
@@ -111,22 +136,28 @@ package body Driver.Robot.Kinematics is
          declare
             Luma : Reals_Access := new Real_Array (1 .. W * H);
             function Pixel (X, Y : Natural) return Positive is (Y * W + X + 1);
+            procedure Add (T : Reals_Access; X, Y : Natural; Value : Real) is
+            begin
+               T (Place (X + 1, Y + 1)) := Value + T (Place (X + 1, Y)) + T (Place (X, Y + 1)) - T (Place (X, Y));
+            end Add;
          begin
             Driver.Images.Luma (Picture, Luma.all);
-         for Y in 0 .. H - 1 loop
-            for X in 0 .. W - 1 loop
-               declare
-                  Squared : Real := 0.0;
-               begin
-                  if X > 0 and then X < W - 1 and then Y > 0 and then Y < H - 1 then
-                     Squared := (Luma (Pixel (X + 1, Y)) - Luma (Pixel (X - 1, Y))) ** 2
-                       + (Luma (Pixel (X, Y + 1)) - Luma (Pixel (X, Y - 1))) ** 2;
-                  end if;
-                  Total (Place (X + 1, Y + 1)) :=
-                    Squared + At_Total (X + 1, Y) + At_Total (X, Y + 1) - At_Total (X, Y);
-               end;
+            for Y in 0 .. H - 1 loop
+               for X in 0 .. W - 1 loop
+                  declare
+                     Dx, Dy : Real := 0.0;
+                  begin
+                     if X > 0 and then X < W - 1 and then Y > 0 and then Y < H - 1 then
+                        Dx := Luma (Pixel (X + 1, Y)) - Luma (Pixel (X - 1, Y));
+                        Dy := Luma (Pixel (X, Y + 1)) - Luma (Pixel (X, Y - 1));
+                     end if;
+                     Add (Txx, X, Y, Dx * Dx);
+                     Add (Tyy, X, Y, Dy * Dy);
+                     Add (Txy, X, Y, Dx * Dy);
+                     Add (Tv, X, Y, (if Noise_Known then S.Variances (S.Variances'First + Pixel (X, Y) - 1) else 0.0));
+                  end;
+               end loop;
             end loop;
-         end loop;
             Free (Luma);
          end;
       end if;
@@ -146,29 +177,39 @@ package body Driver.Robot.Kinematics is
                   Best_X : Natural := (X0 + X1) / 2;
                   Best_Y : Natural := (Y0 + Y1) / 2;
                   Best   : Real := -1.0;
+                  --  A rig's eye without pictures keeps its cells' centres; a picture's cell its best place where the
+                  --  whole patch lies in the picture and is textured above the resting noise, and none elsewhere.
+                  Keep   : Boolean := not Pictured;
                begin
-                  --  Only where the whole patch lies in the picture; a cell with no such place keeps its centre.
                   if Pictured and then W > 2 * Half and then H > 2 * Half then
                      for Y in Natural'Max (Y0, Half) .. Natural'Min (Y1, H - Half) - 1 loop
                         for X in Natural'Max (X0, Half) .. Natural'Min (X1, W - Half) - 1 loop
-                           if Energy (X, Y) > Best then
-                              Best := Energy (X, Y);
-                              Best_X := X;
-                              Best_Y := Y;
-                           end if;
+                           declare
+                              Energy : constant Real := Box (Txx, X, Y) + Box (Tyy, X, Y);
+                           begin
+                              if Energy > Best then
+                                 Best := Energy;
+                                 Best_X := X;
+                                 Best_Y := Y;
+                              end if;
+                           end;
                         end loop;
                      end loop;
+                     Keep := Noise_Known and then Textured_Patch (Best_X, Best_Y, Least (Best_X, Best_Y));
                   end if;
-                  U.Append (Real (Best_X) + 0.5);
-                  V.Append (Real (Best_Y) + 0.5);
-                  Responds.Append (Follows);
+                  if Keep then
+                     U.Append (Real (Best_X) + 0.5);
+                     V.Append (Real (Best_Y) + 0.5);
+                     Responds.Append (Follows);
+                  end if;
                end;
             end if;
          end;
       end loop;
-      if Total /= null then
-         Free (Total);
-      end if;
+      Free (Txx);
+      Free (Tyy);
+      Free (Txy);
+      Free (Tv);
    end Query_Points;
 
    --  The query point rides with the eye by its own patch (Patch_Evidence): in the keyframes whose view moved, its

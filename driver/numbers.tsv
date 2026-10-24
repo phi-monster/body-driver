@@ -3370,6 +3370,7 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
+driver-robot-kinematics.adb	((Box (Txx, X, Y) + Box (Tyy, X, Y)) / 2.0	2.0	math	a symmetric 2 by 2 matrix's smaller eigenvalue: half its trace less the root
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(File, I'Image & "" & Driver.Log.Image (R.Query_U (I - 1), 2) & ""	2	format	digits printed in a log line or a message
@@ -3393,6 +3394,7 @@ driver-robot-kinematics.adb	+ Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))
 driver-robot-kinematics.adb	+ Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))) / Fx_Fy);	2	structure	the two focal lengths
 driver-robot-kinematics.adb	+ Response (3) ** 2), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	+ Response (6) ** 2), 4)	4	format	four decimals in the log
+driver-robot-kinematics.adb	- Sqrt (((Box (Txx, X, Y) - Box (Tyy, X, Y)) / 2.0) ** 2 + Box (Txy, X, Y) ** 2));	2.0	math	a symmetric 2 by 2 matrix's smaller eigenvalue: half the difference of its diagonal
 driver-robot-kinematics.adb	- Unit (Fit.Ray (Moved (L, Term, -S), U, V)))) / (2.0 * S);	2.0	math	a central difference spans two steps
 driver-robot-kinematics.adb	0.01 * ((Cross (Row, 1) * (Cv_Lens (2, 2) - Cv_Lens (1, 2))	0.01	format	the log states how far the placement moves for both focal lengths a hundredth too long
 driver-robot-kinematics.adb	0.01 * ((Cross (Row, 1) * (Cv_Lens (2, 2) - Cv_Lens (1, 2))	1	structure	the two focal lengths
@@ -3421,6 +3423,7 @@ driver-robot-kinematics.adb	Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J
 driver-robot-kinematics.adb	Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J + 2));	2	structure	the centre's block follows the turn's three terms: rows and columns offset by three, counted from one
 driver-robot-kinematics.adb	Centre (I, J) := C (C.First_Index + 6 * (I + 2) + (J + 2));	6	structure	six terms of a placement a row (its turn and its centre)
 driver-robot-kinematics.adb	Centre_Row : constant := 3;	3	structure	the output rows: the turn's three, then the centre's
+driver-robot-kinematics.adb	Count : constant Real := Real ((2 * Half + 1) ** 2);	2	structure	a patch is a half patch either side of its pixel and the pixel itself, square
 driver-robot-kinematics.adb	Covariance (P, Q) := (Result (P, Q) + Result (Q, P)) / 2.0;	2.0	math	a matrix's symmetric part
 driver-robot-kinematics.adb	Cross : Real_Matrix (1 .. Outputs, 1 .. 2) := [others => [others => 0.0]];	2	structure	the two focal lengths
 driver-robot-kinematics.adb	D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
@@ -3591,6 +3594,8 @@ driver-robot-kinematics.adb	if Slack'Length = 2 * N then	2	structure	two slack t
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
 driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
+driver-robot-kinematics.adb	return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;	2.0	statistics	a difference of two pixels has twice one pixel's variance
+driver-robot-kinematics.adb	return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;	8.0	statistics	the square of a Gaussian of variance 2 v varies by twice its variance squared, 8 v squared
 driver-robot-kinematics.adb	return Square_Root (Fixed_Angle_Sigma (M, E) ** 2 + Var / 2.0);	2.0	math	half the trace: the variance per axis across a line
 driver-robot-kinematics.adb	then (1.0 / (R.Result.Table_A * X)) * R.Result.Table_A	1.0	math	the table's plane A * X = 1 scaled to pass through the point
 driver-robot-kinematics.adb	then Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter	2.0	statistics	the noise of a difference of two readings is the square root of two times one reading's
