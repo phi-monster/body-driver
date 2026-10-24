@@ -1,6 +1,10 @@
 #!/usr/bin/perl
 # round.pl RUNS [CAP]: a round of step-1 boots summed up (simulator-side rig code). CAP: the beats a boot may take (1200:
-# two minutes of a real robot's own time); a boot right only past it counts as not right, whatever the hall's clock. From RUNS/ledger.txt (batch.sh, score1.pl)
+# two minutes of a real robot's own time) to its first groups as recognized, the end of step 1; a boot right only past
+# it counts as not right, whatever the hall's clock. A boot that went on to sweep its arms is scored at the groups after
+# sweeping (score1.pl: the mounts the recognition could not tell are the sweeps', owner 10-24), and still timed at the
+# end of step 1: timed at the sweep's end, every one of p314s2's right boots of SO-101 and UR5e counted as over. From
+# RUNS/ledger.txt (batch.sh, score1.pl)
 # and each run's driver log: per robot, how many of its boots recognized every group and eye right, what was wrong,
 # whether the same robot booted twice (one seed, copies a and b) came out the same, and where each boot's beats went:
 # held still before the first push (rest), the push of every channel together (together), each channel alone
@@ -21,13 +25,14 @@ while (<$l>) {
   my ($wrong) = $rest =~ /\[(.*)\]/;
   my ($beat) = $rest =~ /@(\d+)/;
   $line{$kind}{"$seed$copy"} = { verdict => $verdict, wrong => $wrong // "", why => $why, secs => $secs, beat => $beat // 0 };
-  if (defined $cap && $verdict eq "PASS" && ($beat // 0) > $cap) { $verdict = "OVER"; }
-  $line{$kind}{"$seed$copy"}{verdict} = $verdict;
-  $n{$kind}++; $ok{$kind}++ if $verdict eq "PASS";
   # the phases from the driver's log
   my $log = -e "$runs/$tag/driver.log.zst" ? "zstd -dc $runs/$tag/driver.log.zst |" : "$runs/$tag/driver.log";
-  open my $d, $log or next;
   my ($first, $together, $last_channel, $recognized, $last) = (0, 0, 0, 0, 0);
+  my $d;
+  unless (open $d, $log) {   # no log: counted as the ledger says, untimed
+    $n{$kind}++; $ok{$kind}++ if $verdict eq "PASS";
+    next;
+  }
   my ($group_from, @groups) = (0);
   while (<$d>) {
     next unless /^@(\d+) /; my $b = $1; $last = $b;
@@ -42,6 +47,9 @@ while (<$l>) {
   }
   close $d;
   my $end = $recognized || $last;
+  if (defined $cap && $verdict eq "PASS" && $end > $cap) { $verdict = "OVER"; }
+  $line{$kind}{"$seed$copy"}{verdict} = $verdict;
+  $n{$kind}++; $ok{$kind}++ if $verdict eq "PASS";
   $groups{$kind}{"$seed$copy"} = join(" ", @groups);
   $phase{$kind}{"$seed$copy"} = [ $first, ($together ? $together - $first : 0),
                                   ($last_channel && $together ? $last_channel - $together : 0),
