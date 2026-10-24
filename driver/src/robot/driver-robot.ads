@@ -592,6 +592,10 @@ private
       Deviations       : Luma_Access;        --  the square roots of Variances, for the settle watch
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Has_Before    : Boolean := False;      --  Before is the frame two beats ago, of the grid's size
+      --  Those are so while the eye measures a beat; once its frames moved on (One_Eye), Previous holds that beat's
+      --  frame, Before the one before, and Current a spare with the frame of two beats before, to be written over:
+      --  between beats the latest frame is Latest_Frame's.
+      Latest_In_Previous : Boolean := False;   --  the latest frame was moved on into Previous; else it is Current
       --  Whether the picture has stopped changing since the body last began to
       --  move (Driver.Robot.Stillness, Settled): this beat's mean luma change
       --  against the beat before and against two beats before, and the watch
@@ -617,6 +621,7 @@ private
                                             --  farther than rest moves a picture: a drift too slow for one beat to show
       Origin        : Luma_Access;           --  the frame a push began from (Stillness.Set_Origin), and
       Has_Origin    : Boolean := False;      --  it is in effect
+      Origin_At     : Natural := 0;          --  the beat it was taken at
       From_Origin   : Real := Real'Last;     --  the picture's change from it at the latest beat; Real'Last unmeasured
       Run_Moved     : Boolean := False;      --  the still view holds frames the noise called changed, after the
                                              --  picture stopped (Stillness.Judge_Eye): it measures no noise
@@ -676,6 +681,8 @@ private
                                                  --  reach, summed over them
       Stayed_Best_Moved : Count_Vectors.Vector;   --  per group: of the push that left the largest share of the view moved,
       Stayed_Best_Cells : Count_Vectors.Vector;   --  the cells it left moved and the textured cells it was counted of
+      Stayed_Pulled : Count_Vectors.Vector;  --  per group: how many of its pushes left the cells that did not move alone
+                                             --  pulled together the same way (Motion.Note_Stayed)
       Still_At      : Flag_Vectors.Vector;   --  per beat: judged still
       Settled_At    : Flag_Vectors.Vector;   --  per beat: its picture had stopped changing since the body last began
                                              --  to move (the watch's Done at that beat, Stillness)
@@ -683,6 +690,13 @@ private
 
    function Rest_Factor_Of (S : Eye_Stream; Cell : Natural) return Real;
    --  The cell's displacement noise at rest over its floor: its own where measured, else the eye's typical.
+
+   function Latest_Frame (S : Eye_Stream) return Luma_Access;
+   --  The eye's latest frame between beats, after its frames moved on: Previous once a frame of the grid's size moved
+   --  into it, Current where one of another size broke the chain; null before any frame. A frame the decider takes as
+   --  the latest (Stillness.Set_Anchor, Set_Origin, Motion.Note_Stayed) read from Current was two beats old: the flows
+   --  from such an anchor equalled the eye's beat to beat flows of two beats before, summed (the G1's head camera,
+   --  seed 3, paced round p170a, 10-24).
 
    package Eye_Stream_Vectors is new Ada.Containers.Vectors (Eye_Id, Eye_Stream);
 

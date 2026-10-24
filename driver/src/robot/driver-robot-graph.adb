@@ -113,12 +113,16 @@ package body Driver.Robot.Graph is
       --  significantly more than half the textured cells unmoved. Not their sum: a push into an end, or one the body
       --  answered late, leaves nothing, and the test rig's arm, its push up leaving its eye's 48 cells unmoved and its
       --  push down 31 of them moved, was a part by the sum (robot.boot, 10-24).
+      --  Its pushes left the eye's view mostly unmoved: no push of it left even the cells that did not move alone pulled
+      --  together the same way (Stayed_Pulled: a far part of the view moved by less than any one cell can tell).
       function Unmoved (G : Group_Id; E : Eye_Id) return Boolean is
         (Natural (G) <= Natural (M.Eyes (E).Stayed_Best_Cells.Length)
          and then Natural (G) <= Natural (M.Eyes (E).Stayed_Best_Moved.Length)
          and then M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1) > 0
          and then Lockin.Mostly (M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1) - M.Eyes (E).Stayed_Best_Moved (Natural (G) - 1),
-                                 M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1)));
+                                 M.Eyes (E).Stayed_Best_Cells (Natural (G) - 1))
+         and then not (Natural (G) <= Natural (M.Eyes (E).Stayed_Pulled.Length)
+                       and then M.Eyes (E).Stayed_Pulled (Natural (G) - 1) > 0));
 
       --  Group G may carry eye E: one of its own, not the carrier, that moves the eye's view whole.
       function Candidate (G : Group_Id; E : Eye_Id) return Boolean is
@@ -491,8 +495,6 @@ package body Driver.Robot.Graph is
             declare
                Best_Arm   : Arm_Id'Base := 0;
                Best_Eye   : Eye_Id'Base := 0;
-               Best_Count : Natural := 0;
-               Best_Far   : Real := -1.0;
                Patched    : Boolean := False;
                Unsure     : Boolean := False;   --  some eye has not told
                Undecided_Eye : Boolean := False;   --  some eye told, but not enough to decide
@@ -501,6 +503,25 @@ package body Driver.Robot.Graph is
                --  Another eye on an arm shows the group a patch, and the group's pushes left significantly more of its
                --  view moved beyond the flow's reach than of Kept's (Regression.Shares_Apart). Not where the lock-in has
                --  not measured the group in Kept: it then tells nothing.
+               --  Eye E shows the group nearer than eye B: its pushes left significantly more of E's view beyond the
+               --  flow's reach (Further); or as far, by more than chance, significantly more of it moved
+               --  (Regression.Shares_Apart on the cells moved); or as either, more cells responding. By the raw share
+               --  beyond reach, RB-Y1's left gripper, 1 cell of 249 beyond reach in its own wrist's eye against 1 of
+               --  240 in the right wrist's, its pushes moving 61 and 28 of them, went to the right arm (seed 1, paced
+               --  round p121a, 10-24).
+               function Moved_More (E, B : Eye_Id) return Boolean is
+                 (Cells_Of (G, E) > 0 and then Cells_Of (G, B) > 0
+                  and then Real (Moved_Of (G, E)) / Real (Cells_Of (G, E))
+                           > Real (Moved_Of (G, B)) / Real (Cells_Of (G, B))
+                  and then Driver.Robot.Regression.Shares_Apart
+                             (Moved_Of (G, E), Cells_Of (G, E), Moved_Of (G, B), Cells_Of (G, B)));
+               function Nearer (E, B : Eye_Id) return Boolean is
+                 (Further (G => G, E => E, H => G, F => B)
+                  or else (not Further (G => G, E => B, H => G, F => E)
+                           and then (Moved_More (E, B)
+                                     or else (not Moved_More (E => B, B => E)
+                                              and then Effect (M, G, E).Responding > Effect (M, G, B).Responding))));
+
                function Clearer (Kept : Eye_Id) return Boolean is
                  (Best_Eye > 0 and then Best_Eye /= Kept and then Effect (M, G, Kept).Verdict /= Unmeasured
                   and then Cells_Of (G, Kept) > 0 and then Cells_Of (G, Best_Eye) > 0
@@ -542,12 +563,7 @@ package body Driver.Robot.Graph is
                            --  (Stretch's gripper, seed 2, paced round p89a, 10-24: in its wrist's eye 107 of 255 cells
                            --  responding and 14 % of the view left beyond reach, in the head's eye 216 and 1 %, the robot
                            --  rocking as the gripper moved; by the cells responding, it went to the head's arm).
-                           if Mt.Kind = Arm_Carried
-                             and then (Far_Of (G, E) > Best_Far
-                                       or else (Far_Of (G, E) = Best_Far and then F.Responding > Best_Count))
-                           then
-                              Best_Far := Far_Of (G, E);
-                              Best_Count := F.Responding;
+                           if Mt.Kind = Arm_Carried and then (Best_Eye = 0 or else Nearer (E, Best_Eye)) then
                               Best_Arm := Mt.Arm;
                               Best_Eye := E;
                            end if;

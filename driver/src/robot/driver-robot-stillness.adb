@@ -305,16 +305,17 @@ package body Driver.Robot.Stillness is
 
    procedure Set_Anchor (M : in out Model; E : Eye_Id) is
       S : Eye_Stream renames M.Eyes (E);
+      Latest : constant Luma_Access := Latest_Frame (S);
    begin
-      if S.Current = null then
+      if Latest = null then
          S.Has_Anchor := False;
          return;
       end if;
-      if S.Anchor = null or else S.Anchor'Length /= S.Current'Length then
+      if S.Anchor = null or else S.Anchor'Length /= Latest'Length then
          Free (S.Anchor);
-         S.Anchor := new Real_Array (S.Current'Range);
+         S.Anchor := new Real_Array (Latest'Range);
       end if;
-      S.Anchor.all := S.Current.all;
+      S.Anchor.all := Latest.all;
       S.Has_Anchor := True;
       S.Away_Run := 0;
       S.Away_Last := 0.0;
@@ -333,22 +334,26 @@ package body Driver.Robot.Stillness is
 
    procedure Set_Origin (M : in out Model; E : Eye_Id) is
       S : Eye_Stream renames M.Eyes (E);
+      Latest : constant Luma_Access := Latest_Frame (S);
    begin
       S.From_Origin := Real'Last;
-      if S.Current = null then
+      S.Origin_At := M.Beats;
+      if Latest = null then
          S.Has_Origin := False;
          return;
       end if;
-      if S.Origin = null or else S.Origin'Length /= S.Current'Length then
+      if S.Origin = null or else S.Origin'Length /= Latest'Length then
          Free (S.Origin);
-         S.Origin := new Real_Array (S.Current'Range);
+         S.Origin := new Real_Array (Latest'Range);
       end if;
-      S.Origin.all := S.Current.all;
+      S.Origin.all := Latest.all;
       S.Has_Origin := True;
    end Set_Origin;
 
    function Eye_From_Origin (M : Model; E : Eye_Id) return Real is
      (if M.Eyes (E).Has_Origin then M.Eyes (E).From_Origin else Real'Last);
+
+   function Eye_Origin_At (M : Model; E : Eye_Id) return Natural is (M.Eyes (E).Origin_At);
 
    function Eye_Rest_Change (M : Model; E : Eye_Id) return Real is (M.Eyes (E).Watch_Rest);
 

@@ -235,6 +235,7 @@ package body Driver.Robot.Body_File is
                  & ", ""stayed_far_cells"": " & Counts (S.Stayed_Far_Cells)
                  & ", ""stayed_best_moved"": " & Counts (S.Stayed_Best_Moved)
                  & ", ""stayed_best_cells"": " & Counts (S.Stayed_Best_Cells)
+                 & ", ""stayed_pulled"": " & Counts (S.Stayed_Pulled)
                  & ", ""noise"": " & Reals (S.Noise)
                  & ", ""textured"": " & Flags (S.Textured)
                  & ", ""kept_groups"": " & Counts (S.Kept_Groups)
@@ -685,6 +686,7 @@ package body Driver.Robot.Body_File is
                      S.Stayed_Far_Cells := Counts_Of (Field (X, "stayed_far_cells"));
                      S.Stayed_Best_Moved := Counts_Of (Field (X, "stayed_best_moved"));
                      S.Stayed_Best_Cells := Counts_Of (Field (X, "stayed_best_cells"));
+                     S.Stayed_Pulled := Counts_Of (Field (X, "stayed_pulled"));
                      S.Noise := Reals_Of (Field (X, "noise"));
                      S.Textured := Flags_Of (Field (X, "textured"));
                      S.Kept_Groups := Counts_Of (Field (X, "kept_groups"));

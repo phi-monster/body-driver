@@ -102,6 +102,9 @@ private package Driver.Robot.Stillness is
    --  The eye's picture's mean change from its origin at the latest beat, in units of its pixels' noise; Real'Last
    --  when not measured.
 
+   function Eye_Origin_At (M : Model; E : Eye_Id) return Natural;
+   --  The beat the eye's origin was taken at (Set_Origin).
+
    function Eye_Rest_Change (M : Model; E : Eye_Id) return Real;
    --  What rest changes the eye's picture by from one frame to another (the median change of its stationary beats,
    --  Watch); Real'Last before it is measured.

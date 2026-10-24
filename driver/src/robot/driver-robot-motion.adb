@@ -28,6 +28,13 @@ package body Driver.Robot.Motion is
    --  (h406 on the big machine, 10-22: from beat 20461 to an estimate at 43146, and from 46635 to the run's end).
    Longest_Wait : Natural := 0;
 
+   --  Each eye's drift a beat with nothing pushed, as the latest settle that sent nothing back saw it (Settle_Body):
+   --  the slope of its picture's change from its anchor over the second half of the beats the readings stood. A body
+   --  that creeps or turns on by itself (ALOHA's arms, pressed together from the start, 0.02 mm a beat; the G1 after
+   --  a push turning on 0.003 to 0.016 degrees a beat, the world's truth, d98y and d117, 10-24) leaves its pictures
+   --  away by that much a beat of a push, sent back or not.
+   Local_Rates : Real_Vectors.Vector;
+
    --  Sent back and settled: a joint sent back comes back, and its eyes' pictures with it, to where the push began,
    --  however it shook or crept on the way (round 1, 10-23: arms of the SO-101, the Panda and ALOHA, creeping under
    --  their quantized readings, drifted, and drifted again once sent back); a body that a speed carried stops
@@ -59,13 +66,19 @@ package body Driver.Robot.Motion is
                Rest     : constant Real := Driver.Robot.Stillness.Eye_Rest_Change (M, Eye_Id (E));
                Was      : constant Real := Pushed (Pushed'First + E - 1);
                --  Further than rest takes a picture: beyond what rest changes it by, Z of its scale.
-               Bound    : constant Real := Rest + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
+               --  Rest over as many beats as the push took: what the body drifts a beat by itself, as it was last left
+               --  (Local_Rates), on top of rest's change.
+               Span     : constant Natural := M.Beats - Natural'Min (M.Beats, Driver.Robot.Stillness.Eye_Origin_At (M, Eye_Id (E)));
+               Base     : constant Real :=
+                 (if Rest < Real'Last then Rest + (if E <= Natural (Local_Rates.Length) then Local_Rates (E - 1) else 0.0) * Real (Span)
+                  else Rest);
+               Bound    : constant Real := Base + Driver.Conventions.Z * Driver.Robot.Stillness.Eye_Rest_Scale (M, Eye_Id (E));
                Beyond   : constant Boolean :=
                  Now_Away < Real'Last and then Was < Real'Last and then Rest < Real'Last and then Was > Bound;
                --  Stayed away: nearer to how far the push took it than to rest, and itself further than rest takes a
                --  picture. Nearer the halfway mark alone, the G1's hands were speeds by their eyes' 2.6 and 3.0 after
                --  pushes of 2.0 and 2.4 against rest's 1.5 (seed 1, paced round p79b, 10-23).
-               Stayed   : constant Boolean := Beyond and then Now_Away > Real'Max ((Rest + Was) / 2.0, Bound);
+               Stayed   : constant Boolean := Beyond and then Now_Away > Real'Max ((Base + Was) / 2.0, Bound);
             begin
                Considered (Considered'First + E - 1) := Stayed;
                Kept_Going := Kept_Going or else Stayed;
@@ -73,6 +86,7 @@ package body Driver.Robot.Motion is
                Any_Back := Any_Back or else (Beyond and then not Stayed);
                Append (Text, " eye" & E'Image & " " & Driver.Log.Image (Now_Away, 2) & " from where the push began"
                        & " (pushed " & Driver.Log.Image (Was, 2) & ", rest " & Driver.Log.Image (Rest, 2)
+                       & (if Base > Rest and then Base < Real'Last then " and drift " & Driver.Log.Image (Base - Rest, 2) else "")
                        & (if not Beyond then "): no further than rest takes it;"
                           elsif Stayed then "): stayed away;" else "): came back;"));
             end;
@@ -243,6 +257,7 @@ package body Driver.Robot.Motion is
       Eye_Far       : array (1 .. Eyes) of Real := [others => 0.0];
       Eye_Far_At    : array (1 .. Eyes) of Natural := [others => 0];
       Ended_Nowhere : Boolean := False;   --  some eye ended the wait going no farther, unstilled (Eye_Nowhere)
+      Aways         : array (1 .. Eyes) of Real_Vectors.Vector;   --  each eye's change from its anchor, a beat each
       function Eye_Nowhere (E : Positive) return Boolean is
         (Anchored
          and then Beats_Waited - Eye_Far_At (E) > Natural'Max (Natural'Max (Eye_Far_At (E), Delay_Beats), Longest_Wait));
@@ -284,6 +299,11 @@ package body Driver.Robot.Motion is
             for G in 1 .. Groups loop
                Still_Now (G) := Driver.Robot.Stillness.Group_Still (M, Group_Id (G), M.Beats - 1);
                Follow (Group_Id (G));
+            end loop;
+         end if;
+         if Anchored then
+            for E in 1 .. Eyes loop
+               Aways (E).Append (Driver.Robot.Stillness.Eye_From_Anchor (M, Eye_Id (E)));
             end loop;
          end if;
          if Anchored then
@@ -354,6 +374,7 @@ package body Driver.Robot.Motion is
                   Driver.Robot.Stillness.Set_Anchor (M, Eye_Id (E));
                   Eye_Far (E) := 0.0;
                   Eye_Far_At (E) := Beats_Waited;
+                  Aways (E).Clear;
                end loop;
                Anchored := True;
             end if;
@@ -398,6 +419,23 @@ package body Driver.Robot.Motion is
       --  beats a push and was unfinished at the cap (seed 3, paced round p128a, 10-24).
       if not Ended_Nowhere then
          Longest_Wait := Natural'Max (Longest_Wait, Beats_Waited);
+      end if;
+      if not Use_Back then
+         for E in 1 .. Eyes loop
+            declare
+               N : constant Natural := Natural (Aways (E).Length);
+               H : constant Natural := N / 2;
+               Rate : Real := 0.0;
+            begin
+               if N >= 2 and then N - 1 > H then
+                  Rate := Real'Max (0.0, (Aways (E) (N - 1) - Aways (E) (H)) / Real (N - 1 - H));
+               end if;
+               while Natural (Local_Rates.Length) < E loop
+                  Local_Rates.Append (0.0);
+               end loop;
+               Local_Rates.Replace_Element (E - 1, Rate);
+            end;
+         end loop;
       end if;
       if Beats_Waited > 0 then
          declare
@@ -459,6 +497,86 @@ package body Driver.Robot.Motion is
       end loop;
    end Mark_Origins;
 
+   function Reach_Ratio (M : Model) return Real is
+      Gate  : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
+      Ratio : Real := 1.0;
+      Most  : Real := 0.0;       --  the median displacement of the moved cells of the eye with the largest share moved
+      Share : Real := 0.0;       --  that share, of the eye's textured cells
+      Reach : Real := 0.0;       --  half a cell of that eye, in pixels
+      Beyond : Boolean := False;  --  some eye has more of its moved cells beyond reach than within it
+   begin
+      for E in 1 .. Eye_Count (M) loop
+         declare
+            S : Eye_Stream renames M.Eyes (Eye_Id (E));
+            N : constant Natural := Cells (S.Grid);
+            Latest : constant Luma_Access := Latest_Frame (S);
+         begin
+            if S.Has_Origin and then Latest /= null and then S.Origin /= null
+              and then S.Origin'Length = Latest'Length and then N > 0
+              and then Natural (S.Luma_Variance.Length) >= N
+            then
+               declare
+                  type Real_Access is access Real_Array;
+                  type Flag_Access is access Flow.Flag_Array;
+                  procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
+                  procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flag_Access);
+                  Du       : Real_Access := new Real_Array (1 .. N);
+                  Dv       : Real_Access := new Real_Array (1 .. N);
+                  Cond     : Real_Access := new Real_Array (1 .. N);
+                  Noise    : Real_Access := new Real_Array (1 .. N);
+                  Resolved : Flag_Access := new Flow.Flag_Array (1 .. N);
+                  Shifts   : Real_Access := new Real_Array (1 .. N);
+                  Far, Within, Textured : Natural := 0;
+                  X0, X1, Y0, Y1 : Natural;
+               begin
+                  for C in 1 .. N loop
+                     Noise (C) := S.Luma_Variance (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
+                  end loop;
+                  Flow.Displacements (S.Grid, S.Origin.all, Latest.all, Noise.all, Du.all, Dv.all, Cond.all,
+                                      Resolved.all);
+                  for C in 1 .. N loop
+                     if Cond (C) > 0.0 and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1)) then
+                        Textured := Textured + 1;
+                        if not Resolved (C) then
+                           Far := Far + 1;
+                        elsif Driver.Uncertain.Significant
+                            (Gate, Sqrt (Du (C) ** 2 + Dv (C) ** 2),
+                             Rest_Factor_Of (S, C - 1) * Flow.Noise_Floor (Cond (C), S.Luma_Variance (C - 1)))
+                        then
+                           Within := Within + 1;
+                           Shifts (Within) := Sqrt (Du (C) ** 2 + Dv (C) ** 2);
+                        end if;
+                     end if;
+                  end loop;
+                  Flow.Bounds (S.Grid, 1, X0, X1, Y0, Y1);
+                  if Far > Within then
+                     Beyond := True;
+                  elsif Within > 0 and then Real (Far + Within) / Real (Textured) > Share then
+                     --  The eye the push moved most broadly: an eye that sees a few cells move at rest (RB-Y1's wrist
+                     --  eyes, a hundred of their 244) shows them moved by a pixel whatever was pushed, and its median
+                     --  is noise's: RB-Y1's head, its own camera's 86 moved cells by 0.07 px, was scaled by a wrist
+                     --  eye's 47 at 1.27 px and left its camera short of the flow's reach, its torso the camera's
+                     --  own group by it (seed 1, d117, 10-24).
+                     Share := Real (Far + Within) / Real (Textured);
+                     Most := Driver.Stats.Median (Shifts (1 .. Within));
+                     Reach := Real (Natural'Min (X1 - X0, Y1 - Y0)) / 2.0;
+                  end if;
+                  Free (Du);
+                  Free (Dv);
+                  Free (Cond);
+                  Free (Noise);
+                  Free (Resolved);
+                  Free (Shifts);
+               end;
+            end if;
+         end;
+      end loop;
+      if not Beyond and then Most > 0.0 and then Reach > Most then
+         Ratio := Reach / Most;
+      end if;
+      return Ratio;
+   end Reach_Ratio;
+
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real) is
       Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
    begin
@@ -466,9 +584,10 @@ package body Driver.Robot.Motion is
          declare
             S : Eye_Stream renames M.Eyes (Eye_Id (E));
             N : constant Natural := Cells (S.Grid);
+            Latest : constant Luma_Access := Latest_Frame (S);
          begin
-            if S.Has_Origin and then S.Current /= null and then S.Origin /= null
-              and then S.Origin'Length = S.Current'Length and then N > 0
+            if S.Has_Origin and then Latest /= null and then S.Origin /= null
+              and then S.Origin'Length = Latest'Length and then N > 0
               and then Natural (S.Luma_Variance.Length) >= N
             then
                declare
@@ -485,11 +604,16 @@ package body Driver.Robot.Motion is
                   Moved, Textured, Far : Natural := 0;
                   Shifts   : Real_Access := new Real_Array (1 .. N);   --  the moved cells' displacements, in pixels
                   Resolved_Moved : Natural := 0;
+                  --  The cells that did not move by more than each can tell alone: their displacements pooled by inverse
+                  --  variance, in each picture direction, and how many they are.
+                  Pu, Wu, Pv, Wv : Real := 0.0;
+                  Faint    : Natural := 0;
+                  Pulled   : Boolean := False;
                begin
                   for C in 1 .. N loop
                      Noise (C) := S.Luma_Variance (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
                   end loop;
-                  Flow.Displacements (S.Grid, S.Origin.all, S.Current.all, Noise.all, Du.all, Dv.all, Cond.all,
+                  Flow.Displacements (S.Grid, S.Origin.all, Latest.all, Noise.all, Du.all, Dv.all, Cond.all,
                                       Resolved.all);
                   for C in 1 .. N loop
                      if Cond (C) > 0.0 and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1)) then
@@ -497,16 +621,42 @@ package body Driver.Robot.Motion is
                         if not Resolved (C) then
                            Moved := Moved + 1;
                            Far := Far + 1;
-                        elsif Driver.Uncertain.Significant
-                            (Gate, Sqrt (Du (C) ** 2 + Dv (C) ** 2),
-                             Rest_Factor_Of (S, C - 1) * Flow.Noise_Floor (Cond (C), S.Luma_Variance (C - 1)))
-                        then
-                           Moved := Moved + 1;
-                           Resolved_Moved := Resolved_Moved + 1;
-                           Shifts (Resolved_Moved) := Sqrt (Du (C) ** 2 + Dv (C) ** 2);
+                        else
+                           declare
+                              Sd : constant Real :=
+                                Rest_Factor_Of (S, C - 1) * Flow.Noise_Floor (Cond (C), S.Luma_Variance (C - 1));
+                           begin
+                              if Driver.Uncertain.Significant (Gate, Sqrt (Du (C) ** 2 + Dv (C) ** 2), Sd) then
+                                 Moved := Moved + 1;
+                                 Resolved_Moved := Resolved_Moved + 1;
+                                 Shifts (Resolved_Moved) := Sqrt (Du (C) ** 2 + Dv (C) ** 2);
+                              elsif Sd > 0.0 and then Sd < Real'Last then
+                                 Pu := Pu + Du (C) / Sd ** 2;
+                                 Wu := Wu + 1.0 / Sd ** 2;
+                                 Pv := Pv + Dv (C) / Sd ** 2;
+                                 Wv := Wv + 1.0 / Sd ** 2;
+                                 Faint := Faint + 1;
+                              end if;
+                           end;
                         end if;
                      end if;
                   end loop;
+                  --  The cells that did not move alone, pulled together the same way (a chi square of two degrees, one
+                  --  pooled displacement per picture direction, as the lock-in pools a push's gains: Rest_Pull): a far
+                  --  part of a carried eye's view, moved by less than any one cell can tell, moved with the rest, and the
+                  --  push left the view moved, not unmoved (Stayed_Pulled, Graph). Read cell by cell alone, the rig's arm
+                  --  whose eye shows a near object move twenty times as much as the rest left 12 of its 48 cells moved,
+                  --  and carried nothing (robot.boot.step, 10-24); a view shaken that came back pools to nothing. Not
+                  --  counted as moved cells: Stretch's gripper, its push bending its arm, left its wrist eye's view
+                  --  pulled so, as its arm did, and took the eye from its arm (seed 1, paced round p177ca, 10-24).
+                  Pulled := Faint > 0 and then Wu > 0.0 and then Wv > 0.0
+                    and then Driver.Distributions.Chi_Square_Deviate (Pu ** 2 / Wu + Pv ** 2 / Wv, 2) > Driver.Conventions.Z;
+                  while Natural (S.Stayed_Pulled.Length) < Natural (G) loop
+                     S.Stayed_Pulled.Append (0);
+                  end loop;
+                  if Pulled then
+                     S.Stayed_Pulled.Replace_Element (Natural (G) - 1, S.Stayed_Pulled (Natural (G) - 1) + 1);
+                  end if;
                   if Textured > 0 then
                      while Natural (S.Stayed_Pushes.Length) < Natural (G) loop
                         S.Stayed_Pushes.Append (0);
@@ -1367,6 +1517,17 @@ package body Driver.Robot.Motion is
       return Wire;
    end Smallest_Step;
 
+   function Group_Least_Step (M : Model; G : Group_Id) return Real is
+      Least : Real := 0.0;
+   begin
+      if Natural (G) <= Group_Count (M) and then M.Beats > 0 and then Channels.Has_Reading (M, G, M.Beats - 1) then
+         for C in 1 .. Group_Size (M, G) loop
+            Least := Real'Max (Least, Smallest_Step (M, G, C));
+         end loop;
+      end if;
+      return Least;
+   end Group_Least_Step;
+
    type Flag_Array is array (Positive range <>) of Boolean;
 
    --  Moves the listed channels to Base plus the offsets and looks for as
@@ -1715,7 +1876,8 @@ package body Driver.Robot.Motion is
       Amount   : out Real;
       Unlooked : out Natural;
       Start_At : out Natural;
-      Creep    : out Real_Array)
+      Creep    : out Real_Array;
+      Weights  : out Real_Array)
    is
       B : Driver.Clock.Beat;
 
@@ -1731,6 +1893,7 @@ package body Driver.Robot.Motion is
       Start_At := 0;
       Creep := [others => 0.0];
       Noise := [others => 0.0];
+      Weights := [others => 1.0];
       Base := Driver.Commands.Hold;
       Amount := First;
       Driver.Beats.Next (B);
@@ -1775,6 +1938,19 @@ package body Driver.Robot.Motion is
                end;
             end if;
          end loop;
+         --  Each listed channel from its own group's least step (Group_Least_Step), of the largest any group has: a
+         --  group's readings tell its own steps, and one amount for all, the largest step any reading tells, took the
+         --  quietest joints as far as the noisiest reading needs. RB-Y1's wheels, read as counts over a beat at eight
+         --  times, set 0.546 units for every channel, and its torso, read at an eighth, turned 4.4 radians' worth into
+         --  its limit and folded the robot to the floor (seed 3, paced rounds p89 to p99, 10-23 and 10-24). (Experiment
+         --  bd113.)
+         if First = 0.0 and then Amount > 0.0 then
+            for I in Listed'Range loop
+               if Usable (I) then
+                  Weights (I) := Group_Least_Step (M, Listed (I).Group) / Amount;
+               end if;
+            end loop;
+         end if;
       end if;
       Driver.Beats.Send (Driver.Commands.Hold);
    end Begin_Probe;
@@ -1806,10 +1982,17 @@ package body Driver.Robot.Motion is
       Start_At  : Natural;                --  the beat the probe's readings were read at
       Creep     : Real_Array (1 .. N);    --  each reading's steady change a beat at rest (Channels.Drift)
       Farthest_At : Count_Array (1 .. N);   --  the beat each one's farthest reading was read at
+      Weights   : Real_Array (1 .. N);    --  each one's share of the amount (Begin_Probe)
+      Began     : Real;                   --  the amount the ladder began from
       Last_Executed : Real := 0.0;        --  the largest level some listed reading went along at
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep, Weights);
+      Began := Amount;
+      --  A group's own probe: every eye's picture as it began, for what the level seen moved (Reach_Ratio).
+      if First /= 0.0 then
+         Mark_Origins (M);
+      end if;
       Farthest_At := [others => Start_At];
       Following := Usable;
       if Amount <= 0.0 or else (for all U of Usable => not U) then
@@ -1842,7 +2025,7 @@ package body Driver.Robot.Motion is
                Went    : Natural := 0;
             begin
                for I in 1 .. N loop
-                  Offsets (I) := Sign * Ask;
+                  Offsets (I) := Sign * Ask * Weights (I);
                end loop;
                Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
                for I in 1 .. N loop
@@ -1908,7 +2091,7 @@ package body Driver.Robot.Motion is
             Now_At  : Natural;
          begin
             for I in 1 .. N loop
-               Offsets (I) := (if Following (I) then Sign * Amount else Kept (I));
+               Offsets (I) := (if Following (I) then Sign * Amount * Weights (I) else Kept (I));
             end loop;
             Move_And_Look (M, Listed, Usable, Base, Offsets, Unlooked, Seen, Chance, Now, Moving, Now_At);
             --  Which channels still follow: whether asking further took each
@@ -1928,7 +2111,7 @@ package body Driver.Robot.Motion is
                         --  Its own end: held where it last followed.
                         Following (I) := False;
                      else
-                        Kept (I) := Sign * Amount;
+                        Kept (I) := Sign * Amount * Weights (I);
                         if Went then
                            Delivered (I) := True;
                            Farthest (I) := Excursion;
@@ -1963,6 +2146,8 @@ package body Driver.Robot.Motion is
             if Seen and then (for some I in 1 .. N => Usable (I) and then (Delivered (I) or else Did (I))) then
                declare
                   Confirmed : Boolean := False;
+                  --  What this level moved, as it stands, before the moves back and forth (Reach_Ratio).
+                  Level_Reach : constant Real := (if First /= 0.0 then Reach_Ratio (M) else 1.0);
                   --  The run of moves back and forth (Confirm) goes on as its looks ask, and its verdict, for one group's
                   --  channels, takes in the lock-in's evidence of the group moving some eye over every push, the run's among
                   --  them (Lockin.Moving_Chance): another chance that chance alone made what was seen, multiplied in as the
@@ -1983,6 +2168,8 @@ package body Driver.Robot.Motion is
                   if Confirmed then
                      Report.Seen := True;
                      Report.Excursion := Amount;
+                     Report.Factor := Amount / Began;
+                     Report.Reach := Level_Reach;
                   else
                      Driver.Log.Line (Driver.Log.Robot, "probe: level" & Level'Image & " of every channel together, "
                                       & Scientific (Amount) & " units, was seen by an eye but not confirmed (the look's"
@@ -2038,6 +2225,7 @@ package body Driver.Robot.Motion is
                                 else "not seen"));
             if Report.Seen then
                Report.Excursion := Last_Executed;
+               Report.Factor := Last_Executed / Began;
             end if;
          end;
       end if;
@@ -2067,12 +2255,13 @@ package body Driver.Robot.Motion is
       Farthest  : array (Sense) of Real := [others => 0.0];
       Start_At  : Natural;                         --  the beat the probe's reading was read at
       Creep     : Real_Array (1 .. 1);             --  its steady change a beat at rest (Channels.Drift)
+      Weights   : Real_Array (1 .. 1);             --  its share of the amount: all of it, alone
       Farthest_At : array (Sense) of Natural;      --  the beat each way's farthest reading was read at
       Last_Offset : Real := 0.0;                   --  the latest level's push and its way: held until the next level
       Last_Way    : Sense := Increasing;           --  begins, where a speed shows itself (Settle)
    begin
       Report := (others => <>);
-      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
+      Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep, Weights);
       Farthest_At := [others => Start_At];
       if not Usable (1) then
          return;

@@ -16,6 +16,7 @@ with Driver.Robot.Flows;
 with Driver.Robot.Kinematics;
 with Driver.Robot.Lag;
 with Driver.Robot.Channels;
+with Driver.Robot.Graph;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Regression;
@@ -164,9 +165,73 @@ package body Driver.Robot.Boot is
       --  and its head camera stayed 1.66 from where the push began against rest's 1.56, a speed (seed 1, paced rounds
       --  p106xa to p108xb and the world's truth, d108x, 10-24); ALOHA's gripper, asked 1.07e-3 units, delivered 0.90,
       --  its way back unanswered, its wrist eye 0.96 from where the push began against rest's 0.61 (seed 1, p113a).
-      function Readings_Allow_Stay (Out_Report, Back_Report : Driver.Robot.Motion.Step_Report) return Boolean is
-        (not Answered (Out_Report)
-         or else (Back_Report.Outcome = Driver.Robot.Motion.Reached and then Back_Report.Delivered.Value > 0.5));
+      --  The way back is read once the pictures have settled, from the readings then (Back_Share): read at the end of
+      --  the return's step, the drone's speed estimates, answering a beat or more late, had come none of the way back,
+      --  and its flight was no speed by it (seed 1, paced rounds p153a and p158a, 10-24).
+      function Readings_Allow_Stay (Out_Report : Driver.Robot.Motion.Step_Report; Back : Real) return Boolean is
+        (not Answered (Out_Report) or else Back > 0.5);
+
+      --  The group's readings at the latest beat, read in a beat; Fallback where it has none.
+      function Readings_Of (G : Group_Id; Size : Positive; Fallback : Real_Array) return Real_Array is
+         Result : Real_Array (1 .. Size) := Fallback;
+         procedure Read is
+         begin
+            if Natural (G) <= Group_Count (M) and then Group_Size (M, G) = Size and then M.Beats > 0
+              and then Driver.Robot.Channels.Has_Reading (M, G, M.Beats - 1)
+            then
+               for C in 1 .. Size loop
+                  Result (C) := Driver.Robot.Channels.Reading (M, G, M.Beats - 1, C);
+               end loop;
+            end if;
+         end Read;
+      begin
+         Driver.Beats.Within_A_Beat (Read'Access);
+         return Result;
+      end Readings_Of;
+
+      --  How much of the way from Away back to Hold the readings Now have come, along that way: 1 where there was none.
+      function Back_Share (Away, Now, Hold : Real_Array) return Real is
+         Along, Way : Real := 0.0;
+      begin
+         for C in Away'Range loop
+            Along := Along + (Away (C) - Now (C)) * (Away (C) - Hold (C));
+            Way := Way + (Away (C) - Hold (C)) ** 2;
+         end loop;
+         return (if Way > 0.0 then Along / Way else 1.0);
+      end Back_Share;
+
+      --  A body kept going moves the views it carries whole: a stay told only by eyes the group moves a patch of, as the
+      --  lock-in has it (its jaw in view), is no speed by it, and the group came back as a joint does. ALOHA's gripper,
+      --  pushed while the arms pressed together crept, changed its own wrist eye by 1.09 against rest's 0.71, a patch
+      --  of it, stayed so as it came back, and was a speed (seed 2, paced round p148a, 10-24).
+      --  Only a patch the lock-in can tell is no whole view yet: where the most of the eye's cells that may show the
+      --  motion are more than half of them, the view may still move whole with the group. Stretch's base, a patch at
+      --  its hold by the few rows it had then and whole by the end of the boot, was no speed by it, and a closer
+      --  (seed 1, paced rounds p153a and p153b, 10-24).
+      procedure Only_Whole
+        (G : Group_Id; Kept : in out Boolean; Kept_Eyes : in out Channel_Flags; Came : in out Boolean)
+      is
+         procedure Read is
+         begin
+            for E in 1 .. Eye_Count (M) loop
+               if Kept_Eyes (Kept_Eyes'First + E - 1) and then Response (M, G, Eye_Id (E)) = Patch
+                 and then not Driver.Robot.Graph.Effect (M, G, Eye_Id (E)).Could_Be_Whole
+               then
+                  Kept_Eyes (Kept_Eyes'First + E - 1) := False;
+               end if;
+            end loop;
+         end Read;
+      begin
+         if Kept then
+            Driver.Beats.Within_A_Beat (Read'Access);
+            if (for all F of Kept_Eyes => not F) then
+               Kept := False;
+               Came := True;
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s pictures stayed only in eyes it moves a"
+                                & " patch of: no speed by it");
+            end if;
+         end if;
+      end Only_Whole;
 
       --  What Recognize found of each channel: the amount an eye sees it move
       --  at (0 when none does) and the ways found at their ends.
@@ -269,6 +334,8 @@ package body Driver.Robot.Boot is
                   Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
                   Told       : Boolean := True;   --  the hold told what the channel is, or it is known
                   Pushed     : Real_Array (1 .. Eye_Count (M)) := [others => Real'Last];
+                  Out_At     : Real_Array (1 .. Size) := Here;   --  the readings as the push stood
+                  Back_Now   : Real := 1.0;   --  how much of the way back they came once settled
                   procedure Note is
                   begin
                      if Came then
@@ -286,6 +353,7 @@ package body Driver.Robot.Boot is
                   else
                      Driver.Commands.Set_Target (Back, G, Here);
                      Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                     Only_Whole (G, Kept, Kept_Eyes, Came);
                      Told := Kept or else Came;
                      Pushed := Driver.Robot.Motion.Eyes_From_Origin (M);
                      Note;
@@ -301,6 +369,9 @@ package body Driver.Robot.Boot is
                   --  amounts with the old round showed nothing with the chain, so the patch did not grow and the boot
                   --  left the arm a part (robot.boot.patch, robot.boot.step: 13 of 48 cells at twice the amounts against
                   --  17 before). The chain's other saving stands: only the channels an undecided eye does not see.
+                  if not Told then
+                     Out_At := Readings_Of (G, Size, Here);
+                  end if;
                   Go_To (G, Here, Report);
                   if Pause > 0 then
                      Driver.Robot.Motion.Hold (M, Pause);
@@ -310,12 +381,13 @@ package body Driver.Robot.Boot is
                      Driver.Robot.Motion.Settle (M, Waited);
                   else
                      Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
-                     if Kept and then not Readings_Allow_Stay (Out_Report, Report) then
+                     Only_Whole (G, Kept, Kept_Eyes, Came);
+                     Back_Now := Back_Share (Out_At, Readings_Of (G, Size, Here), Here);
+                     if Kept and then not Readings_Allow_Stay (Out_Report, Back_Now) then
                         Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " channel" & P.Channel'Image
                                          & "'s pictures stayed once sent back, its readings "
                                          & Driver.Log.Image (Out_Report.Delivered.Value, 2) & " of the ask out and "
-                                         & Driver.Log.Image (Report.Delivered.Value, 2) & " of the way back ("
-                                         & Report.Outcome'Image & "): no speed by it");
+                                         & Driver.Log.Image (Back_Now, 2) & " of the way back once settled: no speed by it");
                         Kept := False;
                      end if;
                      Note;
@@ -444,12 +516,27 @@ package body Driver.Robot.Boot is
                  or else (Report.Outcome = Driver.Robot.Motion.Reached and then Report.Delivered.Value > 0.5);
                if Keeps_Going (M, G) then
                   Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  Only_Whole (G, Kept, Kept_Eyes, Came);
                else
                   if Pause > 0 then
                      Driver.Robot.Motion.Hold (M, Pause);
                   end if;
-                  Driver.Robot.Motion.Settle (M, Waited);
-                  Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+                  --  With the hold to send it back to: a speed its hold took for a joint (Stretch's base, seed 2, paced
+                  --  rounds p128a and p129a, 10-24: sent back two beats into its drift, its head camera's change fell
+                  --  from 7.06 to 3.93 and it "came back") drives on as it is pushed the other way, and a plain settle
+                  --  waited a thousand beats for its view to still. Sent back as its pictures drift on while every
+                  --  reading stands, and kept going: a speed after all.
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  Only_Whole (G, Kept, Kept_Eyes, Came);
+                  if Kept then
+                     for C in 1 .. Size loop
+                        Note_Keeps_Going (M, G, C, Kept_Eyes);
+                     end loop;
+                     Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " keeps the body going as it is"
+                                      & " pushed the other way: a speed");
+                  elsif not Came then
+                     Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+                  end if;
                end if;
                Go_To (G, Hold, Report);
             end;
@@ -464,13 +551,21 @@ package body Driver.Robot.Boot is
       --  (Motion.Probe_Together); then pushed so and held: a body that keeps going is a speed, and every channel of the
       --  group with it (Motion.Settle); then pushed out and back each way (Push_Group). Each channel keeps the group's
       --  amount, from which step 2's sweeps begin. A group no level shows whole is probed one channel at a time.
-      procedure Recognize_Group (G : Group_Id; Size : Positive; From : Real; Alone : Boolean := False) is
+      procedure Recognize_Group
+        (G : Group_Id; Size : Positive; From : Real; Common : Real := 0.0; Alone : Boolean := False) is
          Refs   : constant Driver.Robot.Motion.Channel_Refs (1 .. Size) := [for C in 1 .. Size => (Group => G, Channel => C)];
          Against : Boolean := False;   --  the hold's push was answered against its ask
          Sign   : Real := 1.0;   --  the way the group was seen moved
          P      : Driver.Robot.Motion.Probe_Report;
          Report : Driver.Robot.Motion.Step_Report;
          Moved  : Boolean;
+         --  Each push after the hold, of the group whole: the hold's push, times as many as would move some eye's view
+         --  as far as the flow reaches from where it stood (Motion.Reach_Ratio); the hold's amount where none was told.
+         --  A just-seen push leaves a view moved by a few tenths of a pixel, and what the graph tells an eye's own
+         --  group by, its pushes' cells beyond the flow's reach, never shows: the Shadow's arm, pushed whole from the
+         --  4.3e-4 units its readings tell, moved its wrist eye's cells 0.31 px and none beyond reach, its hand's 3 to 7
+         --  of them, and both were parts (seed 1, paced round p113a, 10-24).
+         Decisive : Real := 0.0;
       begin
          --  The only group that takes commands: the ladder of every channel together was its own, seen and confirmed at
          --  From (Alone), and is not climbed again. Climbed again, the drone's motors needed 28.7 units for its noisy
@@ -514,8 +609,23 @@ package body Driver.Robot.Boot is
             --  group: held again a level up, at twice the amount as the ladder climbs, while the push still went further.
             --  At the level first seen, 0.14 units, Stretch's base moved its wrist eye 1.99 and 2.09 against a bound of
             --  rest between them: a speed in one round, a joint in the next (seed 1, paced rounds p80a and p83a, 10-23).
-            Amount     : Real := P.Excursion;
+            --  From the push that moves some eye's view by the flow's reach, as the level seen measured it
+            --  (Motion.Probe_Report.Reach): a hold at the level just seen moved ALOHA's wrist eyes 0.36 against rest's
+            --  0.59 while its arms, pressed together, crept 0.02 mm a beat, and its grippers were speeds (seed 1,
+            --  paced round p118a and the world's truth, d117, 10-24).
+            --  At the amount every channel together was seen at (Common), as the groups were all pushed before
+            --  their own least steps: one amount for every group, by which the graph tells an eye's own group by
+            --  what each group's pushes left beyond the flow's reach; but never further than moves some eye's
+            --  view by that reach, as the group's own probe measured it (Motion.Probe_Report.Reach): pushed so far
+            --  RB-Y1's torso folded the robot to the floor, the Panda's arm, asked 17 radians' worth, swept its base
+            --  camera's view as far as its wrist's and was parted, 500 beats, and the G1 swayed 30 to 70 beats a
+            --  push. Never below the level its probe saw it at.
+            Amount     : Real :=
+              Real'Max (P.Excursion, (if Common > 0.0 then Real'Min (P.Excursion * P.Reach, Common)
+                                       else P.Excursion * P.Reach));
             Doubled    : Natural := 0;       --  the hold's doublings, no more than a float has bits
+            Ratio      : Real := 1.0;        --  how many times over the hold's push would move some eye's view as far
+                                             --  as the flow reaches (Motion.Reach_Ratio), where it stood
             Denied     : Boolean := False;   --  its pictures stayed once sent back, its readings out and not half way
                                              --  back: held again at twice the amount, out of the servos' dead band
          begin
@@ -529,24 +639,38 @@ package body Driver.Robot.Boot is
                   Driver.Robot.Motion.Mark_Origins (M);
                   Go_To (G, Away, Report);
                   Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  Only_Whole (G, Kept, Kept_Eyes, Came);
                   --  What the push left, where the settle did not send the body back.
                   if not Kept and then not Came then
                      Driver.Robot.Motion.Note_Stayed (M, G, Sign);
+                     declare
+                        procedure Read_Ratio is
+                        begin
+                           Ratio := Driver.Robot.Motion.Reach_Ratio (M);
+                        end Read_Ratio;
+                     begin
+                        Driver.Beats.Within_A_Beat (Read_Ratio'Access);
+                        Decisive := (if Common > 0.0 then Real'Min (Amount * Ratio, Real'Max (Common, Amount))
+                                     else Amount * Ratio);
+                     end;
                      --  And sent back with no drift seen while it was held: where its pictures settle tells what it is all
                      --  the same (Motion.Judge_Sent_Back). The drone, its motors asked 0.06 units at the level the lock-in
                      --  confirmed, flew on for 392 beats, too slowly for a beat to show its drift against its hover's sway,
                      --  and was an arm (seed 1, paced round p73a, 10-23).
                      declare
                         Pushed : constant Real_Array := Driver.Robot.Motion.Eyes_From_Origin (M);
+                        Out_At : constant Real_Array := Readings_Of (G, Size, Hold);
+                        Back_Now : Real;
                      begin
                         Go_To (G, Hold, Returned);
                         Driver.Robot.Motion.Judge_Sent_Back (M, Pushed, Waited, Kept, Kept_Eyes, Came);
-                        if Kept and then not Readings_Allow_Stay (Report, Returned) then
+                        Only_Whole (G, Kept, Kept_Eyes, Came);
+                        Back_Now := Back_Share (Out_At, Readings_Of (G, Size, Hold), Hold);
+                        if Kept and then not Readings_Allow_Stay (Report, Back_Now) then
                            Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s pictures stayed once sent"
                                             & " back, its readings " & Driver.Log.Image (Report.Delivered.Value, 2)
                                             & " of the ask out (" & Report.Outcome'Image & ") and "
-                                            & Driver.Log.Image (Returned.Delivered.Value, 2) & " of the way back ("
-                                            & Returned.Outcome'Image & "): no speed by it");
+                                            & Driver.Log.Image (Back_Now, 2) & " of the way back once settled: no speed by it");
                            Kept := False;
                            Denied := True;
                         end if;
@@ -598,6 +722,10 @@ package body Driver.Robot.Boot is
             if Kept then
                Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " keeps the body going while held: a speed");
             end if;
+            --  A speed's pushes after its hold are its probe's: held, it keeps the body going whatever its amount.
+            if Kept then
+               Decisive := 0.0;
+            end if;
          end;
          --  The hold's push went out and back one way; the other way's completes the pair. Both again after it, the
          --  group waited for its pictures to settle six times, the G1's 40 to 60 beats each after every move of its
@@ -607,20 +735,25 @@ package body Driver.Robot.Boot is
          --  group, round 4e).
          for C in 1 .. Size loop
             Recognized.Append
-              (Recognized_Channel'(Ref => (Group => G, Channel => C), Amount => P.Excursion, First => P.Excursion,
+              (Recognized_Channel'(Ref => (Group => G, Channel => C), Amount => Real'Max (Decisive, P.Excursion), First => P.Excursion,
                                   Ended => [others => False]));
          end loop;
          if not Keeps_Going (M, G) and then Against then
             Push_Both_Ways (G, Size, 1.0, Moved);
          elsif not Keeps_Going (M, G) then
-            Push_Group (G, Size, P.Excursion, Moved,
+            Push_Group (G, Size, Real'Max (Decisive, P.Excursion), Moved,
                         Pause => Hold_After_A_Push (M, G, Natural'Max (1, Driver.Robot.Lag.Longest (M))), Way => -Sign);
          end if;
          if not Against then
-            Set_Whole_Amount (G, P.Excursion);
+            Set_Whole_Amount (G, Real'Max (Decisive, P.Excursion));
          end if;
          Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " is seen when moved whole by "
                           & Scientific (P.Excursion) & " reading units (after" & P.Steps'Image & " doublings)");
+         Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s hold began from " & Scientific (P.Excursion * P.Reach)
+                          & " reading units: " & Driver.Log.Image (P.Reach, 2) & " times the level it was seen at");
+         Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " is pushed whole by "
+                          & Scientific (Real'Max (Decisive, P.Excursion)) & " reading units after its hold, as far as"
+                          & " moves some eye's view by the flow's reach");
       end Recognize_Group;
 
       --  Turns every joint of the arm both ways from where it rests, by steps
@@ -2047,7 +2180,33 @@ package body Driver.Robot.Boot is
                      Driver.Beats.Within_A_Beat (Estimate'Access);
                      declare
                         Groups_Commanded : Natural := 0;
+                        --  Each group's own ladder from its own least step, as many times over as every channel together
+                        --  was taken to be seen (Motion.Probe_Report.Factor): each group's channels moved together so, from
+                        --  the least step its own readings tell (Motion.Probe_Together).
+                        From_Of : Real_Array (1 .. Count) := [others => P.Excursion];
+                        procedure Read_Least is
+                        begin
+                           for G in 1 .. Count loop
+                              if Commandable (G) and then Sizes (G) > 0 then
+                                 declare
+                                    Least : constant Real := Driver.Robot.Motion.Group_Least_Step (M, Group_Id (G));
+                                 begin
+                                    if Least > 0.0 then
+                                       From_Of (G) := Least * P.Factor;
+                                    end if;
+                                 end;
+                              end if;
+                           end loop;
+                        end Read_Least;
                      begin
+                        Driver.Beats.Within_A_Beat (Read_Least'Access);
+                        for G in 1 .. Count loop
+                           if Commandable (G) and then Sizes (G) > 0 then
+                              Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " is pushed whole from "
+                                               & Scientific (From_Of (G)) & " reading units, its least step"
+                                               & " taken as many times over as every channel together was");
+                           end if;
+                        end loop;
                         for G in 1 .. Count loop
                            if Commandable (G) and then Sizes (G) > 0 then
                               Groups_Commanded := Groups_Commanded + 1;
@@ -2055,7 +2214,8 @@ package body Driver.Robot.Boot is
                         end loop;
                         for G in 1 .. Count loop
                            if Commandable (G) and then Sizes (G) > 0 then
-                              Recognize_Group (Group_Id (G), Sizes (G), P.Excursion, Alone => Groups_Commanded = 1);
+                              Recognize_Group (Group_Id (G), Sizes (G), From_Of (G), Common => P.Excursion,
+                                               Alone => Groups_Commanded = 1);
                            end if;
                         end loop;
                      end;
@@ -2093,6 +2253,17 @@ package body Driver.Robot.Boot is
                               --  wrist's eye, the robot swaying, and in the head's, the arm in its view, 5 of 222 and 21 of
                               --  255 cells left beyond reach, not apart; its own wrist's eye, undecided at that estimate,
                               --  58 of 246; probed one channel at a time, 900 beats, to the boot's cap).
+                              --  How many eyes a group moves whole, as the lock-in has it.
+                              function Wholes (H : Positive) return Natural is
+                                 Moved : Natural := 0;
+                              begin
+                                 for E in 1 .. Eye_Count (M) loop
+                                    if Response (M, Group_Id (H), Eye_Id (E)) = Whole then
+                                       Moved := Moved + 1;
+                                    end if;
+                                 end loop;
+                                 return Moved;
+                              end Wholes;
                               procedure Read_Whole is
                                  Most : Natural := 0;   --  the eye its pushes left most beyond reach
                               begin
@@ -2134,6 +2305,35 @@ package body Driver.Robot.Boot is
                                  if Most = 0 or else Stayed_Of (Most) = 0
                                    or else not Driver.Robot.Regression.Shares_Apart
                                                  (Far_Of (Most), Stayed_Of (Most), 0, Stayed_Of (Most))
+                                 then
+                                    Alike := False;
+                                 end if;
+                                 --  And so of every eye it moves whole: two arms in one group carry each arm's eye beyond reach
+                                 --  alike, where an arm or a hand that sways the body, or moves in another eye's view, leaves
+                                 --  that eye's view within reach. The G1's right hand moved its wrist eye and the head camera
+                                 --  whole, 4 to 7 of the head's 255 cells beyond reach, and was probed one finger at a time,
+                                 --  925 beats, to the cap; RB-Y1's left arm its wrist eye and the head's, 5 of 255 beyond reach
+                                 --  in the head's, 924 beats (seed 1 of each, paced round p160b, 10-24).
+                                 for E in 1 .. Eye_Count (M) loop
+                                    if Response (M, Group_Id (G), Eye_Id (E)) = Whole
+                                      and then (Stayed_Of (E) = 0
+                                                or else not Driver.Robot.Regression.Shares_Apart
+                                                              (Far_Of (E), Stayed_Of (E), 0, Stayed_Of (E)))
+                                    then
+                                       Alike := False;
+                                    end if;
+                                 end loop;
+                                 --  Nor where each eye it moves whole a group moving fewer eyes whole moves whole as well: the
+                                 --  group is under those (a torso under the arms and the head that carry its eyes each), and
+                                 --  not two of them. RB-Y1's torso moved its three eyes whole alike, the arms their wrists'
+                                 --  and the head its own, and was probed one channel at a time, 330 beats, out of beats
+                                 --  (seed 3, paced round p148a, 10-24).
+                                 if (for all E in 1 .. Eye_Count (M) =>
+                                       Response (M, Group_Id (G), Eye_Id (E)) /= Whole
+                                       or else (for some H in 1 .. Count =>
+                                                  H /= G and then Commandable (H)
+                                                  and then Response (M, Group_Id (H), Eye_Id (E)) = Whole
+                                                  and then Wholes (H) < Wholes (G)))
                                  then
                                     Alike := False;
                                  end if;

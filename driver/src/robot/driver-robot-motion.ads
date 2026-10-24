@@ -54,6 +54,13 @@ package Driver.Robot.Motion is
    procedure Mark_Origins (M : in out Model);
    --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).
 
+   function Reach_Ratio (M : Model) return Real;
+   --  How many times over the push held now (from where it began, Mark_Origins) would move some eye's view as far
+   --  as the flow reaches (half a cell, Flow.Displacements): half a cell over the median displacement of the cells
+   --  the eye saw move by more than their noise, of the eye that moved them most; 1 where some eye has more of its
+   --  moved cells beyond reach than within it, or none moved (nothing to scale by). The flow is linear in small
+   --  motions of the body (Flow), and the push's own displacements tell how far it reaches.
+
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real);
    --  After a push of group G (Way: its sign) from a body at rest, held until the body settled: for every eye with an
    --  origin (Mark_Origins), the cells whose picture moved from the origin's and stayed moved, by the flow from the
@@ -183,7 +190,16 @@ package Driver.Robot.Motion is
       Steps     : Natural := 0;       --  how many doublings that took
       Last      : Step_Report;        --  the last step's report
       Answered  : Real := 0.0;        --  the least amount some listed reading went along its ask at; 0 where none did
+      Factor    : Real := 1.0;        --  every listed channel from its group's least step (First 0): how many times its
+                                     --  least step each was taken, when seen
+      Reach     : Real := 1.0;        --  a group's own probe (First not 0): how many times over the level seen would move
+                                     --  some eye's view by the flow's reach, as it stood (Reach_Ratio)
    end record;
+
+   function Group_Least_Step (M : Model; G : Group_Id) return Real;
+   --  The least step every channel of the group can be told to have taken by its readings: the largest of its
+   --  channels' smallest steps (each the least change its reading tells from its noise, and no less than one step of
+   --  it). 0 for a group with no channel read.
 
    function Hold_Of (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  What the group holds the channel at now: the target in effect, or its

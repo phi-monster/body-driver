@@ -32,6 +32,8 @@ package body Driver.Robot is
    function Rest_Factor_Of (S : Eye_Stream; Cell : Natural) return Real is
      (if Natural (S.Rest_Factors.Length) > Cell then S.Rest_Factors (Cell) else S.Rest_Factor);
 
+   function Latest_Frame (S : Eye_Stream) return Luma_Access is (if S.Latest_In_Previous then S.Previous else S.Current);
+
    --  The displacement of every cell of the eye from its previous frame to
    --  its current one, appended to its stream.
    procedure Measure_Displacement (S : in out Eye_Stream)
@@ -204,6 +206,9 @@ package body Driver.Robot is
                      S.Previous := S.Current;
                      S.Current := Spare;
                   end;
+                  S.Latest_In_Previous := True;
+               elsif Have then
+                  S.Latest_In_Previous := False;
                end if;
                S.Has_Before := Same and then S.Has_Previous;
                S.Has_Previous := Same;
