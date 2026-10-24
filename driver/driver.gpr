@@ -33,13 +33,21 @@ project Driver is
                  "action_matrix.adb", "contact_matrix.adb", "truth_warp.adb", "align_study.adb",
                  "grammar_dump.adb", "driver-robot-fit_replay.adb", "pool_bench.adb");
 
-   Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
+   --  No loop peeled or versioned for its arrays' alignment: a vectorized loop whose first elements were done apart
+   --  where an array happened to lie off the vector's width, its multiply-adds fused in one part and not the other, left
+   --  a fit's sums a bit apart from run to run of the same program on the same input (RB-Y1 seed 3b's first fit,
+   --  replayed serially on the big machine, 10-24: two results, 181.3658 and 181.3654 px, as the heap fell; the second
+   --  descent round's cost apart in its 16th digit). Without them it gave one result in every run and at every count
+   --  of workers, fused multiply-adds and vectorizing kept.
+   Same_Every_Run := ("--param=vect-max-peeling-for-alignment=0", "--param=vect-max-version-for-alignment-checks=0");
+   Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g") & Same_Every_Run;
    --  The body on a robot: without the assertions (the contracts the tests prove, checked on every call of the
    --  aligner's sampling), the language's own checks kept.
-   Release_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g");
+   Release_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g") & Same_Every_Run;
    --  BD_BUILD=fast: the normal build's checks, optimized for the machine that builds it (-O3, its own instruction set,
    --  inlining across units), for the batches of fake boots on the big machine.
-   Fast_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g");
+   Fast_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g")
+     & Same_Every_Run;
 
    package Compiler is
       case Build is
