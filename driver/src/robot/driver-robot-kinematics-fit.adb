@@ -233,6 +233,10 @@ package body Driver.Robot.Kinematics.Fit is
       return [X, Y, 1.0];
    end Ray;
 
+   --  The point is somewhere: each coordinate a number.
+   function Placed (P : Vec3) return Boolean is
+     (abs P (1) <= Real'Last and then abs P (2) <= Real'Last and then abs P (3) <= Real'Last);
+
    procedure Project (L : Lens; P : Vec3; U, V : out Real; In_Front : out Boolean) is
    begin
       In_Front := P (3) > 0.0;
@@ -808,6 +812,19 @@ package body Driver.Robot.Kinematics.Fit is
                   end loop;
                end if;
                Free (Weights);
+               --  A parameter whose information is nought has no gradient and no cross terms either, the tracks'
+               --  refinement's rule (Refine_Tracks): an order's quick fit forms its normal equations from derivatives
+               --  made through each keyframe's eye (Normal_Of), whose products may underflow where they do not, and the
+               --  damped solve would divide such a gradient by the damping's floor alone.
+               for P in 1 .. Parameters loop
+                  if A (P, P) = 0.0 then
+                     G (P) := 0.0;
+                     for Q in 1 .. Parameters loop
+                        A (P, Q) := 0.0;
+                        A (Q, P) := 0.0;
+                     end loop;
+                  end if;
+               end loop;
             end;
             --  Marquardt's damping, doubled until a step lowers the cost or
             --  the step no longer moves any parameter.
@@ -1632,24 +1649,37 @@ package body Driver.Robot.Kinematics.Fit is
             begin
                Points (T) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
             end Point_Of;
+            --  A point the parameters put nowhere (a coordinate no number: a scale or a depth gone past any float) is
+            --  not behind the eye, where its residual is bounded: its residuals are the float's largest, the cost no
+            --  number, and the step that put it there no step (Placed). Taken for behind, such points let a fit lower
+            --  its cost by putting them nowhere: rby12a of round p321s2 (10-25), its eye's fit at 24 px, took a joint's
+            --  scale to infinity in an order's quick fit (steps of 1E9 to 1E20 on its weakest terms, the cost falling),
+            --  and its next stage began from no number and stopped the estimates.
             procedure Residual_Of (K : Positive) is
                Sg : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
                U, V : Real;
                Ahead : Boolean;
+               Pt : Vec3;
             begin
                if Turned (Sg.Frame) then
                   if Sg.U0 = Ref_U0 (Sg.Track) and then Sg.V0 = Ref_V0 (Sg.Track) then
-                     Project (Lx, Views (Sg.Frame) * Points (Sg.Track), U, V, Ahead);
+                     Pt := Views (Sg.Frame) * Points (Sg.Track);
                   else
                      declare
                         D0 : constant Real := Exp (Dv (Sg.Track));
                         H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
                      begin
-                        Project (Lx, Views (Sg.Frame) * [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)], U, V, Ahead);
+                        Pt := Views (Sg.Frame) * [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
                      end;
                   end if;
-                  R (2 * K - 1) := U - Sg.U;
-                  R (2 * K) := V - Sg.V;
+                  if Placed (Pt) then
+                     Project (Lx, Pt, U, V, Ahead);
+                     R (2 * K - 1) := U - Sg.U;
+                     R (2 * K) := V - Sg.V;
+                  else
+                     R (2 * K - 1) := Real'Last;
+                     R (2 * K) := Real'Last;
+                  end if;
                end if;
             end Residual_Of;
             procedure Every_View is new Driver.Parallel_For (View_Of);
@@ -2576,6 +2606,15 @@ package body Driver.Robot.Kinematics.Fit is
                                  A (Q, P) := 0.0;
                               end loop;
                               for T in 1 .. Tracks loop
+                                 Bm (P, T) := 0.0;
+                              end loop;
+                           end if;
+                        end loop;
+                        --  And so a track's depth, its information nought (no residual its depth moves).
+                        for T in 1 .. Tracks loop
+                           if C (T) = 0.0 then
+                              Gd (T) := 0.0;
+                              for P in 1 .. Count loop
                                  Bm (P, T) := 0.0;
                               end loop;
                            end if;
@@ -7032,11 +7071,18 @@ package body Driver.Robot.Kinematics.Fit is
                         Ahead : Boolean;
                      begin
                         if Has_Track (I) then
-                           Project (X.L, Back * Track_Points (I), U, Vv, Ahead);
-                           R (R'First + 2 * I - 2) :=
-                             (if Ahead then U - Sight (Sight'First + I - 1).U else Real (Width));
-                           R (R'First + 2 * I - 1) :=
-                             (if Ahead then Vv - Sight (Sight'First + I - 1).V else Real (Width));
+                           declare
+                              Pt : constant Vec3 := Back * Track_Points (I);
+                           begin
+                              Project (X.L, Pt, U, Vv, Ahead);
+                              --  Nowhere is no place behind the eye (Refine_Tracks' Residual_Of).
+                              R (R'First + 2 * I - 2) :=
+                                (if not Placed (Pt) then Real'Last
+                                 elsif Ahead then U - Sight (Sight'First + I - 1).U else Real (Width));
+                              R (R'First + 2 * I - 1) :=
+                                (if not Placed (Pt) then Real'Last
+                                 elsif Ahead then Vv - Sight (Sight'First + I - 1).V else Real (Width));
+                           end;
                         end if;
                      end;
                   end loop;

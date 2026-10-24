@@ -2524,7 +2524,9 @@ driver-robot-kinematics-fit.adb	Prior_W : constant Real := (if Focal_Within > 0.
 driver-robot-kinematics-fit.adb	Q : Real_Matrix (1 .. 1, 1 .. 1);	1	structure	one column, the focal length's: a matrix of one
 driver-robot-kinematics-fit.adb	Q : Real_Matrix (1 .. 1, 1 .. 1);	1	structure	one column, the focal length's: a matrix of one
 driver-robot-kinematics-fit.adb	Q_Alone := Q_Alone + A (Errors.Both_Across) * Along (2 * K - 1, 1) ** 2	2	structure	two residuals a sighting, across and down
+driver-robot-kinematics-fit.adb	R (2 * K - 1) := Real'Last;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	R (2 * K - 1) := U - Sg.U;	2	structure	two residuals per sighting, across and down
+driver-robot-kinematics-fit.adb	R (2 * K) := Real'Last;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	R (2 * K) := V - Sg.V;	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	R (R'First + 2 * (I - L'First) + 1) := Dv (I - From + 1);	2	structure	two residuals a sighting, one along each image axis
