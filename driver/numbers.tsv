@@ -2123,6 +2123,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Multi_M, 3) & ""	3	format	di
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (R.Focal_Sigma, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Focal_Sigma, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rs.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
@@ -2135,6 +2136,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driv
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Walked (Way).Flat_To, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
+driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (Rise, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + (if Pinhole then 0 else 1))), Cx => X (X'First + 2),	1	structure	the lens's terms in the vector: the logarithms of the two focal lengths, the centre, the two distortion terms
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + (if Pinhole then 0 else 1))), Cx => X (X'First + 2),	2	structure	the lens's terms in the vector: the logarithms of the two focal lengths, the centre, the two distortion terms

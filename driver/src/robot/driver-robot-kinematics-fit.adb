@@ -4056,6 +4056,20 @@ package body Driver.Robot.Kinematics.Fit is
                            end if;
                         end loop;
                      end if;
+                     --  Its sigma as wide as its profile says, a focal length no longer significant against it is no
+                     --  more told than one its covariance left so (Refine_Tracks): a Stretch head (p297s2, seed 2a,
+                     --  10-24) was fitted at 36.4 +- 24.4 px for the true 216.5, and its refits from there, which walk
+                     --  no profile, drifted to 0.28 px and were said fitted.
+                     if not Moved and then Report.Determined
+                       and then not Driver.Uncertain.Significant (L.Fx, Report.Focal_Sigma)
+                     then
+                        Report.Determined := False;
+                        Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                          ("the sightings leave the focal length undetermined: " & Driver.Log.Image (L.Fx, 1) & " +- "
+                           & Driver.Log.Image (Report.Focal_Sigma, 1) & " px, as wide as its profile");
+                        Driver.Log.Line
+                          (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
+                     end if;
                   end;
                end;
             end loop;
