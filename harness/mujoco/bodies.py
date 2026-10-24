@@ -5,6 +5,7 @@
 # robot carries them, its global camera on its own body (none stands in the room), and the truth a scorer judges the driver against: each
 # group's role and each camera's mount. Nothing here reaches the driver but what robot.py sends: readings and pictures.
 import math
+import os
 import numpy as np
 import mujoco
 
@@ -95,6 +96,24 @@ def room(spec):
     for g in spec.geoms:
         if g.type == mujoco.mjtGeom.mjGEOM_PLANE:
             g.material = "bd_grid"
+
+
+def plain_light(spec):
+    """A diagnostic, never a hall's world (BD_PLAIN_LIGHT=1): every light casts no shadow and gives no highlight, the
+    headlight (which moves with whichever camera renders) gives none at all, and no material reflects or shines, so a
+    surface looks the same from wherever a camera sees it: what the driver's matches err by then is the matcher's own
+    and not the scene's shadows of the moving arm, its mirror image in the floor or the highlights that move with the
+    eye (step 2's fits, 10-25)."""
+    for light in spec.lights:
+        light.castshadow = False
+        light.specular = [0.0, 0.0, 0.0]
+    spec.visual.headlight.diffuse = [0.0, 0.0, 0.0]
+    spec.visual.headlight.specular = [0.0, 0.0, 0.0]
+    spec.visual.headlight.ambient = [0.7, 0.7, 0.7]
+    for mat in spec.materials:
+        mat.reflectance = 0.0
+        mat.specular = 0.0
+        mat.shininess = 0.0
 
 
 def place(rng, drawn, s):
@@ -465,6 +484,8 @@ def build(kind, rng, with_props=True, policy=None):
         for j in list(body.joints):
             if j.type == mujoco.mjtJoint.mjJNT_FREE:
                 spec.delete(j)
+    if os.environ.get("BD_PLAIN_LIGHT") == "1":
+        plain_light(spec)
     m = spec.compile()
     d = mujoco.MjData(m)
     if policy:
