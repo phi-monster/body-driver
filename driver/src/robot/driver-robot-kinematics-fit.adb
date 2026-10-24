@@ -1446,6 +1446,10 @@ package body Driver.Robot.Kinematics.Fit is
          Depth_Sigma : Real_Access := new Real_Array'(1 .. Tracks => Real'Last);
          Has    : Flags_Access := new Flags'(1 .. Tracks => False);
          Inlier : Flags_Access := new Flags'(1 .. S => False);
+         --  The tracks taken out as no point the world holds still (below, once the sightings' choice settles), out
+         --  for the rest of the refinement.
+         Taken_Out : Flags_Access := new Flags'(1 .. Tracks => False);
+         Tracks_Judged : Boolean := False;   --  the tracks were judged (below): once a refinement
          X      : Real_Array (1 .. Count);
          --  The sightings each pass began with: the passes end where the choice settles or returns to one it began
          --  from (a choice that cycles has no fixed point to wait for), and at most as many as the float has bits.
@@ -2854,7 +2858,8 @@ package body Driver.Robot.Kinematics.Fit is
                      Scale : constant Real := Scale_Of (Model, All_Own (2 * I));
                      Fits  : constant Boolean := Has (Sight (Sight'First + I - 1).Track) and then Scale > Real'Model_Small
                        and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)
-                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);
+                       and then not Driver.Uncertain.Significant (All_R (2 * I), Scale)
+                       and then not Taken_Out (Sight (Sight'First + I - 1).Track);
                   begin
                      if Fits /= Inlier (I) then
                         Now_Changed := Now_Changed + 1;
@@ -2865,6 +2870,95 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end;
                end loop;
+               --  A track whose sightings fall out of the fit more often than the kept tracks' rate makes likely is
+               --  no point the world holds still (the shadow an arm casts, a patch across two surfaces): it fits in
+               --  some keyframes and not in others, and those it fits in pull the lens by the part of its motion that
+               --  is not the world's. Out goes every sighting of a track whose count out is beyond the kept tracks'
+               --  pooled rate by the binomial's upper tail at Z, the rate taken again over the tracks still kept until
+               --  none goes. From the truth, Panda seed 3a's last fit of p290s2 (10-24) went to +3.0 % of the focal
+               --  length; with only the tracks the truth puts within 2 px in all but a twentieth of their sightings,
+               --  +0.5 %. Over that round's 56 arms with their eye told, their last fits again with this: within 2 %
+               --  33 and 39, the truth beyond 3 of their sigmas 14 and 10, Panda seed 3a +3.0 and +1.7 %. Where the
+               --  arm's own shadow holds more than half the tracks (UR5e seed 2a), the rate is theirs and nothing goes.
+               --  Judged once a refinement, when the sightings' choice first settles, the tracks out kept out for
+               --  the rest of it. Judged at every pass, a desktop arm swept 3.4 degrees lost its outer tracks before
+               --  its fit had found its focal length, and ended at 498 by 516 px for the true 400, its lens 432 chi
+               --  squares on 6 terms off (robot.kinematics.desktop, 10-24). Let back in at the next pass, the tracks
+               --  went out and came back by turns, and Panda seed 3a stayed at +2.9 %. Judged again whenever the
+               --  choice settled anew, the rate fell with every track out and the next ones stood beyond it: the order
+               --  exam's fits ran to their passes' bound.
+               if Now_Changed = 0 and then not Tracks_Judged then
+                  Tracks_Judged := True;
+                  declare
+                     type Count_List is array (1 .. Tracks) of Natural;
+                     Seen_N, Out_N : Count_List := [others => 0];
+                     Tail    : constant Real :=
+                       Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
+                     Went    : Boolean := True;
+                     --  The chance of K or more of N at the rate P.
+                     function Upper_Tail (K, N : Natural; P : Real) return Real is
+                        Term : Real := (1.0 - P) ** N;
+                        Sum  : Real := 0.0;
+                     begin
+                        if K = 0 or else P >= 1.0 then
+                           return 1.0;
+                        elsif P <= 0.0 then
+                           return 0.0;
+                        end if;
+                        for J in 0 .. N loop
+                           if J >= K then
+                              Sum := Sum + Term;
+                           end if;
+                           exit when J = N;
+                           Term := Term * Real (N - J) / Real (J + 1) * P / (1.0 - P);
+                        end loop;
+                        return Sum;
+                     end Upper_Tail;
+                  begin
+                     for I in 1 .. S loop
+                        declare
+                           T : constant Positive := Sight (Sight'First + I - 1).Track;
+                        begin
+                           if Has (T) and then not Taken_Out (T) then
+                              Seen_N (T) := Seen_N (T) + 1;
+                              if not Inlier (I) then
+                                 Out_N (T) := Out_N (T) + 1;
+                              end if;
+                           end if;
+                        end;
+                     end loop;
+                     while Went loop
+                        Went := False;
+                        declare
+                           All_Seen, All_Out : Natural := 0;
+                           Rate : Real;
+                        begin
+                           for T in 1 .. Tracks loop
+                              if not Taken_Out (T) then
+                                 All_Seen := All_Seen + Seen_N (T);
+                                 All_Out := All_Out + Out_N (T);
+                              end if;
+                           end loop;
+                           Rate := (if All_Seen > 0 then Real (All_Out) / Real (All_Seen) else 0.0);
+                           for T in 1 .. Tracks loop
+                              if not Taken_Out (T) and then Seen_N (T) > 0
+                                and then Upper_Tail (Out_N (T), Seen_N (T), Rate) < Tail
+                              then
+                                 Taken_Out (T) := True;
+                                 Went := True;
+                              end if;
+                           end loop;
+                        end;
+                     end loop;
+                     for I in 1 .. S loop
+                        if Inlier (I) and then Taken_Out (Sight (Sight'First + I - 1).Track) then
+                           Inlier (I) := False;
+                           Now_Changed := Now_Changed + 1;
+                           Kf := Kf - 1;
+                        end if;
+                     end loop;
+                  end;
+               end if;
                Report.Sigma_Px := Sigma;
                Report.Own_Gain := Model.Gain;
                Report.Used := Kf;
@@ -3119,6 +3213,7 @@ package body Driver.Robot.Kinematics.Fit is
             Free (Choice);
          end loop;
          Free (Inlier);
+         Free (Taken_Out);
       end;
    end Refine_Tracks;
 

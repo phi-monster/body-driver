@@ -2271,6 +2271,7 @@ driver-robot-kinematics-fit.adb	Directions : constant Natural := 2562;	2562	nume
 driver-robot-kinematics-fit.adb	Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Seen_T'Length));	1	structure	an array of at least one element, so it is never empty
 driver-robot-kinematics-fit.adb	Dist : Real_Access := new Real_Array (1 .. Natural'Max (1, Tracks));	1	structure	at least one element, for an array that may hold none
 driver-robot-kinematics-fit.adb	Dr : constant Real := X.L.K1 + 2.0 * X.L.K2 * R2;	2.0	math	the radial factor's derivative in the radius squared
+driver-robot-kinematics-fit.adb	Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;	2.0	math	a symmetric distribution's one-sided tail: half its two-sided one
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Driver.Log.Image (Rise, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Driver.Log.Line (Driver.Log.Robot, "" & Who & ""	"3	format	the stage named in a log line
@@ -2718,7 +2719,7 @@ driver-robot-kinematics-fit.adb	[X.L.Fy * 2.0 * Xn * Yn * Dr, X.L.Fy * (D + 2.0 
 driver-robot-kinematics-fit.adb	and then (Partner (X.Frame) = 1	1	structure	keyframe 1 is the reference
 driver-robot-kinematics-fit.adb	and then Judge (Au, Av, Bu, Bv, 2).Smaller);	2	structure	the keyframes by halves: every one (0), the odd (1), the even (2)
 driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I - 1), Scale)	2	structure	two residuals a sighting, across and down
-driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale);	2	structure	two residuals a sighting, across and down
+driver-robot-kinematics-fit.adb	and then not Driver.Uncertain.Significant (All_R (2 * I), Scale)	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	and then not Joint_Determined (Variance (O + 1), Variance (O + 2), Variance (O + 5), C)	2	structure	a joint's terms after the lens's: its axis's tilt along the two directions across it (1, 2), then its point's (3, 4), then its scale (5)
 driver-robot-kinematics-fit.adb	and then not Joint_Determined (Variance (O + 1), Variance (O + 2), Variance (O + 5), C)	5	structure	a joint's terms after the lens's: its axis's tilt along the two directions across it (1, 2), then its point's (3, 4), then its scale (5)
 driver-robot-kinematics-fit.adb	else "" & Ada.Strings.Fixed.Trim (Positive'Image ((P - 7) / Per_Reduced + 1), Ada.Strings.Left)	7	structure	the reduced terms' layout: six of the lens, then a joint's from the seventh (two of its axis, two of its point, its scale, and where its slack is fitted its half slack and its slack's place)
@@ -2843,6 +2844,7 @@ driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
 driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
+driver-robot-kinematics-fit.adb	if K = 0 or else P >= 1.0 then	1.0	math	a rate of one: every trial counts, the upper tail is certain
 driver-robot-kinematics-fit.adb	if K > 1 then	1	structure	after the first
 driver-robot-kinematics-fit.adb	if Km > 1 then	1	statistics	a spread needs two values
 driver-robot-kinematics-fit.adb	if N = 0 or else S = 0 or else Frames < 2 then	2	structure	the keyframes and joints after the first
@@ -2877,6 +2879,7 @@ driver-robot-kinematics-fit.adb	return (Floor => 0.0, Gain => 1.0);	1.0	structur
 driver-robot-kinematics-fit.adb	return (Floor => Noise_Of (R), Gain => 1.0);	1.0	structure	nothing stated: the gain scales nothing, the floor is the noise shown
 driver-robot-kinematics-fit.adb	return (case Half is when 0 => "", when 1 => "",	1	structure	the keyframes by halves: every one (0), the odd (1), the even (2)
 driver-robot-kinematics-fit.adb	return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));	1.0	numerics	at least one sample
+driver-robot-kinematics-fit.adb	return 1.0;	1.0	math	the chance of a certain event
 driver-robot-kinematics-fit.adb	return 1;	1	math	one sample when every point agrees
 driver-robot-kinematics-fit.adb	return 2 * At_Most < Total;	2	math	the median lies above when fewer than half lie at or below
 driver-robot-kinematics-fit.adb	return 2 * Inside > Total;	2	math	a majority: more than half of the plane's points lie inside the other's box
