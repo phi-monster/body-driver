@@ -84,6 +84,8 @@ begin
       Asked       : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
       type Play_Access is access Fit.Play_Paths;
       Play        : Play_Access := null;   --  the readings' way between the keyframes, when dumped
+      type Real_Array_Access is access Real_Array;
+      Dumped_Slack : Real_Array_Access := null;   --  the slack the driver began from, when dumped
       Visible     : Real_Array (1 .. N);
       Sightings   : constant Sightings_Access := new Fit.Sighting_Array (1 .. S);
    begin
@@ -185,14 +187,27 @@ begin
                end loop;
             end;
          end if;
+         --  The slack the driver began from, when the dump has it (its count, two numbers a joint): an arm with a fit
+         --  of its own reference begins from that fit's slack, not from one measured again.
+         if At_Token <= Tokens.Last_Index and then Tokens (At_Token) = "slack" then
+            Expect ("slack");
+            declare
+               Count : constant Natural := Next_Natural;
+            begin
+               Dumped_Slack := new Real_Array (1 .. Count);
+               for K in 1 .. Count loop
+                  Dumped_Slack (K) := Next_Real;
+               end loop;
+            end;
+         end if;
          Began := Ada.Calendar.Clock;
          if Play = null then
             Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
                      Who => To_String (Who), From => From);
          else
             declare
-               --  The slack measured from the keyframes alone, as the driver measures it before its fit; or the one a
-               --  file names (the slack the driver began from, its last fit's), two numbers a joint.
+               --  The slack the driver began from: the one a file names (two numbers a joint), else the dump's, else
+               --  measured from the keyframes alone, as the driver measures it where the arm has no fit of its own.
                function Slack_Given return Real_Array is
                   F : File_Type;
                   R : Real_Array (1 .. 2 * N);
@@ -211,9 +226,11 @@ begin
                end Slack_Given;
                Measured : constant Real_Array :=
                  (if Ada.Command_Line.Argument_Count = 2 then Slack_Given
+                  elsif Dumped_Slack /= null then Dumped_Slack.all
                   else Fit.Measure_Slack (Changes, Sightings.all, Play.all));
             begin
-               Put ("slack measured:");
+               Put ((if Ada.Command_Line.Argument_Count = 2 then "slack given:"
+                     elsif Dumped_Slack /= null then "slack dumped:" else "slack measured:"));
                for H of Measured loop
                   Put (H'Image);
                end loop;

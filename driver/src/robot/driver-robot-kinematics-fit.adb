@@ -3221,7 +3221,10 @@ package body Driver.Robot.Kinematics.Fit is
    --  The fit
 
    --  For a fit studied alone (tools/fit_replay): with BD_DUMP_FITS naming a folder, every fit's inputs, in a file
-   --  of what is fitted and the fit's number in the run, every real to its last bit.
+   --  of what is fitted and the fit's number in the run, every real to its last bit. The slack the fit begins from
+   --  (Slack_Start) too: an arm with a fit of its own reference begins from that fit's slack, which no measure of
+   --  the dump makes again, and replayed without it Stretch 2b's last fit of round p314s2 ended at stage 0 where the
+   --  run's had fitted (10-25).
    protected Dumps is
       procedure Next (Number : out Positive);
    private
@@ -3239,7 +3242,7 @@ package body Driver.Robot.Kinematics.Fit is
    procedure Dump_Inputs
      (Changes : Driver.Numerics.Arrays.Real_Matrix; Asked : Flag_Matrix; Visible : Real_Array;
       Sightings : Sighting_Array; Width, Height : Positive; Unit_Frames : Natural; Who : String; From : Fit_Start;
-      Play : Play_Paths)
+      Play : Play_Paths; Slack_Start : Real_Array)
    is
       use Ada.Text_IO;
       File   : File_Type;
@@ -3356,6 +3359,14 @@ package body Driver.Robot.Kinematics.Fit is
             end loop;
             New_Line (File);
          end loop;
+      end if;
+      --  The slack begun from, when given: its count, then two numbers a joint.
+      if Slack_Start'Length > 0 then
+         Put (File, "slack" & Slack_Start'Length'Image);
+         for X of Slack_Start loop
+            Put_Real (X);
+         end loop;
+         New_Line (File);
       end if;
       Close (File);
    end Dump_Inputs;
@@ -4323,7 +4334,7 @@ package body Driver.Robot.Kinematics.Fit is
 
    begin
       if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
-         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play);
+         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play, Slack_Start);
       end if;
       Report := (others => <>);
       Joints := [others => <>];
