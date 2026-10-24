@@ -1927,6 +1927,13 @@ package body Driver.Robot.Boot is
          Note_Rest_Commands (M);
       end Note_Rest;
 
+      --  The groups as the sweeps left them, each eye's mount among them: the mounts step 1 could not tell are told by
+      --  the arms' fits (owner 10-24), and the boot is scored on the groups after the sweeps where it sweeps.
+      procedure Tell_Swept is
+      begin
+         Driver.Log.Line (Driver.Log.Robot, "boot: the groups after sweeping the arms:" & ASCII.LF & Describe (M));
+      end Tell_Swept;
+
       procedure Read_Body is
       begin
          --  The turn at which the recognition's probes saw each channel move an eye goes to the model
@@ -2577,6 +2584,7 @@ package body Driver.Robot.Boot is
          end if;
          if not Fitted_Before then
             Sweep_Every_Arm;
+            Driver.Beats.Within_A_Beat (Tell_Swept'Access);
             Keep ("sweeping the arms");
          end if;
          --  Step 3: every fixed eye that sees a fitted arm and has no place yet is placed by the arms' edge flow

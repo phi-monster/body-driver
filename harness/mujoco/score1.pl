@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 # score1.pl RUN: step 1 of a run on a MuJoCo robot against its truth (RUN/truth.json, written by robot.py): every group's
-# role as the driver recognized it (the groups as recognized) against the role its truth gives it, every camera's mount
+# role as the driver recognized it (the last of the groups as recognized and, where the boot swept its arms, the groups
+# after sweeping the arms: the mounts the recognition could not tell are the sweeps', owner 10-24) against the role its
+# truth gives it, every camera's mount
 # against its truth's, every camera an arm carries carried by the group that truly carries it, and every closer the closer
 # of the arm that truly bears it (its truth names it ARM_closer beside its arm's ARM_joints, as bodies.py names them: on a
 # robot of two arms, the closer of the wrong arm leaves step 4 to look for its tips in the other arm's eye). The driver's group N
@@ -23,7 +25,7 @@ while (my $line = <$f>) {
     $in_report = 0 if $line =~ /^\s*$/;
     next;
   }
-  if ($line =~ /^@(\d+) \[robot\] boot: the groups as recognized:/) { @block = (); $in_block = 1; $at = $1; next; }
+  if ($line =~ /^\@(\d+) \[robot\] boot: the groups (?:as recognized|after sweeping the arms):/) { @block = (); $in_block = 1; $at = $1; next; }
   if ($in_block) { if ($line =~ /^\s*$/) { $in_block = 0; } else { push @block, $line; } }
 }
 close $f;
