@@ -28,6 +28,9 @@ PORT=${PORT:-$((31000 + SEED % 2000))}; LIM=${MINUTES:-5}; STOP=${STOP:-"the bod
   echo "options $* ${RATE:+rate $RATE}"; echo "start $(date +%FT%T)"; } > "$R/meta.txt"
 # DUMP_CELLS=1: the driver writes every eye's cells as the lock-in saw them at each recognition (Lockin.Dump_Cells).
 [ "${DUMP_CELLS:-0}" = 1 ] && export BD_DUMP_CELLS="$R"
+# DUMP_FITS=1: the driver writes every arm fit's inputs (BD_DUMP_FITS), for driver-robot-fit_replay to make that fit again
+# alone in seconds: a step 2 fit studied without the run's recording.
+[ "${DUMP_FITS:-0}" = 1 ] && export BD_DUMP_FITS="$R"
 TRUTH_ARGS=(); RECORD_ARGS=()
 if [ "${TRUTH:-0}" = 1 ]; then
   TRUTH_ARGS=(--truth "$R/truth.jsonl"); export BD_TRUTH_GEOMETRY=${TRUTH_GEOMETRY:-/root/mj/truth_geometry}
