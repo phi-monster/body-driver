@@ -3777,6 +3777,7 @@ driver-robot-motion.adb	Offset : constant Real := Amount * 2.0 ** (Report.Levels
 driver-robot-motion.adb	Offsets : constant Real_Array (1 .. 1) := [1 => Signs (Way) * Offset];	1	structure	one channel
 driver-robot-motion.adb	Offsets : constant Real_Array (1 .. 1) := [1 => Signs (Way) * Offset];	1	structure	one channel
 driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in yet: a chance of one
+driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in yet: a chance of one
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	0.0	structure	from zero: the first step is the smallest the reading can tell
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	1	structure	one channel
 driver-robot-motion.adb	Rarest : Real := 1.0;	1.0	math	the largest a verdict's share of the rest can be: before any verdict, none rarer than certain

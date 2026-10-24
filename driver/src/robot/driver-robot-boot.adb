@@ -164,7 +164,6 @@ package body Driver.Robot.Boot is
       --  and its head camera stayed 1.66 from where the push began against rest's 1.56, a speed (seed 1, paced rounds
       --  p106xa to p108xb and the world's truth, d108x, 10-24); ALOHA's gripper, asked 1.07e-3 units, delivered 0.90,
       --  its way back unanswered, its wrist eye 0.96 from where the push began against rest's 0.61 (seed 1, p113a).
-      --  (Experiment bd116.)
       function Readings_Allow_Stay (Out_Report, Back_Report : Driver.Robot.Motion.Step_Report) return Boolean is
         (not Answered (Out_Report)
          or else (Back_Report.Outcome = Driver.Robot.Motion.Reached and then Back_Report.Delivered.Value > 0.5));
@@ -2126,6 +2125,18 @@ package body Driver.Robot.Boot is
                                        end loop;
                                     end if;
                                  end loop;
+                                 --  Alike only where the eye moved most has cells beyond reach to be alike in, more than
+                                 --  none by more than chance: a push that left a cell or two beyond reach anywhere, a
+                                 --  view moved by fractions of a pixel, leaves no two eyes apart by chance and tells
+                                 --  nothing of them. RB-Y1's left arm, its pushes leaving 2 of its wrist eye's 243
+                                 --  cells beyond reach and none of the others', was probed one channel at a time, 300
+                                 --  beats, and the boot ran out of them (seed 1, paced round p133a, 10-24).
+                                 if Most = 0 or else Stayed_Of (Most) = 0
+                                   or else not Driver.Robot.Regression.Shares_Apart
+                                                 (Far_Of (Most), Stayed_Of (Most), 0, Stayed_Of (Most))
+                                 then
+                                    Alike := False;
+                                 end if;
                               end Read_Whole;
                            begin
                               Driver.Beats.Within_A_Beat (Read_Whole'Access);

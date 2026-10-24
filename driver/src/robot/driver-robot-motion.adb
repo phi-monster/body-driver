@@ -242,6 +242,7 @@ package body Driver.Robot.Motion is
       --  and waited here 505 beats for it to settle, its longest wait before 75 (seed 1, paced round p75a, 10-23).
       Eye_Far       : array (1 .. Eyes) of Real := [others => 0.0];
       Eye_Far_At    : array (1 .. Eyes) of Natural := [others => 0];
+      Ended_Nowhere : Boolean := False;   --  some eye ended the wait going no farther, unstilled (Eye_Nowhere)
       function Eye_Nowhere (E : Positive) return Boolean is
         (Anchored
          and then Beats_Waited - Eye_Far_At (E) > Natural'Max (Natural'Max (Eye_Far_At (E), Delay_Beats), Longest_Wait));
@@ -330,6 +331,10 @@ package body Driver.Robot.Motion is
                for G in 1 .. Groups loop
                   Ended_There (G) := not Still_Now (G);
                end loop;
+               Ended_Nowhere :=
+                 (for some E in 1 .. Eyes =>
+                    not Driver.Robot.Stillness.Eye_Settled (M, Eye_Id (E))
+                    and then not (Jittering and then Driver.Robot.Stillness.Eye_Still (M, Eye_Id (E))));
             end if;
             if not Standing then
                Stood_Since := -1;
@@ -387,7 +392,13 @@ package body Driver.Robot.Motion is
             Tell_At := 2 * Tell_At;
          end if;
       end loop;
-      Longest_Wait := Natural'Max (Longest_Wait, Beats_Waited);
+      --  The longest wait the body took to settle, from waits whose every eye stilled: one an eye ended going no
+      --  farther (Eye_Nowhere) waited at least the longest before, and kept so it lengthened every wait after it.
+      --  The G1, its balance swaying an eye on for a hundred beats after one push, then waited 114, 159 and 153
+      --  beats a push and was unfinished at the cap (seed 3, paced round p128a, 10-24).
+      if not Ended_Nowhere then
+         Longest_Wait := Natural'Max (Longest_Wait, Beats_Waited);
+      end if;
       if Beats_Waited > 0 then
          declare
             Text : Unbounded_String;
@@ -1795,6 +1806,7 @@ package body Driver.Robot.Motion is
       Start_At  : Natural;                --  the beat the probe's readings were read at
       Creep     : Real_Array (1 .. N);    --  each reading's steady change a beat at rest (Channels.Drift)
       Farthest_At : Count_Array (1 .. N);   --  the beat each one's farthest reading was read at
+      Last_Executed : Real := 0.0;        --  the largest level some listed reading went along at
    begin
       Report := (others => <>);
       Begin_Probe (M, Listed, First, Usable, Start, Noise, Base, Amount, Unlooked, Start_At, Creep);
@@ -1939,6 +1951,9 @@ package body Driver.Robot.Motion is
                                 & " (the look's chance of a false alarm " & Driver.Log.Image (Chance, 3) & "), "
                                 & Went_Along'Image & " channels went along their ask");
                Executed_None := Went_Along = 0;
+               if Went_Along > 0 then
+                  Last_Executed := Amount;
+               end if;
             end;
             --  A level is seen only when the body executed it: some channel's reading went along its ask. A
             --  camera on an arm whose servo hums against its dead band shakes, and an eye sees motion where no
@@ -1997,6 +2012,35 @@ package body Driver.Robot.Motion is
             Amount := 2.0 * Amount;
          end;
       end loop;
+      --  A group's own ladder no look saw at any level its readings executed: the lock-in, regressing every eye's
+      --  cells on the group's readings over all of the ladder's pushes (Lockin.Moving_Chance), may tell it moved
+      --  some eye where no look of a few beats could. Its chance below the rarity a level's confirmation asks (Z's
+      --  tail over every level a probe may try, as Confirm's): seen, at the largest level its readings executed.
+      --  The G1's hand, its seven fingers pushed together, showed nothing in looks of five beats at any of eight
+      --  levels, its pictures swaying from its balance, and was probed a channel at a time, 50 beats each, two fingers
+      --  seen, out of beats (seed 1, paced rounds p116a and p116b, 10-24).
+      if not Report.Seen and then First /= 0.0 and then Last_Executed > 0.0
+        and then (for all I in 1 .. N => Natural (Listed (I).Group) = Natural (Listed (Listed'First).Group))
+      then
+         declare
+            Prior : Real := 1.0;
+            procedure Read_Prior is
+            begin
+               Prior := Lockin.Moving_Chance (M, Listed (Listed'First).Group);
+            end Read_Prior;
+         begin
+            Hold_And_Estimate (M);
+            Driver.Beats.Within_A_Beat (Read_Prior'Access);
+            Report.Seen := Prior < Tail / Real (Levels);
+            Driver.Log.Line (Driver.Log.Robot, "probe: no level of the group was seen by a look; the lock-in's chance "
+                             & Scientific (Prior) & " against " & Scientific (Tail / Real (Levels)) & ": "
+                             & (if Report.Seen then "seen at " & Scientific (Last_Executed) & " units"
+                                else "not seen"));
+            if Report.Seen then
+               Report.Excursion := Last_Executed;
+            end if;
+         end;
+      end if;
       --  Back to the hold.
       Step (M, Base, Report.Last);
    end Probe_Together;
