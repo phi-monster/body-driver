@@ -1,5 +1,5 @@
 --  replay RECORDING [--body FILE] [--estimates FILE] [--inst HOST:PORT] [--eye HOST:PORT] [--watch EYE]
---         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only] [--graphs]
+--         [--readings GROUP] [--dump DIR EYE EVERY] [--dump-only] [--graphs] [--until BEAT]
 --
 --  Feeds a recording (Driver.Recording format, uncompressed; it is read once,
 --  forward, so "zstd -dc run.rec.zst | replay /dev/stdin ..." needs no copy on
@@ -42,6 +42,8 @@
 --  (Driver.Robot.Describe; with --body, once more at the end): score1.pl scores a replay's graph as the boot's.
 --  With --dump DIR EYE EVERY, the eye's picture at every EVERY-th beat is written
 --  to DIR/eyeEYE_BEAT.ppm (a study's way of seeing what the estimators saw).
+--  With --until BEAT, the replay ends once it has replayed BEAT beats: a step 1 study of a boot recorded through its
+--  sweeps replays its recognition alone, in seconds, not its sweeps' minutes of fits.
 --  With --sweeping ARM@BEAT (repeatable), the arm's sweep is said to begin at
 --  that beat: for a recording made before the boot's word to the kinematics
 --  was recorded (kinds G and Q); its keyframes are then taken and aligned,
@@ -315,6 +317,7 @@ procedure Replay is
    Dump_Every : Natural := 0;
    Dump_Only  : Boolean := False;   --  with --dump-only, nothing else is estimated
    Graphs     : Boolean := False;   --  with --graphs, the groups as recognized after every estimate a decider asked for
+   Until_Beat : Natural := 0;       --  with --until BEAT, the replay ends at that beat (0: at the recording's end)
 
    procedure Write_Ppm (File : String; I : Driver.Images.Image) is
       F    : Ada.Streams.Stream_IO.File_Type;
@@ -684,6 +687,8 @@ begin
          Dump_Every := Natural'Value (Argument (I + 3));
       elsif Argument (I) = "--readings" then
          Followed := Natural'Value (Argument (I + 1));
+      elsif Argument (I) = "--until" then
+         Until_Beat := Natural'Value (Argument (I + 1));
       elsif Argument (I) = "--sweeping" and then I + 1 <= Argument_Count then
          declare
             Given : constant String := Argument (I + 1);
@@ -710,6 +715,7 @@ begin
       return;
    end if;
    while More loop
+      exit when Until_Beat > 0 and then Beat >= Until_Beat;
       Driver.Recording.Next (R, Kind, Ns, Payload, More);
       exit when not More;
       case Kind is
