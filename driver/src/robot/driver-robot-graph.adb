@@ -225,8 +225,12 @@ package body Driver.Robot.Graph is
       --  it, and while no other group is that eye's own now (Best_Of): ridden early by the wrist eye that its hand
       --  or its jaw filled half of, on few rows, the Shadow's hand and Stretch's gripper stayed arms once the eye rode its
       --  arm (seeds 1 and 2, paced round p76a, 10-23).
+      --  An eye that measured nothing of the group's pushes (Unmeasured: none of its beats a row, its picture unsettled
+      --  before each) tells nothing against riding it either: ALOHA 1a's left wrist eye, unsettled before 49 of the
+      --  left arm's 74 pushed beats and left with no row, took the arm for a part and itself for fixed in the world, and
+      --  the arm was never swept (the recorded set rec315, 10-25).
       function Still_Ridden (G : Group_Id) return Boolean is
-        (M.Groups (G).Rider > 0 and then Effect (M, G, M.Groups (G).Rider).Verdict in Undecided | Patch
+        (M.Groups (G).Rider > 0 and then Effect (M, G, M.Groups (G).Rider).Verdict in Undecided | Patch | Unmeasured
          and then Best_Of (M.Groups (G).Rider) in 0 | Natural (G));
    begin
       --  Once a push of the group was its own it stays so: the longest lag the stream can tell of is the median gap
