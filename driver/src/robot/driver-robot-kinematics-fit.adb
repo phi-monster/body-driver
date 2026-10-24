@@ -1228,6 +1228,7 @@ package body Driver.Robot.Kinematics.Fit is
       Focal_Within : Real := 0.0;
       Spread       : Boolean := True;
       Pinhole      : Boolean := False;
+      Hold_Focal   : Boolean := False;
       Judge_Floor  : Real := 0.0;
       Judge_Gain   : Real := 0.0;
       Play         : Play_Paths := No_Play;
@@ -2044,7 +2045,8 @@ package body Driver.Robot.Kinematics.Fit is
                         --  The terms a pinhole with square pixels has not, the lens's second focal length and its two
                         --  distortion terms, have no column, and a term with none stays where it is (a sliding joint's
                         --  axis point's).
-                        function Has_Column (P : Positive) return Boolean is (not (Pinhole and then P in 2 | 5 | 6));
+                        function Has_Column (P : Positive) return Boolean is
+                          (not (Pinhole and then P in 2 | 5 | 6) and then not (Hold_Focal and then P in 1 | 2));
                         Lenses      : array (1 .. 6) of Lens;
                         Lens_Rays   : Vec3_Grid_Access := new Vec3_Grid (1 .. 6, 1 .. Tracks);
                         Joint_Views : Rigid_Grid_Access := new Rigid_Grid (7 .. Count, 1 .. Frames);
@@ -2978,6 +2980,34 @@ package body Driver.Robot.Kinematics.Fit is
                   begin
                      Errors.Meat (Kinds, Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
                                   Last_Pass.Ref_V.all, Last_Pass.Rows.all, Meat);
+                     --  The focal length's own design effect: each sighting's error moves the focal length by its
+                     --  row times the inverse's first column; the meat along that, over the same with each error alone.
+                     --  What a keyframe's points share and what a point keeps in every keyframe widen the focal
+                     --  length's variance by it, and its profile is judged at it (Fit's walk): judged at the sightings
+                     --  as independent, the profile told steps a twentieth of a pixel apart (an arm's fit of p207s2,
+                     --  panda2b's dump, 10-24: its walk an hour of 1084 refits).
+                     declare
+                        Rows_Count : constant Natural := Last_Pass.Rows'Length (1);
+                        Along : Real_Matrix (1 .. Rows_Count, 1 .. 1);
+                        Q     : Real_Matrix (1 .. 1, 1 .. 1);
+                        A     : constant Errors.Entries := Errors.Alone (Kinds);
+                        Q_Alone : Real := 0.0;
+                     begin
+                        for I in 1 .. Rows_Count loop
+                           Along (I, 1) := 0.0;
+                           for P in 1 .. Reduced loop
+                              Along (I, 1) := Along (I, 1) + Last_Pass.Rows (I, P) * Last_Pass.Inv (P, 1);
+                           end loop;
+                        end loop;
+                        Errors.Meat (Kinds, Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
+                                     Last_Pass.Ref_V.all, Along, Q);
+                        for K in 1 .. Rows_Count / 2 loop
+                           Q_Alone := Q_Alone + A (Errors.Both_Across) * Along (2 * K - 1, 1) ** 2
+                             + A (Errors.Both_Down) * Along (2 * K, 1) ** 2
+                             + 2.0 * A (Errors.Across_Down) * Along (2 * K - 1, 1) * Along (2 * K, 1);
+                        end loop;
+                        Report.Focal_Design := (if Q_Alone > 0.0 then Real'Max (1.0, Q (1, 1) / Q_Alone) else 1.0);
+                     end;
                      Sandwich (Last_Pass.Inv.all, Meat, V, Clipped, Ok);
                      if Ok then
                         for P in 1 .. Reduced loop
@@ -3778,12 +3808,19 @@ package body Driver.Robot.Kinematics.Fit is
          --  the basin the solution lies in, nothing of another basin along the direction the sightings tell worst:
          --  with a wide lens's barrel distortion free, the focal length, the distortion and the joints' turns per unit
          --  trade along a valley, and a desktop arm swept to 11.5 degrees settled at 330 px of 400, its sigma 4.5 px
-         --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held at steps
-         --  doubling from Z of its own sigma (held within that sigma, the search's measurement of it), everything
-         --  else refitted; a step whose robust cost over every sighting lies below the solution's by more than Z
-         --  squared over two (a likelihood ratio at Z) is a better basin, refitted from there and profiled again; a
-         --  step whose median residual over every sighting lies above the solution's by more than Z of the two
-         --  medians' standard errors ends that way, as does the range the focal search ranged over.
+         --  (robot.kinematics.desktop, 10-15). Each way from the solution, the focal length is held where a step
+         --  asks it, at steps doubling from Z of its own sigma (no nearer than the sightings could ever tell),
+         --  everything else refitted. The cost rises are judged at the focal length's own design effect (what the
+         --  sightings' dependence does to its variance, Refine_Tracks): a step whose robust cost over every sighting
+         --  lies below the solution's by more than Z squared over two times it (a likelihood ratio at Z) is a better
+         --  basin, refitted from there and profiled again; a step whose median residual over every sighting lies
+         --  above the solution's by more than Z of the two medians' standard errors, widened by its root, ends that
+         --  way, as does the range the focal search ranged over. Held only within its own sigma, a step the
+         --  sightings pulled back to the solution's focal length rose by nothing, and judged at the sightings'
+         --  dependence the profile was taken for flat to the end of the range (robot.kinematics.shared, 10-24: steps
+         --  asked up to 435 px ending at 398 to 400, the fit called undetermined); judged at the sightings as
+         --  independent, it told steps a twentieth of a pixel apart (panda2b's dump of p207s2: an hour of 1084
+         --  refits).
          declare
             type Sign_Way is (Up, Down);
             Moved : Boolean := True;
@@ -3800,6 +3837,16 @@ package body Driver.Robot.Kinematics.Fit is
                declare
                   Held     : constant Real := Report.Focal_Sigma / L.Fx;   --  the focal length's own sigma, in the logarithm
                   Base_Err : constant Real := Median_Error (Base, Report.All_Count);
+                  --  The profile judged at the focal length's own design effect (Refine_Tracks), its steps the cost
+                  --  rises of the sightings as they depend on each other.
+                  Design   : constant Real := Report.Focal_Design;
+                  --  The walk's least step: no nearer than the sightings could ever tell, the noise floor over the
+                  --  picture's half diagonal and the root of the sightings' effective count.
+                  Resolution : constant Real :=
+                    (if Report.All_Count > 0
+                     then Report.Sigma_Px * Sqrt (Design / Real (Report.All_Count))
+                          / Sqrt ((Real (Width) / 2.0) ** 2 + (Real (Height) / 2.0) ** 2)
+                     else 0.0);
                begin
                   --  The two ways at once (Driver.Parallel_For), each from the solution, writing only its own result;
                   --  the way up's better basin is taken before the way down's, as when the way down was walked only
@@ -3834,11 +3881,11 @@ package body Driver.Robot.Kinematics.Fit is
                      --  narrow sweep (robot.kinematics.desktop, 10-20: from 404 px to 358 no keyframe's median moved, the
                      --  median over all 1.727 against 1.726 px, where the covariance put the focal length at 401 +- 2.5).
                      function Told_Apart (Step : Fit_Report) return Boolean is
-                       (Step.Cost_Judged - Report.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0);
+                       (Step.Cost_Judged - Report.Cost_Judged > Design * Driver.Conventions.Z ** 2 / 2.0);
 
                      procedure Walk (Index : Positive) is
                         Way    : constant Sign_Way := Sign_Way'Val (Index - 1);
-                        Offset : Real := Driver.Conventions.Z * Held;
+                        Offset : Real := Real'Max (Driver.Conventions.Z * Held, Resolution);
                         Last_F : Real := 0.0;   --  the focal length of the last step taken, none yet
                      begin
                         loop
@@ -3862,16 +3909,16 @@ package body Driver.Robot.Kinematics.Fit is
                               Lp.Fy := L.Fy * Factor;
                               Refine_Tracks (Joint_Turns, Sight, Jp, Order, Lp, Rp, Held, Spread => False,
                                              Pinhole => Report.Pinhole, Judge_Floor => Report.Judge_Floor,
-                                             Judge_Gain => Report.Judge_Gain);
+                                             Judge_Gain => Report.Judge_Gain,
+                                             Hold_Focal => True);
                               exit when Rp.All_Count = 0;
-                              --  Where the step's focal length went, held within its own sigma: a profile is flat as far
-                              --  as its steps went untold, not as far as they were asked (the sightings pulled a step at
-                              --  315 px back to 178, s22's arm 2, 10-20).
+                              --  Where the step held the focal length (a step held only within its own sigma went where
+                              --  the sightings pulled it: one asked at 315 px came back to 178, s22's arm 2, 10-20).
                               Last_F := Lp.Fx;
                               Walked (Way).Widest := Real'Max
                                 (Walked (Way).Widest,
                                  abs Ln (Lp.Fx / L.Fx)
-                                 / Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged), 1.0)));
+                                 / Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged) / Design, 1.0)));
                               declare
                                  Err : constant Real :=
                                    Sqrt (Median_Error (Rp.All_Median_Px, Rp.All_Count) ** 2 + Base_Err ** 2);
@@ -3897,16 +3944,27 @@ package body Driver.Robot.Kinematics.Fit is
                                  --  the solution's cost and the order exams ran past the two-minute cap (10-20); with the
                                  --  quick fits through the eyes, 56 % more steps than the told ending cost robot.kinematics
                                  --  3 % more time side by side (10-21).
-                                 if Report.Cost_Judged - Rp.Cost_Judged > Driver.Conventions.Z ** 2 / 2.0 then
+                                 if Report.Cost_Judged - Rp.Cost_Judged > Design * Driver.Conventions.Z ** 2 / 2.0 then
                                     Refine_Tracks (Joint_Turns, Sight, Jp, Order, Lp, Rp, Focal_Within, Pinhole => Report.Pinhole,
                                                    Judge_Floor => Report.Judge_Floor, Judge_Gain => Report.Judge_Gain);
+                                    --  And again from where that ended: refitted from the step, the fit's
+                                    --  sightings were chosen where the step held the focal length, and it kept
+                                    --  their lean. Refitted from a step at 457.9 px, a desktop arm's fit ended
+                                    --  at 400.0 px with its distortion 5.1 of its sigmas off along the direction
+                                    --  its sightings tell best; refitted again from there, at 401.0 px and 0.9
+                                    --  (robot.kinematics.desktop, 10-24).
+                                    if Rp.All_Count > 0 then
+                                       Refine_Tracks (Joint_Turns, Sight, Jp, Order, Lp, Rp, Focal_Within,
+                                                      Pinhole => Report.Pinhole, Judge_Floor => Report.Judge_Floor,
+                                                      Judge_Gain => Report.Judge_Gain);
+                                    end if;
                                     if Rp.All_Count > 0 and then Rp.Cost_Judged < Report.Cost_Judged then
                                        Walked (Way) := (Moved => True, L => Lp, Report => Rp, others => <>);
                                        Walked_Joints (Way) := Jp;
                                     end if;
                                     exit;
                                  end if;
-                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err;
+                                 exit when Rp.All_Median_Px > Base + Driver.Conventions.Z * Err * Sqrt (Design);
                               end;
                               Offset := 2.0 * Offset;
                            end;

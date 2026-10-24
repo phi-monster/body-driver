@@ -312,6 +312,9 @@ package Driver.Robot.Kinematics.Fit is
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals
                                        --  show (Errors); empty when not determined
       Errors     : Error_Summary;      --  what the covariance rests on
+      Focal_Design : Real := 1.0;
+      --  How much the errors' dependence (Errors) widens the focal length's variance over what its errors as if
+      --  independent would give, along the focal length's own direction: one where it does not widen it.
       Depths     : Real_Lists.Vector;  --  per track, the depth of its point along its reference line of
                                        --  sight as the track refinement found it; 0 where it has none
       Depth_Sigmas : Real_Lists.Vector;   --  per track, how uncertain the logarithm of that depth is, the
