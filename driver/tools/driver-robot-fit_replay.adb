@@ -123,6 +123,13 @@ begin
             X.Off_Told := Next_Flag;
          end;
       end loop;
+      --  The sightings' anchors, where the dump has them (a relay); the reference's otherwise.
+      if At_Token <= Tokens.Last_Index and then Tokens (At_Token) = "anchors" then
+         Expect ("anchors");
+         for K in 1 .. S loop
+            Sightings (K).Anchor := Next_Natural;
+         end loop;
+      end if;
       Expect ("from");
       declare
          M      : constant Natural := Next_Natural;

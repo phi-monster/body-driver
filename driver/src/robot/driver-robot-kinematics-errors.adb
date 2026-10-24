@@ -21,6 +21,14 @@ package body Driver.Robot.Kinematics.Errors is
 
    function Distance (Ua, Va, Ub, Vb : Real) return Real is (Sqrt ((Ua - Ub) ** 2 + (Va - Vb) ** 2));
 
+   --  The distance of two pixels of the pictures Pa and Pb: beyond any range where the pictures are two.
+   function Distance (Pa, Pb : Natural; Ua, Va, Ub, Vb : Real) return Real is
+     (if Pa /= Pb then Real'Last else Distance (Ua, Va, Ub, Vb));
+
+   --  The picture of the sighting I (Measure's and Meat's Picture): one where none is given.
+   function Picture_Of (Picture : Natural_Array; I : Positive) return Natural is
+     (if Picture'Length = 0 then 1 else Picture (I));
+
    ---------------------------------------------------------------------------
    --  Grouping
 
@@ -181,7 +189,8 @@ package body Driver.Robot.Kinematics.Errors is
      (Frame, Track : Natural_Array;
       U0, V0       : Real_Array;
       Error        : Real_Array;
-      M            : out Model)
+      M            : out Model;
+      Picture      : Natural_Array := No_Pictures)
    is
       K      : constant Natural := Frame'Length;
       Frames : Natural := 0;
@@ -200,6 +209,7 @@ package body Driver.Robot.Kinematics.Errors is
          Seen    : Natural_Access := new Natural_Array'(1 .. Tracks => 0);
          Pixel_U : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          Pixel_V : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+         Pixel_P : Natural_Access := new Natural_Array'(1 .. Tracks => 1);   --  the picture of each track's pixel
          Sum_A   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          Sum_D   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          --  What each track's errors, squared and across with down, add up to.
@@ -222,6 +232,7 @@ package body Driver.Robot.Kinematics.Errors is
                Seen (T) := Seen (T) + 1;
                Pixel_U (T) := U0 (I);
                Pixel_V (T) := V0 (I);
+               Pixel_P (T) := Picture_Of (Picture, I);
                Sum_A (T) := Sum_A (T) + A;
                Sum_D (T) := Sum_D (T) + D;
                Own (1, 1) := Own (1, 1) + A * A;
@@ -256,6 +267,7 @@ package body Driver.Robot.Kinematics.Errors is
             Free (Seen);
             Free (Pixel_U);
             Free (Pixel_V);
+            Free (Pixel_P);
             Free (Sum_A);
             Free (Sum_D);
             return;
@@ -276,7 +288,9 @@ package body Driver.Robot.Kinematics.Errors is
                if Seen (T) > 0 then
                   for S in T + 1 .. Tracks loop
                      if Seen (S) > 0 then
-                        Add (Pool.all, Bin_Of (M, Distance (Pixel_U (T), Pixel_V (T), Pixel_U (S), Pixel_V (S))),
+                        Add (Pool.all,
+                             Bin_Of (M, Distance (Pixel_P (T), Pixel_P (S), Pixel_U (T), Pixel_V (T), Pixel_U (S),
+                                                  Pixel_V (S))),
                              Sum_A (T), Sum_D (T), Sum_A (S), Sum_D (S), Real (Seen (T)) * Real (Seen (S)));
                      end if;
                   end loop;
@@ -290,7 +304,9 @@ package body Driver.Robot.Kinematics.Errors is
                         B : constant Positive := Frame_Order (Y);
                      begin
                         if Track (A) /= Track (B) then
-                           Add (Same.all, Bin_Of (M, Distance (U0 (A), V0 (A), U0 (B), V0 (B))),
+                           Add (Same.all,
+                                Bin_Of (M, Distance (Picture_Of (Picture, A), Picture_Of (Picture, B), U0 (A), V0 (A),
+                                                     U0 (B), V0 (B))),
                                 Error (2 * A - 1), Error (2 * A), Error (2 * B - 1), Error (2 * B), 1.0);
                         end if;
                      end;
@@ -312,6 +328,7 @@ package body Driver.Robot.Kinematics.Errors is
          Free (Seen);
          Free (Pixel_U);
          Free (Pixel_V);
+         Free (Pixel_P);
          Free (Sum_A);
          Free (Sum_D);
          Free (Frame_Start);
@@ -387,7 +404,8 @@ package body Driver.Robot.Kinematics.Errors is
       Track  : Natural_Array;
       U0, V0 : Real_Array;
       Rows   : Real_Matrix;
-      Result : out Real_Matrix)
+      Result : out Real_Matrix;
+      Picture : Natural_Array := No_Pictures)
    is
       P      : constant Natural := Rows'Length (2);
       K      : constant Natural := Frame'Length;
@@ -411,6 +429,7 @@ package body Driver.Robot.Kinematics.Errors is
          Seen      : Natural_Access := new Natural_Array'(1 .. Tracks => 0);
          Pixel_U   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
          Pixel_V   : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
+         Pixel_P   : Natural_Access := new Natural_Array'(1 .. Tracks => 1);   --  the picture of each track's pixel
          --  What each track's sightings hold of the gradient, across and down,
          --  and what the covariance carries of all the tracks' to it.
          Held      : Matrix_Access := new Real_Matrix'[1 .. 2 * Tracks => [1 .. P => 0.0]];
@@ -432,7 +451,8 @@ package body Driver.Robot.Kinematics.Errors is
                      declare
                         C : constant Entries :=
                           (if S = T then M.Same_Track
-                           else Persistent (M, Distance (Pixel_U (T), Pixel_V (T), Pixel_U (S), Pixel_V (S))));
+                           else Persistent (M, Distance (Pixel_P (T), Pixel_P (S), Pixel_U (T), Pixel_V (T),
+                                                        Pixel_U (S), Pixel_V (S))));
                      begin
                         for Q in 1 .. P loop
                            Carried (2 * T - 1, Q) := Carried (2 * T - 1, Q) + C (Both_Across) * Held (2 * S - 1, Q)
@@ -455,7 +475,9 @@ package body Driver.Robot.Kinematics.Errors is
             for Y in Frame_Start (F) .. Frame_Start (F + 1) - 1 loop
                declare
                   B   : constant Positive := Frame_Order (Y);
-                  Bin : constant Natural := Bin_Of (M, Distance (U0 (A), V0 (A), U0 (B), V0 (B)));
+                  Bin : constant Natural :=
+                    Bin_Of (M, Distance (Picture_Of (Picture, A), Picture_Of (Picture, B), U0 (A), V0 (A),
+                                         U0 (B), V0 (B)));
                begin
                   if Y /= X and then Bin < Near then
                      declare
@@ -551,6 +573,7 @@ package body Driver.Robot.Kinematics.Errors is
                Seen (T) := Seen (T) + 1;
                Pixel_U (T) := U0 (I);
                Pixel_V (T) := V0 (I);
+               Pixel_P (T) := Picture_Of (Picture, I);
                for Q in 1 .. P loop
                   Held (2 * T - 1, Q) := Held (2 * T - 1, Q) + Rows (2 * I - 1, Q);
                   Held (2 * T, Q) := Held (2 * T, Q) + Rows (2 * I, Q);
@@ -576,6 +599,7 @@ package body Driver.Robot.Kinematics.Errors is
          Free (Seen);
          Free (Pixel_U);
          Free (Pixel_V);
+         Free (Pixel_P);
          Free (Held);
          Free (Carried);
          Free (Sums);

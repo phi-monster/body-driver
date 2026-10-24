@@ -1562,6 +1562,23 @@ package body Driver.Robot.Kinematics.Fit is
          end Firsts_Of;
          Ref_U0 : constant Real_Array (1 .. Tracks) := Firsts_Of (True);
          Ref_V0 : constant Real_Array (1 .. Tracks) := Firsts_Of (False);
+         --  Per track, the keyframe its reference pixel is a pixel of (Sighting.Anchor): the reference, or a later
+         --  keyframe that chose the point and followed it into others (a relay). The point stands at its depth along
+         --  that keyframe's line of sight from where that keyframe's eye stands, and moves with the joints that move
+         --  that eye: a relayed sighting's residual is the anchor's eye's as much as its own keyframe's.
+         function Anchors_Of return Natural_Array is
+            Result : Natural_Array (1 .. Tracks) := [others => 1];
+            Seen   : Flags (1 .. Tracks) := [others => False];
+         begin
+            for X of Sight loop
+               if not Seen (X.Track) then
+                  Seen (X.Track) := True;
+                  Result (X.Track) := X.Anchor;
+               end if;
+            end loop;
+            return Result;
+         end Anchors_Of;
+         Track_Anchor : constant Natural_Array (1 .. Tracks) := Anchors_Of;
          Depth  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);   --  the log of each track's depth
          --  How uncertain each log depth is at the solution, the other
          --  parameters held: the root of the inverse of its own information.
@@ -1597,6 +1614,7 @@ package body Driver.Robot.Kinematics.Fit is
             Inv, Rows           : Grid_Access;
             Error, Ref_U, Ref_V : Real_Access;
             In_Frame, Of_Track  : Natural_Access;
+            In_Picture          : Natural_Access;   --  the keyframe each sighting's reference pixel is of (its anchor)
          end record;
          Last_Pass : Pass_Evidence;
 
@@ -1609,6 +1627,7 @@ package body Driver.Robot.Kinematics.Fit is
             Free (E.Ref_V);
             Free (E.In_Frame);
             Free (E.Of_Track);
+            Free (E.In_Picture);
             E.Ready := False;
          end Release;
 
@@ -1646,8 +1665,9 @@ package body Driver.Robot.Kinematics.Fit is
             procedure Point_Of (T : Positive) is
                D0 : constant Real := Exp (Dv (T));
                H0 : constant Vec3 := Ray (Lx, Ref_U0 (T), Ref_V0 (T));
+               P  : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
             begin
-               Points (T) := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+               Points (T) := (if Track_Anchor (T) > 1 then Inverse (Views (Track_Anchor (T))) * P else P);
             end Point_Of;
             --  A point the parameters put nowhere (a coordinate no number: a scale or a depth gone past any float) is
             --  not behind the eye, where its residual is bounded: its residuals are the float's largest, the cost no
@@ -1668,8 +1688,10 @@ package body Driver.Robot.Kinematics.Fit is
                      declare
                         D0 : constant Real := Exp (Dv (Sg.Track));
                         H0 : constant Vec3 := Ray (Lx, Sg.U0, Sg.V0);
+                        P  : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
                      begin
-                        Pt := Views (Sg.Frame) * [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                        Pt := Views (Sg.Frame)
+                          * (if Track_Anchor (Sg.Track) > 1 then Inverse (Views (Track_Anchor (Sg.Track))) * P else P);
                      end;
                   end if;
                   if Placed (Pt) then
@@ -1865,10 +1887,16 @@ package body Driver.Robot.Kinematics.Fit is
                      Rho (I) := Real'Last;
                      if Saa (T) > 0.0 and then Lengths (T) > 0.0 then
                         declare
-                           H0   : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
+                           --  A relayed point along its anchor's line of sight, turned by the anchor's eye and from
+                           --  where that eye stands.
+                           Ta   : constant Positive := Track_Anchor (T);
+                           H0   : constant Vec3 :=
+                             (if Ta > 1 then Turns (Ta) * Ray (L, Sg.U0, Sg.V0) else Ray (L, Sg.U0, Sg.V0));
                            B    : constant Vec3 := Ray (L, Sg.U, Sg.V);
                            Seen : constant Vec3 :=
-                             Transpose (Turns (Sg.Frame)) * (Lengths (T) * H0 - Translation_Of (Sg.Frame, Q));
+                             Transpose (Turns (Sg.Frame))
+                             * ((if Ta > 1 then Lengths (T) * H0 + Translation_Of (Ta, Q) else Lengths (T) * H0)
+                                - Translation_Of (Sg.Frame, Q));
                         begin
                            if Dot (B, Seen) > 0.0 and then abs Seen > 0.0 then
                               Rho (I) := Focal * Real'(abs Cross (B, Seen)) / (Real'(abs B) * Real'(abs Seen));
@@ -1947,7 +1975,11 @@ package body Driver.Robot.Kinematics.Fit is
             for I in 1 .. S loop
                declare
                   Sg   : Sighting renames Sight (Sight'First + I - 1);
-                  H0   : constant Vec3 := Ray (L, Sg.U0, Sg.V0);
+                  --  A relayed point stands along its anchor's line of sight, turned by the anchor's eye, and from where
+                  --  that eye stands: its depth's column turned so, its axes' points' the keyframe's less the anchor's.
+                  Ta   : constant Positive := Track_Anchor (Sg.Track);
+                  H0   : constant Vec3 :=
+                    (if Ta > 1 then Turns (Ta) * Ray (L, Sg.U0, Sg.V0) else Ray (L, Sg.U0, Sg.V0));
                   B    : constant Vec3 := Ray (L, Sg.U, Sg.V);
                   Back : constant Mat3 := Transpose (Turns (Sg.Frame));
                   A    : constant Vec3 := Cross (B, Back * H0);
@@ -1959,8 +1991,11 @@ package body Driver.Robot.Kinematics.Fit is
                   for J in 1 .. N loop
                      for Axis in 1 .. (if Slides (J) then 1 else 2) loop
                         declare
+                           E   : constant Vec3 := (if Axis = 1 then E_1 (J) else E_2 (J));
                            Col : constant Vec3 :=
-                             Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * (if Axis = 1 then E_1 (J) else E_2 (J))));
+                             (if Ta > 1
+                              then Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * E - Maps ((Ta - 1) * N + J) * E))
+                              else Cross (B, Back * (Maps ((Sg.Frame - 1) * N + J) * E)));
                         begin
                            for D in 1 .. 3 loop
                               Across_Columns (3 * I - 3 + D, First_Of (J) + Axis - 1) := Col (D);
@@ -1981,7 +2016,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Rr     : Mat3;
                      Tt     : Vec3;
                   begin
-                     Relative (Poses (1), Poses (Sg.Frame), Rr, Tt);
+                     Relative (Poses (Track_Anchor (Sg.Track)), Poses (Sg.Frame), Rr, Tt);
                      Rs (I) := Sampson (Rr, Tt, Ray (L, Sg.U0, Sg.V0), Ray (L, Sg.U, Sg.V), Focal);
                   end;
                end loop;
@@ -2085,6 +2120,9 @@ package body Driver.Robot.Kinematics.Fit is
                   type Pose_Access is access Pose_Grid;
                   procedure Free is new Ada.Unchecked_Deallocation (Pose_Grid, Pose_Access);
                   Je    : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. 6);
+                  --  A relayed sighting's residuals' derivatives in its anchor's eye's turn and step as well (Jea; nought
+                  --  for the reference's points, whose anchor no term moves).
+                  Jea   : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. 6);
                   Jl    : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. 2 * Used, 1 .. 6);
                   Pose  : Pose_Access := new Pose_Grid (1 .. Frames, 7 .. Count, 1 .. 6);
                   Jd    : Real_Access := new Real_Array (1 .. 2 * Used);
@@ -2096,6 +2134,8 @@ package body Driver.Robot.Kinematics.Fit is
                   --  keyframe's into its eye's (Frame_Sum).
                   type Row_Lists is array (1 .. Frames) of Natural_Access;
                   Frame_Rows : Row_Lists := [others => null];
+                  --  Per keyframe, the residuals of the relayed sightings it anchors: their sums through its eye.
+                  Anchor_Rows : Row_Lists := [others => null];
                   K     : Natural := 0;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
@@ -2118,6 +2158,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end if;
                   end loop;
                   Je.all := [others => [others => 0.0]];
+                  Jea.all := [others => [others => 0.0]];
                   Jl.all := [others => [others => 0.0]];
                   Pose.all := [others => [others => [others => 0.0]]];
                   for G in 1 .. Frames loop
@@ -2145,6 +2186,27 @@ package body Driver.Robot.Kinematics.Fit is
                         Frame_Rows (F) (Taken (F) + 2) := 2 * At_K;
                         Taken (F) := Taken (F) + 2;
                      end loop;
+                     Taken := [others => 0];
+                     for At_K in 1 .. Used loop
+                        F := Track_Anchor (Sight (Sight'First + Natural (Index (At_K)) - 1).Track);
+                        if F > 1 then
+                           Taken (F) := Taken (F) + 2;
+                        end if;
+                     end loop;
+                     for G in 1 .. Frames loop
+                        if Taken (G) > 0 then
+                           Anchor_Rows (G) := new Natural_Array (1 .. Taken (G));
+                        end if;
+                        Taken (G) := 0;
+                     end loop;
+                     for At_K in 1 .. Used loop
+                        F := Track_Anchor (Sight (Sight'First + Natural (Index (At_K)) - 1).Track);
+                        if F > 1 then
+                           Anchor_Rows (F) (Taken (F) + 1) := 2 * At_K - 1;
+                           Anchor_Rows (F) (Taken (F) + 2) := 2 * At_K;
+                           Taken (F) := Taken (F) + 2;
+                        end if;
+                     end loop;
                   end;
                   Residuals (X, Depth.all, Index, R0.all);
                   declare
@@ -2159,10 +2221,12 @@ package body Driver.Robot.Kinematics.Fit is
                      Free (R0);
                      Free (Rn);
                      Free (Je);
+                     Free (Jea);
                      Free (Jl);
                      Free (Pose);
                      for F in 1 .. Frames loop
                         Free (Frame_Rows (F));
+                        Free (Anchor_Rows (F));
                      end loop;
                      Free (Jd);
                      Free (Owns);
@@ -2207,6 +2271,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Stepped_Joints : array (7 .. Count) of Joint;
                         Stepped_Parts  : Grid_Access := new Real_Matrix (7 .. Count, 1 .. Frames);
                         Base_Views  : Rigid_Access := new Rigid_Array (1 .. Frames);
+                        Base_Eyes   : Rigid_Access := new Rigid_Array (1 .. Frames);   --  each view's eye, its inverse
                         Base_Rays   : Vec3_Grid_Access := new Vec3_Grid (1 .. 1, 1 .. Tracks);
                         --  A joint's slack terms are its seventh and eighth.
                         function Slack_Term (P : Positive) return Boolean is
@@ -2246,8 +2311,8 @@ package body Driver.Robot.Kinematics.Fit is
                                  end if;
                               end;
                            elsif Item <= Count + Frames then
-                              Base_Views (Item - Count) :=
-                                Inverse (Eye_At (Jx, Chain, Changes_Of (Item - Count, Parts)));
+                              Base_Eyes (Item - Count) := Eye_At (Jx, Chain, Changes_Of (Item - Count, Parts));
+                              Base_Views (Item - Count) := Inverse (Base_Eyes (Item - Count));
                            else
                               Base_Rays (1, Item - Count - Frames) :=
                                 Ray (Lx, Ref_U0 (Item - Count - Frames), Ref_V0 (Item - Count - Frames));
@@ -2318,10 +2383,13 @@ package body Driver.Robot.Kinematics.Fit is
                            Sg  : Sighting renames Sight (Sight'First + Natural (Index (K)) - 1);
                            F   : constant Positive := Sg.Frame;
                            T   : constant Positive := Sg.Track;
+                           Ta  : constant Positive := Track_Anchor (T);
                            Own : constant Boolean := not (Sg.U0 = Ref_U0 (T) and then Sg.V0 = Ref_V0 (T));
                            D0  : constant Real := Exp (Depth (T));
                            H0  : constant Vec3 := (if Own then Ray (Lx, Sg.U0, Sg.V0) else Base_Rays (1, T));
-                           P0  : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                           --  The point in its anchor's eye (Pa) and where the reference's eye has it (P0).
+                           Pa  : constant Vec3 := [D0 * H0 (1), D0 * H0 (2), D0 * H0 (3)];
+                           P0  : constant Vec3 := (if Ta > 1 then Base_Eyes (Ta) * Pa else Pa);
                            Pe  : constant Vec3 := Base_Views (F) * P0;
                            I1  : constant Positive := 2 * K - 1;
                            I2  : constant Positive := 2 * K;
@@ -2334,8 +2402,11 @@ package body Driver.Robot.Kinematics.Fit is
                                     Hp : constant Vec3 :=
                                       (if Own then Ray (Lenses (P), Sg.U0, Sg.V0) else Lens_Rays (P, T));
                                  begin
-                                    Project (Lenses (P), Base_Views (F) * [D0 * Hp (1), D0 * Hp (2), D0 * Hp (3)], U, V,
-                                             Ahead);
+                                    Project (Lenses (P),
+                                             Base_Views (F)
+                                             * (if Ta > 1 then Base_Eyes (Ta) * [D0 * Hp (1), D0 * Hp (2), D0 * Hp (3)]
+                                                else [D0 * Hp (1), D0 * Hp (2), D0 * Hp (3)]),
+                                             U, V, Ahead);
                                     Jl (I1, P) := ((U - Sg.U) - R0 (I1)) / Steps (P);
                                     Jl (I2, P) := ((V - Sg.V) - R0 (I2)) / Steps (P);
                                  end;
@@ -2357,8 +2428,30 @@ package body Driver.Robot.Kinematics.Fit is
                                  Vy    : constant Real := Lx.Fy * (Dl + 2.0 * Yn * Yn * Dr);
                                  Up    : constant Vec3 := [Ux / Pe (3), Uy / Pe (3), -(Ux * Xn + Uy * Yn) / Pe (3)];
                                  Vp    : constant Vec3 := [Vx / Pe (3), Vy / Pe (3), -(Vx * Xn + Vy * Yn) / Pe (3)];
-                                 Along : constant Vec3 := Rotate (Base_Views (F), P0);
+                                 Along : constant Vec3 :=
+                                   Rotate (Base_Views (F), (if Ta > 1 then Rotate (Base_Eyes (Ta), Pa) else P0));
                               begin
+                                 --  A relayed point moves with its anchor's eye too: by that eye's turn about its own
+                                 --  axes and its step along them, in the anchor's frame, the projection's derivatives
+                                 --  carried back into that frame (M: from it into the keyframe's eye's).
+                                 if Ta > 1 then
+                                    declare
+                                       M  : constant Mat3 := Times (Base_Views (F).Rotation, Base_Eyes (Ta).Rotation);
+                                       Wu : constant Vec3 := Transposed_Times (M, Up);
+                                       Wv : constant Vec3 := Transposed_Times (M, Vp);
+                                    begin
+                                       Jea (I1, 1) := Pa (2) * Wu (3) - Pa (3) * Wu (2);
+                                       Jea (I1, 2) := Pa (3) * Wu (1) - Pa (1) * Wu (3);
+                                       Jea (I1, 3) := Pa (1) * Wu (2) - Pa (2) * Wu (1);
+                                       Jea (I2, 1) := Pa (2) * Wv (3) - Pa (3) * Wv (2);
+                                       Jea (I2, 2) := Pa (3) * Wv (1) - Pa (1) * Wv (3);
+                                       Jea (I2, 3) := Pa (1) * Wv (2) - Pa (2) * Wv (1);
+                                       for L in 1 .. 3 loop
+                                          Jea (I1, 3 + L) := Wu (L);
+                                          Jea (I2, 3 + L) := Wv (L);
+                                       end loop;
+                                    end;
+                                 end if;
                                  Je (I1, 1) := Up (2) * Pe (3) - Up (3) * Pe (2);
                                  Je (I1, 2) := Up (3) * Pe (1) - Up (1) * Pe (3);
                                  Je (I1, 3) := Up (1) * Pe (2) - Up (2) * Pe (1);
@@ -2376,6 +2469,8 @@ package body Driver.Robot.Kinematics.Fit is
                               for L in 1 .. 6 loop
                                  Je (I1, L) := 0.0;
                                  Je (I2, L) := 0.0;
+                                 Jea (I1, L) := 0.0;
+                                 Jea (I2, L) := 0.0;
                               end loop;
                               Jd (I1) := 0.0;
                               Jd (I2) := 0.0;
@@ -2394,6 +2489,7 @@ package body Driver.Robot.Kinematics.Fit is
                         Free (Lens_Rays);
                         Free (Stepped_Parts);
                         Free (Base_Views);
+                        Free (Base_Eyes);
                         Free (Base_Rays);
                      end;
                      declare
@@ -2431,6 +2527,24 @@ package body Driver.Robot.Kinematics.Fit is
                            procedure Free is new Ada.Unchecked_Deallocation (Sum_Array, Sum_Access);
                            Sums  : Sum_Access := new Sum_Array;
                            Cross : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Used, 1 .. 6);
+                           --  A relayed sighting's anchor's eye derivatives times its depth's (as Cross is its keyframe's),
+                           --  and, per keyframe and anchor that relayed sightings join (a pair), its sightings' keyframe's
+                           --  eye derivatives with the anchor's: the terms of the joints that move the one with the terms
+                           --  of the joints that move the other.
+                           Anchor_Cross : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Used, 1 .. 6);
+                           type Pair_Grid is array (1 .. Frames, 1 .. Frames) of Natural;
+                           type Pair_Grid_Access is access Pair_Grid;
+                           procedure Free is new Ada.Unchecked_Deallocation (Pair_Grid, Pair_Grid_Access);
+                           Pair_Of : Pair_Grid_Access := new Pair_Grid'[others => [others => 0]];
+                           Pairs_Count : Natural := 0;
+                           type Pair_Sum is record
+                              F, A : Positive := 1;   --  the sightings' keyframe and their anchor
+                              X    : Six_By_Six := [others => [others => 0.0]];
+                           end record;
+                           type Pair_Sum_Array is array (Positive range <>) of Pair_Sum;
+                           type Pair_Sum_Access is access Pair_Sum_Array;
+                           procedure Free is new Ada.Unchecked_Deallocation (Pair_Sum_Array, Pair_Sum_Access);
+                           Pair_Sums : Pair_Sum_Access := null;
                            --  The arrays by name, their bounds once (each access through a pointer checks it again).
                            Wz  : Real_Array renames Weights.all;
                            Tz  : Natural_Array renames Track_Of.all;
@@ -2438,6 +2552,8 @@ package body Driver.Robot.Kinematics.Fit is
                            Sz  : Sum_Array renames Sums.all;
                            Cz  : Driver.Numerics.Arrays.Real_Matrix renames Cross.all;
                            Jez : Driver.Numerics.Arrays.Real_Matrix renames Je.all;
+                           Jeaz : Driver.Numerics.Arrays.Real_Matrix renames Jea.all;
+                           Caz  : Driver.Numerics.Arrays.Real_Matrix renames Anchor_Cross.all;
                            Jlz : Driver.Numerics.Arrays.Real_Matrix renames Jl.all;
                            Jdz : Real_Array renames Jd.all;
                            Rz  : Real_Array renames R0.all;
@@ -2466,11 +2582,6 @@ package body Driver.Robot.Kinematics.Fit is
                                           end;
                                        end loop;
                                     end loop;
-                                    for K in 2 .. 6 loop
-                                       for L in 1 .. K - 1 loop
-                                          Fs.Info (K, L) := Fs.Info (L, K);
-                                       end loop;
-                                    end loop;
                                     --  Each sighting's two residuals, rows 2 K - 1 and 2 K, one after the other.
                                     for Pair in 1 .. Rows_F'Length / 2 loop
                                        declare
@@ -2480,11 +2591,37 @@ package body Driver.Robot.Kinematics.Fit is
                                           for L in 1 .. 6 loop
                                              Cz (K, L) := Wz (I1) * Jez (I1, L) * Jdz (I1)
                                                + Wz (I1 + 1) * Jez (I1 + 1, L) * Jdz (I1 + 1);
+                                             Caz (K, L) := Wz (I1) * Jeaz (I1, L) * Jdz (I1)
+                                               + Wz (I1 + 1) * Jeaz (I1 + 1, L) * Jdz (I1 + 1);
                                           end loop;
                                        end;
                                     end loop;
                                  end;
                               end if;
+                              --  The relayed sightings this keyframe anchors, through its eye: their residuals' own
+                              --  information, gradient and cross terms with the lens in its eye's terms.
+                              if Anchor_Rows (F) /= null then
+                                 for I of Anchor_Rows (F).all loop
+                                    for K in 1 .. 6 loop
+                                       declare
+                                          Wk : constant Real := Wz (I) * Jeaz (I, K);
+                                       begin
+                                          Fs.Grad (K) := Fs.Grad (K) - Wk * Rz (I);
+                                          for L in K .. 6 loop
+                                             Fs.Info (K, L) := Fs.Info (K, L) + Wk * Jeaz (I, L);
+                                          end loop;
+                                          for L in Fs.With_Lens'Range (1) loop
+                                             Fs.With_Lens (L, K) := Fs.With_Lens (L, K) + Wk * Jlz (I, L);
+                                          end loop;
+                                       end;
+                                    end loop;
+                                 end loop;
+                              end if;
+                              for K in 2 .. 6 loop
+                                 for L in 1 .. K - 1 loop
+                                    Fs.Info (K, L) := Fs.Info (L, K);
+                                 end loop;
+                              end loop;
                            end Frame_Sum;
                            procedure Every_Frame_Sum is new Driver.Parallel_For (Frame_Sum);
                            procedure Row_Of (P : Positive) is
@@ -2557,6 +2694,53 @@ package body Driver.Robot.Kinematics.Fit is
                                           end loop;
                                        end if;
                                     end loop;
+                                    --  Relayed sightings join the terms of the joints that move their keyframe's eye
+                                    --  with those of the joints that move their anchor's: its row with the other's
+                                    --  through the pair's sum, both ways round.
+                                    for Pr in 1 .. Pairs_Count loop
+                                       declare
+                                          Ps : Pair_Sum renames Pair_Sums (Pr);
+                                       begin
+                                          if Moved (Ps.F, J) then
+                                             declare
+                                                Xp : Six;
+                                             begin
+                                                for L in 1 .. 6 loop
+                                                   Xp (L) := 0.0;
+                                                   for K in 1 .. 6 loop
+                                                      Xp (L) := Xp (L) + Pz (Ps.F, P, K) * Ps.X (K, L);
+                                                   end loop;
+                                                end loop;
+                                                for Q in Sum_A'Range loop
+                                                   if Moved (Ps.A, (Q - 7) / Per_Joint + 1) then
+                                                      for L in 1 .. 6 loop
+                                                         Sum_A (Q) := Sum_A (Q) + Xp (L) * Pz (Ps.A, Q, L);
+                                                      end loop;
+                                                   end if;
+                                                end loop;
+                                             end;
+                                          end if;
+                                          if Moved (Ps.A, J) then
+                                             declare
+                                                Ya : Six;
+                                             begin
+                                                for K in 1 .. 6 loop
+                                                   Ya (K) := 0.0;
+                                                   for L in 1 .. 6 loop
+                                                      Ya (K) := Ya (K) + Ps.X (K, L) * Pz (Ps.A, P, L);
+                                                   end loop;
+                                                end loop;
+                                                for Q in Sum_A'Range loop
+                                                   if Moved (Ps.F, (Q - 7) / Per_Joint + 1) then
+                                                      for K in 1 .. 6 loop
+                                                         Sum_A (Q) := Sum_A (Q) + Pz (Ps.F, Q, K) * Ya (K);
+                                                      end loop;
+                                                   end if;
+                                                end loop;
+                                             end;
+                                          end if;
+                                       end;
+                                    end loop;
                                     Gp (P) := Sum_G;
                                     for Q in Sum_A'Range loop
                                        A (P, Q) := Sum_A (Q);
@@ -2572,6 +2756,20 @@ package body Driver.Robot.Kinematics.Fit is
                                              Bz (P, Tz (2 * K)) := Bz (P, Tz (2 * K)) + Sum;
                                           end;
                                        end if;
+                                       declare
+                                          Ta : constant Positive := Track_Anchor (Tz (2 * K));
+                                       begin
+                                          if Ta > 1 and then Moved (Ta, J) then
+                                             declare
+                                                Sum : Real := 0.0;
+                                             begin
+                                                for L in 1 .. 6 loop
+                                                   Sum := Sum + Pz (Ta, P, L) * Caz (K, L);
+                                                end loop;
+                                                Bz (P, Tz (2 * K)) := Bz (P, Tz (2 * K)) + Sum;
+                                             end;
+                                          end if;
+                                       end;
                                     end loop;
                                  end;
                               end if;
@@ -2585,10 +2783,51 @@ package body Driver.Robot.Kinematics.Fit is
                            for K in 1 .. Used loop
                               Fz (K) := Sight (Sight'First + Natural (Index (K)) - 1).Frame;
                            end loop;
+                           --  The pairs of a keyframe and an anchor that relayed sightings join, and their sums, in the
+                           --  sightings' order.
+                           for K in 1 .. Used loop
+                              declare
+                                 Ta : constant Positive := Track_Anchor (Tz (2 * K));
+                              begin
+                                 if Ta > 1 and then Pair_Of (Fz (K), Ta) = 0 then
+                                    Pairs_Count := Pairs_Count + 1;
+                                    Pair_Of (Fz (K), Ta) := Pairs_Count;
+                                 end if;
+                              end;
+                           end loop;
+                           Pair_Sums := new Pair_Sum_Array (1 .. Pairs_Count);
+                           for K in 1 .. Used loop
+                              declare
+                                 Ta : constant Positive := Track_Anchor (Tz (2 * K));
+                              begin
+                                 if Ta > 1 then
+                                    declare
+                                       Ps : Pair_Sum renames Pair_Sums (Pair_Of (Fz (K), Ta));
+                                    begin
+                                       Ps.F := Fz (K);
+                                       Ps.A := Ta;
+                                       for I in 2 * K - 1 .. 2 * K loop
+                                          for Kk in 1 .. 6 loop
+                                             declare
+                                                Wk : constant Real := Wz (I) * Jez (I, Kk);
+                                             begin
+                                                for Ll in 1 .. 6 loop
+                                                   Ps.X (Kk, Ll) := Ps.X (Kk, Ll) + Wk * Jeaz (I, Ll);
+                                                end loop;
+                                             end;
+                                          end loop;
+                                       end loop;
+                                    end;
+                                 end if;
+                              end;
+                           end loop;
                            Every_Frame_Sum (1, Frames);
                            Rows (1, Count + 1);
                            Free (Sums);
                            Free (Cross);
+                           Free (Anchor_Cross);
+                           Free (Pair_Of);
+                           Free (Pair_Sums);
                            Free (Frame_Of);
                            Free (Weights);
                            Free (Track_Of);
@@ -2997,6 +3236,7 @@ package body Driver.Robot.Kinematics.Fit is
                                     Last_Pass.Error := new Real_Array'(1 .. 2 * Used => 0.0);
                                     Last_Pass.In_Frame := new Natural_Array'(1 .. Used => 1);
                                     Last_Pass.Of_Track := new Natural_Array'(1 .. Used => 1);
+                                    Last_Pass.In_Picture := new Natural_Array'(1 .. Used => 1);
                                     Last_Pass.Ref_U := new Real_Array'(1 .. Used => 0.0);
                                     Last_Pass.Ref_V := new Real_Array'(1 .. Used => 0.0);
                                     declare
@@ -3031,6 +3271,7 @@ package body Driver.Robot.Kinematics.Fit is
                                           begin
                                              In_Frame (K) := Sg.Frame;
                                              Of_Track (K) := Sg.Track;
+                                             Last_Pass.In_Picture (K) := Track_Anchor (Sg.Track);
                                              Last_Pass.Ref_U (K) := Sg.U0;
                                              Last_Pass.Ref_V (K) := Sg.V0;
                                           end;
@@ -3071,6 +3312,12 @@ package body Driver.Robot.Kinematics.Fit is
                                                          for K in 1 .. 6 loop
                                                             Jr := Jr + Je (I, K) * Reduced_Pose (F, P, K);
                                                          end loop;
+                                                         if Track_Anchor (T) > 1 then
+                                                            for K in 1 .. 6 loop
+                                                               Jr := Jr
+                                                                 + Jea (I, K) * Reduced_Pose (Track_Anchor (T), P, K);
+                                                            end loop;
+                                                         end if;
                                                       end if;
                                                       if T /= Anchor and then C (T) > 0.0 then
                                                          Jr := Jr - Br (P, T) / C (T) * Jd (I);
@@ -3111,10 +3358,12 @@ package body Driver.Robot.Kinematics.Fit is
                   Free (R0);
                   Free (Rn);
                   Free (Je);
+                  Free (Jea);
                   Free (Jl);
                   Free (Pose);
                   for F in 1 .. Frames loop
                      Free (Frame_Rows (F));
+                     Free (Anchor_Rows (F));
                   end loop;
                   Free (Jd);
                   Free (Owns);
@@ -3178,10 +3427,16 @@ package body Driver.Robot.Kinematics.Fit is
                      begin
                         if Has (Sg.Track) and then not Fitting (Sg.Track) then
                            declare
+                              --  A relayed point along its anchor's line of sight from where that eye stands.
+                              Ta   : constant Positive := Track_Anchor (Sg.Track);
                               Back : constant Mat3 := Transpose (Views (Sg.Frame).Rotation);
                               B    : constant Vec3 := Ray (Lx, Sg.U, Sg.V);
-                              A    : constant Vec3 := Cross (B, Back * Ray (Lx, Sg.U0, Sg.V0));
-                              C    : constant Vec3 := Cross (B, Back * Views (Sg.Frame).Translation);
+                              A    : constant Vec3 :=
+                                Cross (B, Back * (if Ta > 1 then Views (Ta).Rotation * Ray (Lx, Sg.U0, Sg.V0)
+                                                  else Ray (Lx, Sg.U0, Sg.V0)));
+                              C    : constant Vec3 :=
+                                Cross (B, Back * (if Ta > 1 then Views (Sg.Frame).Translation - Views (Ta).Translation
+                                                  else Views (Sg.Frame).Translation));
                            begin
                               Saa_T (Sg.Track) := Saa_T (Sg.Track) + A * A;
                               Sac_T (Sg.Track) := Sac_T (Sg.Track) + A * C;
@@ -3413,7 +3668,7 @@ package body Driver.Robot.Kinematics.Fit is
                Kinds   : Errors.Model;
             begin
                Errors.Measure (Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
-                               Last_Pass.Ref_V.all, Last_Pass.Error.all, Kinds);
+                               Last_Pass.Ref_V.all, Last_Pass.Error.all, Kinds, Picture => Last_Pass.In_Picture.all);
                if Errors.Measured (Kinds) then
                   declare
                      Meat    : Real_Matrix (1 .. Reduced, 1 .. Reduced);
@@ -3422,7 +3677,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Ok      : Boolean;
                   begin
                      Errors.Meat (Kinds, Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
-                                  Last_Pass.Ref_V.all, Last_Pass.Rows.all, Meat);
+                                  Last_Pass.Ref_V.all, Last_Pass.Rows.all, Meat, Picture => Last_Pass.In_Picture.all);
                      --  The focal length's own design effect: each sighting's error moves the focal length by its
                      --  row times the inverse's first column; the meat along that, over the same with each error alone.
                      --  What a keyframe's points share and what a point keeps in every keyframe widen the focal
@@ -3443,7 +3698,7 @@ package body Driver.Robot.Kinematics.Fit is
                            end loop;
                         end loop;
                         Errors.Meat (Kinds, Last_Pass.In_Frame.all, Last_Pass.Of_Track.all, Last_Pass.Ref_U.all,
-                                     Last_Pass.Ref_V.all, Along, Q);
+                                     Last_Pass.Ref_V.all, Along, Q, Picture => Last_Pass.In_Picture.all);
                         for K in 1 .. Rows_Count / 2 loop
                            Q_Alone := Q_Alone + A (Errors.Both_Across) * Along (2 * K - 1, 1) ** 2
                              + A (Errors.Both_Down) * Along (2 * K, 1) ** 2
@@ -3651,6 +3906,15 @@ package body Driver.Robot.Kinematics.Fit is
          Put_Flag (X.Off_Told);
          New_Line (File);
       end loop;
+      --  Each sighting's anchor (Sighting.Anchor), where any is relayed: a dump without them is of the reference's
+      --  points alone.
+      if (for some X of Sightings => X.Anchor > 1) then
+         Put_Line (File, "anchors");
+         for X of Sightings loop
+            Put (File, X.Anchor'Image);
+         end loop;
+         New_Line (File);
+      end if;
       Put_Line (File, "from" & From.N'Image);
       Put_Flag (From.Valid);
       Put_Flag (From.Whole);
@@ -3720,11 +3984,16 @@ package body Driver.Robot.Kinematics.Fit is
       Close (File);
    end Dump_Inputs;
 
-   procedure Fit
+   --  The fit of the sightings whose points the reference chose (Sightings), every stage; those of points later
+   --  keyframes chose and followed into others (Relayed, Sighting.Anchor) join them in the tracks' refinement and what
+   --  follows it alone: the stages before it rest on the reference's view (its pairs with each keyframe, its tracks'
+   --  epipolar lines).
+   procedure Fit_Stages
      (Changes    : Driver.Numerics.Arrays.Real_Matrix;
       Asked      : Flag_Matrix;
       Visible    : Real_Array;
       Sightings  : Sighting_Array;
+      Relayed    : Sighting_Array;
       Width, Height : Positive;
       Unit_Frames : Natural;
       Joints     : out Joint_Array;
@@ -4133,7 +4402,7 @@ package body Driver.Robot.Kinematics.Fit is
          Free (Inlier);
       end Together;
 
-      procedure Finish (Profiled : Boolean) is
+      procedure Finish_On (Profiled : Boolean; Sight : Sighting_Array) is
          --  The lens with its extras where the pinhole replaced it, whose step the pinhole takes in once its profile
          --  is walked (Take_Span).
          Span_Due : Boolean := False;
@@ -4148,7 +4417,10 @@ package body Driver.Robot.Kinematics.Fit is
          begin
             for X of Sight loop
                declare
-                  T   : constant Rigid := Eye_At (Joints, Order, Changes_Of (X.Frame));
+                  --  A relayed sighting's two eyes are its anchor's and its keyframe's.
+                  Tf  : constant Rigid := Eye_At (Joints, Order, Changes_Of (X.Frame));
+                  T   : constant Rigid :=
+                    (if X.Anchor > 1 then Inverse (Eye_At (Joints, Order, Changes_Of (X.Anchor))) * Tf else Tf);
                   A   : constant Vec3 := Ray (L, X.U0, X.V0);
                   Bv  : constant Vec3 := T.Rotation * Ray (L, X.U, X.V);
                   --  Lambda1 A = T.Translation + Lambda2 Bv, least squares.
@@ -4624,7 +4896,7 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Focal_Within := Focal_Within;
          Report.Searched_Least := Searched_Least;
          Report.Searched_Most := Searched_Most;
-         Report.Profiled_Over := (if Profiled then Sightings'Length elsif From.Valid then From.Profiled_Over else 0);
+         Report.Profiled_Over := (if Profiled then Sight'Length elsif From.Valid then From.Profiled_Over else 0);
          Report.Order_Told := Order_Is_Told;
          Report.Untold := Untold;
          Report.Untold_Turns := Untold_Turns;
@@ -4679,12 +4951,26 @@ package body Driver.Robot.Kinematics.Fit is
          end if;
          Report.Fitted := Report.Determined;
          Close_Stage;
+      end Finish_On;
+
+      --  The tracks' refinement and what follows it, over every sighting: the reference's, then the relayed.
+      procedure Finish (Profiled : Boolean) is
+      begin
+         if Relayed'Length = 0 then
+            Finish_On (Profiled, Sightings);
+         else
+            declare
+               Every : Sighting_Access := new Sighting_Array (1 .. Sightings'Length + Relayed'Length);
+            begin
+               Every (1 .. Sightings'Length) := Sightings;
+               Every (Sightings'Length + 1 .. Every'Last) := Relayed;
+               Finish_On (Profiled, Every.all);
+               Free (Every);
+            end;
+         end if;
       end Finish;
 
    begin
-      if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
-         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play, Slack_Start);
-      end if;
       Report := (others => <>);
       Joints := [others => <>];
       Chain := Order;
@@ -8377,7 +8663,62 @@ package body Driver.Robot.Kinematics.Fit is
       --  runs and the self tests sharing the machine), and by the one that tells the order, whose covariance is the
       --  one the arm keeps: unwalked there, the step 2 bench's six bent mast heads stated their joints 69.9 chi
       --  squares over 42 off the truth, walked 55.8 (10-22).
-      Finish (Profiled => not From.Valid or else Sightings'Length >= 2 * From.Profiled_Over or else Order_Is_Told);
+      Finish (Profiled => not From.Valid or else Sightings'Length + Relayed'Length >= 2 * From.Profiled_Over
+                          or else Order_Is_Told);
+   end Fit_Stages;
+
+   procedure Fit
+     (Changes    : Driver.Numerics.Arrays.Real_Matrix;
+      Asked      : Flag_Matrix;
+      Visible    : Real_Array;
+      Sightings  : Sighting_Array;
+      Width, Height : Positive;
+      Unit_Frames : Natural;
+      Joints     : out Joint_Array;
+      Chain      : out Chain_Order;
+      L          : out Lens;
+      Report     : out Fit_Report;
+      Who        : String := "";
+      From       : Fit_Start := No_Start;
+      Play       : Play_Paths := No_Play;
+      Slack_Start : Real_Array := No_Slack)
+   is
+      Relays : Natural := 0;
+   begin
+      if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
+         Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play, Slack_Start);
+      end if;
+      for X of Sightings loop
+         if X.Anchor > 1 then
+            Relays := Relays + 1;
+         end if;
+      end loop;
+      if Relays = 0 then
+         Fit_Stages (Changes, Asked, Visible, Sightings, Sightings (Sightings'First .. Sightings'First - 1), Width,
+                     Height, Unit_Frames, Joints, Chain, L, Report, Who, From, Play, Slack_Start);
+      else
+         declare
+            type Sighting_Access is access Sighting_Array;
+            procedure Free is new Ada.Unchecked_Deallocation (Sighting_Array, Sighting_Access);
+            Own     : Sighting_Access := new Sighting_Array (1 .. Sightings'Length - Relays);
+            Relayed : Sighting_Access := new Sighting_Array (1 .. Relays);
+            K, R    : Natural := 0;
+         begin
+            for X of Sightings loop
+               if X.Anchor > 1 then
+                  R := R + 1;
+                  Relayed (R) := X;
+               else
+                  K := K + 1;
+                  Own (K) := X;
+               end if;
+            end loop;
+            Fit_Stages (Changes, Asked, Visible, Own.all, Relayed.all, Width, Height, Unit_Frames, Joints, Chain, L,
+                        Report, Who, From, Play, Slack_Start);
+            Free (Own);
+            Free (Relayed);
+         end;
+      end if;
    end Fit;
 
    function Depth_Known (Depth, Sigma : Real) return Boolean is

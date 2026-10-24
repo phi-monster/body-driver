@@ -50,18 +50,25 @@ package Driver.Robot.Kinematics.Errors is
    type Entries is array (Pair_Kind) of Real;
 
    type Model is private;
+
+   --  Every sighting's reference pixel is of one picture where none is given (Picture empty); given, the picture each
+   --  is of (its point's anchor keyframe, Fit.Sighting.Anchor): two pixels of two pictures are farther apart than
+   --  any range.
+   No_Pictures : constant Natural_Array (1 .. 0) := [others => 0];
    --  Heap-held: Free it.
 
    procedure Measure
      (Frame, Track : Natural_Array;
       U0, V0       : Real_Array;
       Error        : Real_Array;
-      M            : out Model)
+      M            : out Model;
+      Picture      : Natural_Array := No_Pictures)
      with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length
                  and then U0'First = 1 and then U0'Length = Frame'Length and then V0'First = 1
                  and then V0'Length = Frame'Length and then Error'First = 1
                  and then Error'Length = 2 * Frame'Length
-                 and then (for all F of Frame => F > 0) and then (for all T of Track => T > 0);
+                 and then (for all F of Frame => F > 0) and then (for all T of Track => T > 0)
+                 and then (Picture'Length = 0 or else (Picture'First = 1 and then Picture'Length = Frame'Length));
    --  Sighting K is of the point Track (K) in keyframe Frame (K), whose
    --  reference pixel is (U0 (K), V0 (K)) and whose errors, across and down,
    --  are Error (2 K - 1) and Error (2 K): a fit's residuals, as its score
@@ -98,18 +105,20 @@ package Driver.Robot.Kinematics.Errors is
    --  function is below half there already, 0 when Same_Track is not above zero.
 
    procedure Meat
-     (M      : Model;
-      Frame  : Natural_Array;
-      Track  : Natural_Array;
-      U0, V0 : Real_Array;
-      Rows   : Driver.Numerics.Arrays.Real_Matrix;
-      Result : out Driver.Numerics.Arrays.Real_Matrix)
+     (M       : Model;
+      Frame   : Natural_Array;
+      Track   : Natural_Array;
+      U0, V0  : Real_Array;
+      Rows    : Driver.Numerics.Arrays.Real_Matrix;
+      Result  : out Driver.Numerics.Arrays.Real_Matrix;
+      Picture : Natural_Array := No_Pictures)
      with Pre => Frame'First = 1 and then Track'First = 1 and then Track'Length = Frame'Length
                  and then U0'First = 1 and then U0'Length = Frame'Length and then V0'First = 1
                  and then V0'Length = Frame'Length and then Rows'First (1) = 1 and then Rows'First (2) = 1
                  and then Rows'Length (1) = 2 * Frame'Length and then Result'First (1) = 1
                  and then Result'First (2) = 1 and then Result'Length (1) = Rows'Length (2)
-                 and then Result'Length (2) = Rows'Length (2);
+                 and then Result'Length (2) = Rows'Length (2)
+                 and then (Picture'Length = 0 or else (Picture'First = 1 and then Picture'Length = Frame'Length));
    --  The sum, over every pair of sightings and of their two errors, of the
    --  covariance of the pair times the outer product of the gradient rows
    --  (Rows, two a sighting, across then down): what the gradient of a fit

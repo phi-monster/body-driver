@@ -7578,6 +7578,195 @@ package body Driver.Robot.Tests is
       end;
    end Unit_Holds_As_Keyframes_Arrive;
 
+   --  A relay (10-25): an arm swept wide over a table, each joint to 0.6 rad either way, the reference's points mostly
+   --  out of its widest pictures; at 0.4 rad either way a keyframe chooses points of its own (a grid of its picture on
+   --  the table) and follows them into the keyframe at 0.6. Fitted with the relayed sightings beside the reference's,
+   --  begun from the reference's fit as a sweep's later estimate is, the arm is fitted, its focal length within Z of
+   --  its sigma of the truth, and the relayed sightings are among those it keeps (measured: 399.96 +- 0.14 px, the
+   --  reference's points alone 399.94; 10-25).
+   procedure Kinematics_Of_A_Relayed_Sweep is
+      package Fit renames Driver.Robot.Kinematics.Fit;
+      N       : constant := 5;
+      Levels  : constant Real_Array := [0.1, -0.1, 0.2, -0.2, 0.4, -0.4, 0.6, -0.6];
+      Cells   : constant := 7;   --  keyframes of every joint at once, each joint's sign by its row's bits (the order)
+      Frames  : constant Positive := 1 + N * Levels'Length + Cells;
+      Columns : constant := 16;
+      Rows    : constant := 12;
+      Noise   : constant Real := 0.3;
+      Table   : constant Vec3 := Unit ([0.0, -0.6, -0.8]);   --  the table's normal, towards the eye; n . X = -1
+      Lens    : constant Fit.Lens := (Fx => 400.0, Fy => 400.0, Cx => 320.0, Cy => 240.0, K1 => 0.0, K2 => 0.0);
+      Truth   : Fit.Joint_Array (1 .. N);
+      Changes : Real_Matrix (1 .. Frames, 1 .. N) := [others => [others => 0.0]];
+      Asked   : Fit.Flag_Matrix (1 .. Frames, 1 .. N);
+      Rng     : Generator;
+      type Sighting_Access is access Fit.Sighting_Array;
+      All_Seen : constant Sighting_Access := new Fit.Sighting_Array (1 .. 2 * Frames * Columns * Rows);
+      Seen     : Natural := 0;
+      Own_Seen : Natural := 0;   --  of them, the reference's points' (the first, in order)
+      Eyes     : array (1 .. Frames) of Rigid;   --  each keyframe's eye in the reference's frame
+      --  The keyframe of joint J at level L.
+      function Frame_Of (J, L : Positive) return Positive is (1 + (J - 1) * Levels'Length + L);
+      --  Where a point of the reference's frame is seen in keyframe F, if it is.
+      procedure Sight (F, Track, Anchor : Positive; U0, V0 : Real; X : Vec3) is
+         U, V  : Real;
+         Ahead : Boolean;
+      begin
+         Fit.Project (Lens, Inverse (Eyes (F)) * X, U, V, Ahead);
+         U := U + Noise * Gaussian (Rng);
+         V := V + Noise * Gaussian (Rng);
+         if Ahead and then U in 0.0 .. 640.0 and then V in 0.0 .. 480.0 then
+            Seen := Seen + 1;
+            All_Seen (Seen) := (Frame => F, Track => Track, U0 => U0, V0 => V0, Anchor => Anchor, U => U, V => V,
+                                Own => 0.0, Own_Freedom => 0, others => <>);
+         end if;
+      end Sight;
+      --  The point of the table on keyframe F's line of sight through (U0, V0), if the line meets it ahead.
+      procedure On_Table (F : Positive; U0, V0 : Real; X : out Vec3; Found : out Boolean) is
+         H : constant Vec3 := Eyes (F).Rotation * Fit.Ray (Lens, U0, V0);
+         D : constant Real := Real'(Table * H);
+      begin
+         Found := D < 0.0;
+         X := (if Found then Eyes (F).Translation + ((-1.0 - Real'(Table * Eyes (F).Translation)) / D) * H else Zero3);
+         Found := Found and then (-1.0 - Real'(Table * Eyes (F).Translation)) / D > 0.0;
+      end On_Table;
+   begin
+      declare
+         Axes   : constant array (1 .. N) of Vec3 :=
+           [[0.1, -0.9, 0.4], [1.0, 0.1, 0.05], [0.95, -0.1, 0.1], [1.0, 0.05, -0.1], [0.05, 0.85, 0.5]];
+         Points : constant array (1 .. N) of Vec3 :=
+           [[0.3, 0.5, 0.2], [0.0, 0.4, 0.4], [0.0, 0.25, 0.3], [0.0, 0.1, 0.15], [0.05, 0.05, 0.1]];
+      begin
+         for J in 1 .. N loop
+            declare
+               W : constant Vec3 := Unit (Axes (J));
+            begin
+               Truth (J) := (W => W, P => Points (J) - Real'(Points (J) * W) * W, C => 1.0, Slide => False);
+            end;
+         end loop;
+      end;
+      for J in 1 .. N loop
+         for L in Levels'Range loop
+            Changes (Frame_Of (J, L), J) := Levels (L);
+         end loop;
+      end loop;
+      for Row in 1 .. Cells loop
+         for J in 1 .. N loop
+            declare
+               Bits : Natural := 0;
+               R    : Natural := Row;
+               C    : Natural := J;
+            begin
+               while R > 0 and then C > 0 loop
+                  if R mod 2 = 1 and then C mod 2 = 1 then
+                     Bits := Bits + 1;
+                  end if;
+                  R := R / 2;
+                  C := C / 2;
+               end loop;
+               Changes (1 + N * Levels'Length + Row, J) := (if Bits mod 2 = 0 then 0.1 else -0.1);
+            end;
+         end loop;
+      end loop;
+      for F in 1 .. Frames loop
+         declare
+            D : Real_Array (1 .. N);
+         begin
+            for J in 1 .. N loop
+               D (J) := Changes (F, J);
+               Asked (F, J) := Changes (F, J) /= 0.0;
+            end loop;
+            Eyes (F) := Fit.Eye_At (Truth, Along (Truth), D);
+         end;
+      end loop;
+      --  The reference's points, in every keyframe that sees them.
+      for F in 2 .. Frames loop
+         for Gy in 1 .. Rows loop
+            for Gx in 1 .. Columns loop
+               declare
+                  U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                  V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                  X  : Vec3;
+                  Found : Boolean;
+               begin
+                  On_Table (1, U0, V0, X, Found);
+                  if Found then
+                     Sight (F, (Gy - 1) * Columns + Gx, 1, U0, V0, X);
+                  end if;
+               end;
+            end loop;
+         end loop;
+      end loop;
+      Own_Seen := Seen;
+      --  Each joint's keyframes at 0.4 either way choose their own and follow them into those at 0.6.
+      for J in 1 .. N loop
+         for L in 5 .. 6 loop
+            declare
+               Anchor : constant Positive := Frame_Of (J, L);
+               Next   : constant Positive := Frame_Of (J, L + 2);
+            begin
+               for Gy in 1 .. Rows loop
+                  for Gx in 1 .. Columns loop
+                     declare
+                        U0 : constant Real := (Real (Gx) - 0.5) * 640.0 / Real (Columns);
+                        V0 : constant Real := (Real (Gy) - 0.5) * 480.0 / Real (Rows);
+                        X  : Vec3;
+                        Found : Boolean;
+                     begin
+                        On_Table (Anchor, U0, V0, X, Found);
+                        if Found then
+                           Sight (Next, Columns * Rows * (1 + 2 * (J - 1) + (L - 5)) + (Gy - 1) * Columns + Gx, Anchor,
+                                  U0, V0, X);
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+            end;
+         end loop;
+      end loop;
+      declare
+         Joints : Fit.Joint_Array (1 .. N);
+         Chain  : Fit.Chain_Order (1 .. N);
+         Found_All, Found_Own : Fit.Lens;
+         Report_All, Report_Own : Fit.Fit_Report;
+         Visible : constant Real_Array (1 .. N) := [others => 0.01];
+      begin
+         Fit.Fit (Changes, Asked, Visible, All_Seen (1 .. Own_Seen), 640, 480, 0, Joints, Chain, Found_Own, Report_Own);
+         --  The relayed sightings come in a later estimate's fit, begun from the one before it, as a sweep's do.
+         declare
+            Start : Fit.Fit_Start (N);
+         begin
+            Start.Valid := Report_Own.Fitted;
+            Start.Whole := True;
+            Start.Joints := Joints;
+            Start.Chain := Chain;
+            Start.L := Found_Own;
+            Start.Focal_Within := Report_Own.Focal_Within;
+            Start.Searched_Least := Report_Own.Searched_Least;
+            Start.Searched_Most := Report_Own.Searched_Most;
+            Start.Profiled_Over := Report_Own.Profiled_Over;
+            Start.Order_Told := Report_Own.Order_Told;
+            Fit.Fit (Changes, Asked, Visible, All_Seen (1 .. Seen), 640, 480, 0, Joints, Chain, Found_All, Report_All,
+                     From => Start);
+         end;
+         Driver.Log.Line (Driver.Log.Robot, "kinematics relay test:" & Own_Seen'Image & " sightings of the reference's"
+                          & " points, focal " & Driver.Log.Image (Found_Own.Fx, 3) & " +- "
+                          & Driver.Log.Image (Report_Own.Focal_Sigma, 3) & " px (fitted " & Report_Own.Fitted'Image
+                          & ");" & Natural'Image (Seen - Own_Seen) & " relayed beside them, focal "
+                          & Driver.Log.Image (Found_All.Fx, 3) & " +- " & Driver.Log.Image (Report_All.Focal_Sigma, 3)
+                          & " px (fitted " & Report_All.Fitted'Image & ")");
+         Check (Report_All.Fitted, "the relayed sweep was not fitted: stage" & Report_All.Stage'Image & ", "
+                & Ada.Strings.Unbounded.To_String (Report_All.Why));
+         if Report_All.Fitted then
+            Check (abs (Found_All.Fx - Lens.Fx) <= Driver.Conventions.Z * Report_All.Focal_Sigma,
+                   "the relayed sweep's focal length is off by" & Real'Image (Found_All.Fx - Lens.Fx) & " px, its sigma"
+                   & Report_All.Focal_Sigma'Image);
+            Check (Report_All.Used > Report_Own.Used,
+                   "the relayed sightings are not among those the fit kept:" & Report_All.Used'Image & " kept with them,"
+                   & Report_Own.Used'Image & " of the reference's alone");
+         end if;
+      end;
+   end Kinematics_Of_A_Relayed_Sweep;
+
    procedure Kinematics_Of_A_Synthetic_Arm is
    begin
       Synthetic_Sweep (1.0, Expect_Fit => True);
@@ -9276,6 +9465,10 @@ package body Driver.Robot.Tests is
                              Kinematics_On_A_Plane_In_Ticks'Access);
       Driver.Tests.Register ("robot.kinematics.plane_turn", "a plane's points seen before and after a turn about an "
                              & "axis do not give back the turn, or the plane and the shift", Turn_On_A_Plane'Access);
+      Driver.Tests.Register ("robot.kinematics.relay", "an arm swept wide, its keyframes at 0.4 rad choosing points of "
+                             & "their own and following them into those at 0.6, is not fitted, its focal length off by "
+                             & "more than Z of its sigma, or the fit keeps none of the relayed sightings",
+                             Kinematics_Of_A_Relayed_Sweep'Access);
       Driver.Tests.Register ("robot.kinematics.desktop", "a desktop servo arm swept by 1.5 to 3.4 degrees, its sightings "
                              & "erring by a pixel, a quarter of the points left, is reported fitted with a lens off by "
                              & "more than Z of its sigma, or swept to 11.5 degrees is not fitted right",

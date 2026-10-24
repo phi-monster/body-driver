@@ -228,12 +228,16 @@ package Driver.Robot.Kinematics.Fit is
    --  units by Pose_Covariance, 12 per cent, where the truth puts the arm's tool within 0.16 mm, a seventieth of a
    --  unit, once its scale is taken out). Real'Last on the diagonal as Pose_Covariance.
 
-   --  A point the reference keyframe shows at (U0, V0), seen again at (U, V)
-   --  in keyframe Frame (2 or more; the reference is 1).
+   --  A point keyframe Anchor shows at (U0, V0), seen again at (U, V) in
+   --  keyframe Frame (2 or more; the reference is 1).
    type Sighting is record
       Frame  : Positive := 2;
       Track  : Positive := 1;
       U0, V0 : Real := 0.0;
+      Anchor : Positive := 1;
+      --  The keyframe whose picture (U0, V0) is a pixel of, its eye the one the point's depth is taken from: the
+      --  reference unless the point was chosen in a later keyframe, which followed it into others (a relay). Every
+      --  sighting of a track has its track's.
       U, V   : Real := 0.0;
       Own    : Real := 0.0;
       --  The standard deviation the matcher states of where it saw the point again, in pixels, per axis; zero when
