@@ -56,4 +56,8 @@ package Driver.Distributions with Pure is
      with Pre => Upper_Tail > 0.0 and then Upper_Tail <= 1.0;
    --  The F >= 0 with F_Upper_Tail (F, Numerator, Denominator) = Upper_Tail.
 
+   function Binomial_Upper_Tail (K, N : Natural; P : Real) return Real;
+   --  P (X >= K) for X binomial over N trials at the rate P: the sum of the terms from K on, each from the one before.
+   --  One when K is 0 or P at least one, nought when P is at most nought.
+
 end Driver.Distributions;

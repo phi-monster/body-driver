@@ -310,4 +310,23 @@ package body Driver.Distributions is
       return Real (Denominator) * (1.0 - X) / (Real (Numerator) * X);
    end F_Quantile;
 
+   function Binomial_Upper_Tail (K, N : Natural; P : Real) return Real is
+      Term : Real := (1.0 - P) ** N;
+      Sum  : Real := 0.0;
+   begin
+      if K = 0 or else P >= 1.0 then
+         return 1.0;
+      elsif P <= 0.0 then
+         return 0.0;
+      end if;
+      for J in 0 .. N loop
+         if J >= K then
+            Sum := Sum + Term;
+         end if;
+         exit when J = N;
+         Term := Term * Real (N - J) / Real (J + 1) * P / (1.0 - P);
+      end loop;
+      return Sum;
+   end Binomial_Upper_Tail;
+
 end Driver.Distributions;

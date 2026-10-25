@@ -3500,24 +3500,8 @@ package body Driver.Robot.Kinematics.Fit is
                        Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
                      Went    : Boolean := True;
                      --  The chance of K or more of N at the rate P.
-                     function Upper_Tail (K, N : Natural; P : Real) return Real is
-                        Term : Real := (1.0 - P) ** N;
-                        Sum  : Real := 0.0;
-                     begin
-                        if K = 0 or else P >= 1.0 then
-                           return 1.0;
-                        elsif P <= 0.0 then
-                           return 0.0;
-                        end if;
-                        for J in 0 .. N loop
-                           if J >= K then
-                              Sum := Sum + Term;
-                           end if;
-                           exit when J = N;
-                           Term := Term * Real (N - J) / Real (J + 1) * P / (1.0 - P);
-                        end loop;
-                        return Sum;
-                     end Upper_Tail;
+                     function Upper_Tail (K, N : Natural; P : Real) return Real
+                       renames Driver.Distributions.Binomial_Upper_Tail;
                   begin
                      for I in 1 .. S loop
                         declare
@@ -4003,7 +3987,8 @@ package body Driver.Robot.Kinematics.Fit is
       Who        : String := "";
       From       : Fit_Start := No_Start;
       Play       : Play_Paths := No_Play;
-      Slack_Start : Real_Array := No_Slack)
+      Slack_Start : Real_Array := No_Slack;
+      Before     : Flag_Matrix := No_Before)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -7193,6 +7178,55 @@ package body Driver.Robot.Kinematics.Fit is
 
             Arm : constant String := (if Who = "" then "the arm" else Who);
 
+            --  What an eye that watched the arm saw of its order (Before): joint J lies between joint K and the base when
+            --  the parts K moved J moved too, and J moved parts K left standing. An order that puts K before J is no
+            --  order of this arm: none such is scored, weighed or kept, and every one is told against.
+            Watched : constant Boolean := Before'Length (1) = N and then N > 1;
+            function Violates (C : Chain_Order) return Boolean is
+               Pos : array (1 .. N) of Natural := [others => 0];
+            begin
+               if not Watched then
+                  return False;
+               end if;
+               for P in 1 .. N loop
+                  Pos (C (C'First + P - 1)) := P;
+               end loop;
+               for J in 1 .. N loop
+                  for K in 1 .. N loop
+                     if Before (Before'First (1) + J - 1, Before'First (2) + K - 1) and then Pos (K) < Pos (J) then
+                        return True;
+                     end if;
+                  end loop;
+               end loop;
+               return False;
+            end Violates;
+            --  C as near as Before lets it stand: joint after joint, the first of C's not placed yet whose every joint
+            --  seen before it is placed (Kinematics gives no Before that goes round in a circle).
+            function Agreeing (C : Chain_Order) return Chain_Order is
+               Result : Chain_Order (1 .. N) := C;
+               Placed : array (1 .. N) of Boolean := [others => False];
+            begin
+               for P in 1 .. N loop
+                  for Q in 1 .. N loop
+                     declare
+                        J : constant Positive := C (C'First + Q - 1);
+                     begin
+                        if not Placed (J)
+                          and then (for all I in 1 .. N =>
+                                      Placed (I) or else not Before (Before'First (1) + I - 1, Before'First (2) + J - 1))
+                        then
+                           Result (P) := J;
+                           Placed (J) := True;
+                           exit;
+                        end if;
+                     end;
+                  end loop;
+               end loop;
+               return Result;
+            end Agreeing;
+            --  The orders one move from the order kept (and the cheap score's least) that Before ruled out, this pass.
+            Against : Natural := 0;
+
             --  The sightings by keyframe: those of keyframe F are By_Frame (First_Of (F) .. First_Of (F) + Count_Of (F)
             --  - 1), indices into Sight.
             Count_Of, First_Of : array (1 .. Frames) of Natural := [others => 0];
@@ -7280,6 +7314,9 @@ package body Driver.Robot.Kinematics.Fit is
             function Cheap (C : Chain_Order) return Real is
                K : Natural := 0;
             begin
+               if Violates (C) then
+                  return Real'Last;
+               end if;
                Cheaps := Cheaps + 1;
                for M in 1 .. Multi_Count loop
                   declare
@@ -8062,6 +8099,11 @@ package body Driver.Robot.Kinematics.Fit is
             if From.Valid and then From.N = N then
                Start := From.Chain;
             end if;
+            --  Begun from an order Before rules out (the fit begun from was made before an eye saw it), from the order
+            --  nearest it that Before allows.
+            if Violates (Start) then
+               Start := Agreeing (Start);
+            end if;
             --  Every order is fitted from the joints and lens of the keyframes of one joint each (Unordered), which
             --  no order changes: from the joints of the order kept, fitted to it, the true order of the bench's s36
             --  (10-20) came to 1.3 px on the keyframes of several joints, its own fit from those of one joint's to 0.24.
@@ -8095,6 +8137,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Adequacy (Here, Single_M, Multi_M, Adequate);
                   Global (Here.Order, G, Gm, Starts);
                   Closes := 0;
+                  Against := 0;
                   if G /= Here.Order then
                      Closes := 1;
                      Close (1) := G;
@@ -8113,7 +8156,9 @@ package body Driver.Robot.Kinematics.Fit is
                               --  does, and weighing only the moves that score close to it kept the wrong order: w20's
                               --  arm 1 at 77 keyframes (replayed from its dump, 10-20) was told as 2 1 6 3 5 4 with no
                               --  order weighed, where the truth, 1 6 3 2 5 4, is one move from it.
-                              if C /= G then
+                              if Violates (C) then
+                                 Against := Against + 1;
+                              elsif C /= G then
                                  Closes := Closes + 1;
                                  Close (Closes) := C;
                                  Close_M (Closes) := Mc;
@@ -8239,7 +8284,9 @@ package body Driver.Robot.Kinematics.Fit is
                                    & Fitted_Now'Image & " of" & Closes'Image & " orders weighed fitted in themselves"
                                    & (if Best > 0 then ", the least " & Image (Close (Best)) & " at "
                                       & Driver.Log.Image (Best_M, 3) & " px"
-                                      else ", none less"));
+                                      else ", none less")
+                                   & (if Watched then ";" & Against'Image & " against what the eyes that watch it saw"
+                                      else ""));
                   exit when Best = 0;
                   Here := Close_Fit (Best);
                end;
@@ -8603,6 +8650,8 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
                                 & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
                                 & Same_Arm'Image & " the same arm"
+                                & (if Watched then "," & Against'Image & " against what the eyes that watch it saw"
+                                   else "")
                                 & (if Adequate then "" else "; it explains the keyframes of several joints worse ("
                                    & Driver.Log.Image (Multi_M, 3) & " px against "
                                    & Driver.Log.Image (Single_M, 3) & ")")
@@ -8682,7 +8731,8 @@ package body Driver.Robot.Kinematics.Fit is
       From       : Fit_Start := No_Start;
       Play       : Play_Paths := No_Play;
       Slack_Start : Real_Array := No_Slack;
-      Across_Joints : Boolean := False)
+      Across_Joints : Boolean := False;
+      Before     : Flag_Matrix := No_Before)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -8701,7 +8751,7 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          if Relays = 0 then
             Fit_Stages (Changes, Asked, Visible, Sight, Sight (Sight'First .. Sight'First - 1), Width, Height,
-                        Unit_Frames, Jx, Cx, Lx, Rx, Who_Now, Start, Play, Slack_Start);
+                        Unit_Frames, Jx, Cx, Lx, Rx, Who_Now, Start, Play, Slack_Start, Before);
          else
             declare
                type Sighting_Access is access Sighting_Array;
@@ -8720,7 +8770,7 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end loop;
                Fit_Stages (Changes, Asked, Visible, Own.all, Relayed.all, Width, Height, Unit_Frames, Jx, Cx, Lx, Rx,
-                           Who_Now, Start, Play, Slack_Start);
+                           Who_Now, Start, Play, Slack_Start, Before);
                Free (Own);
                Free (Relayed);
             end;
