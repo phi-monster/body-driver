@@ -86,6 +86,9 @@ package body Driver.Robot.Graph is
       Carries : array (M.Groups.First_Index .. M.Groups.Last_Index, M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean :=
         [others => [others => False]];   --  the group carries the eye (Best_Of)
       Carried : array (M.Groups.First_Index .. M.Groups.Last_Index) of Natural := [others => 0];   --  the eyes it carries
+      --  Of those, the eyes it carries as its own: where it moves the eye most, or no group, the carrier among them,
+      --  left the eye significantly further beyond the flow's reach (Best_Of's fewest first).
+      Carried_Own : array (M.Groups.First_Index .. M.Groups.Last_Index) of Natural := [others => 0];
 
       --  Group G moves eye E's view whole: as the lock-in finds it, or, where the lock-in measured nothing of the group
       --  in the eye (no beat of its pushes a row: the Shadow's arm, whose hand swung at every one, and the head of
@@ -282,27 +285,29 @@ package body Driver.Robot.Graph is
 
       --  The carrier: the group a channel of which, held away from its rest command, kept the whole body going (the
       --  eyes' pictures drifting while every reading stood, and stopping once it was sent back: Motion.Settle), a speed
-      --  that carries every eye it drifted; of two such groups, the one that drifted more eyes. It used to be the group
+      --  that carries every eye it drifted; of two such groups, the one whose pushes left the eyes further beyond the
+      --  flow's reach, summed over them (Far_Of): it carries the whole body, where a hand whose pushes swayed a balancing
+      --  body on and left it standing elsewhere was taken for a speed with it, and by the eyes they drifted the G1's
+      --  hand, its pushes leaving 2 to 5 % of the eyes' cells beyond reach, was the carrier and its walk, 23 to 70 %, a
+      --  closer (seed 3, rounds p373s2 and r374, 10-25). It used to be the group
       --  that moved every eye riding on the body whole, two eyes at least, while another group moved some of them and
       --  not all: with one eye, carrying it and carrying the body look the same (the drone and the Go2, their carriers
       --  taken for arms in round 0, 10-23), and a torso that moves the head's and both arms' eyes whole carries no body
       --  (RB-Y1's, taken for the carrier in m4).
       declare
-         Most : Natural := 0;
+         Farthest : Real := 0.0;
       begin
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
             if Own (G) and then Keeps_Going (M, G) then
                declare
-                  Kept : Natural := 0;
+                  Far : Real := 0.0;
                begin
                   for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
-                     if Kept_Eye (M, G, E) then
-                        Kept := Kept + 1;
-                     end if;
+                     Far := Far + Far_Of (G, E);
                   end loop;
-                  if Gr.Carrier = 0 or else Kept > Most then
+                  if Gr.Carrier = 0 or else Far > Farthest then
                      Gr.Carrier := G;
-                     Most := Kept;
+                     Farthest := Far;
                   end if;
                end;
             end if;
@@ -359,6 +364,18 @@ package body Driver.Robot.Graph is
             if Carries (G, E) then
                Carried (G) := Carried (G) + 1;
             end if;
+            --  A body that leans as an arm is pushed moves every eye on it by a little, and the arm carries none of them
+            --  as its own but its own wrist's. The G1's right arm, its pushes leaving its wrist eye's cells 40 % beyond
+            --  reach and the head's 4 %, against the walk's 56 % of the head's, counted two eyes to its hand's one, and
+            --  its wrist eye went to the hand (seed 1, round r374, 10-25). RB-Y1's torso, its pushes leaving each wrist
+            --  eye further beyond reach than any other group, carries all three as its own.
+            if Carries (G, E)
+              and then (Most (G, E)
+                        or else not (for some H in M.Groups.First_Index .. M.Groups.Last_Index =>
+                                       H /= G and then Further (H, E, G, E)))
+            then
+               Carried_Own (G) := Carried_Own (G) + 1;
+            end if;
          end loop;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
@@ -368,13 +385,13 @@ package body Driver.Robot.Graph is
          begin
             for G in M.Groups.First_Index .. M.Groups.Last_Index loop
                if Most (G, E) and then Carries (G, E)
-                 and then (Carried (G) < Fewest
-                           or else (Carried (G) = Fewest
+                 and then (Carried_Own (G) < Fewest
+                           or else (Carried_Own (G) = Fewest
                                     and then (Far_Of (G, E) > Best_Far
                                               or else (Far_Of (G, E) = Best_Far
                                                        and then Effect (M, G, E).Fraction.Value > Best_Share))))
                then
-                  Fewest := Carried (G);
+                  Fewest := Carried_Own (G);
                   Best_Far := Far_Of (G, E);
                   Best_Share := Effect (M, G, E).Fraction.Value;
                   Best_Of (E) := Natural (G);

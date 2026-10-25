@@ -678,6 +678,9 @@ package body Driver.Robot.Motion is
                   --  and carried nothing (robot.boot.step, 10-24); a view shaken that came back pools to nothing. Not
                   --  counted as moved cells: Stretch's gripper, its push bending its arm, left its wrist eye's view
                   --  pulled so, as its arm did, and took the eye from its arm (seed 1, paced round p177ca, 10-24).
+                  S.Last_Stayed_Group := Natural (G);
+                  S.Last_Stayed_Moved := Moved;
+                  S.Last_Stayed_Cells := Textured;
                   Pulled := Faint > 0 and then Wu > 0.0 and then Wv > 0.0
                     and then Driver.Distributions.Chi_Square_Deviate (Pu ** 2 / Wu + Pv ** 2 / Wv, 2) > Driver.Conventions.Z;
                   while Natural (S.Stayed_Pulled.Length) < Natural (G) loop

@@ -211,14 +211,25 @@ package body Driver.Robot.Boot is
       procedure Only_Whole
         (G : Group_Id; Kept : in out Boolean; Kept_Eyes : in out Channel_Flags; Came : in out Boolean)
       is
+         --  An eye whose staying away the push itself left mostly unmoved, as it stood (Motion.Note_Stayed, taken as
+         --  the settle sent the body back): what stayed is a part the push moved in its view (a box its jaw knocked),
+         --  not the view. Not by the lock-in's call of the group a patch in that eye: a walk that moved every view beyond
+         --  the flow's reach left no cell answering its pushes, and the lock-in called it a patch in all three eyes of
+         --  the G1, whose hand then was its only speed and took the carrier's place (seed 3, round r374, 10-25); the
+         --  base of Stretch, crawling at its first level, the same (seed 1).
          procedure Read is
          begin
             for E in 1 .. Eye_Count (M) loop
-               if Kept_Eyes (Kept_Eyes'First + E - 1) and then Response (M, G, Eye_Id (E)) = Patch
-                 and then not Driver.Robot.Graph.Effect (M, G, Eye_Id (E)).Could_Be_Whole
-               then
-                  Kept_Eyes (Kept_Eyes'First + E - 1) := False;
-               end if;
+               declare
+                  S : Eye_Stream renames M.Eyes (Eye_Id (E));
+               begin
+                  if Kept_Eyes (Kept_Eyes'First + E - 1) and then S.Last_Stayed_Group = Natural (G)
+                    and then S.Last_Stayed_Cells > 0
+                    and then Driver.Robot.Lockin.Mostly (S.Last_Stayed_Cells - S.Last_Stayed_Moved, S.Last_Stayed_Cells)
+                  then
+                     Kept_Eyes (Kept_Eyes'First + E - 1) := False;
+                  end if;
+               end;
             end loop;
          end Read;
       begin
@@ -227,8 +238,8 @@ package body Driver.Robot.Boot is
             if (for all F of Kept_Eyes => not F) then
                Kept := False;
                Came := True;
-               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s pictures stayed only in eyes it moves a"
-                                & " patch of: no speed by it");
+               Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & "'s pictures stayed only in eyes its push"
+                                & " left mostly unmoved: no speed by it");
             end if;
          end if;
       end Only_Whole;
