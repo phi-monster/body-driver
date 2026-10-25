@@ -462,10 +462,17 @@ package body Driver.Robot.Motion is
             Driver.Robot.Stillness.Drop_Anchor (M, Eye_Id (E));
          end loop;
       end if;
+      --  Weighed by every eye, not only those that drifted on as it was sent back: an eye the push took beyond rest and
+      --  that came back tells it was no speed, whether or not it drifted then. Weighed by the drifting eyes alone, the
+      --  G1's right arm was a speed: its own wrist eye, pushed 15.33 against rest's 1.25, came back to 1.63 the first
+      --  time and had stopped as the arm did the second, while its head's and other wrist's eyes, swaying on as the
+      --  body stood, stayed away (rec315 g12a, 10-25); taken for a speed, the arm was pushed no more as a joint, and
+      --  its wrist eye rode its hand.
       if Sent_Back then
          declare
             Showed : Boolean;
          begin
+            Kept_Eyes := [others => True];
             Judge_Return (M, Pushed_Away, Kept_Eyes, Kept_Going, Showed);
          end;
       end if;
