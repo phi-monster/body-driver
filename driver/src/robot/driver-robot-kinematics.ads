@@ -148,6 +148,11 @@ private package Driver.Robot.Kinematics is
    --  of a step off and fitted). An arm that carries no eye has nothing to
    --  drop.
 
+   procedure Weigh_Across_Joints (M : in out Model; A : Arm_Id);
+   --  Arm A's next fit (at the next estimate) takes the jackknife over its joints into its covariance (Fit's
+   --  Across_Joints): each joint's own keyframes left out in turn, the fit begun from itself, its last stage alone.
+   --  Asked once the arm's sweep has ended: it costs a last stage a joint.
+
    procedure Refit (M : in out Model; Again : Boolean := False);
    --  Fits every arm whose answers changed since its last fit
    --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of

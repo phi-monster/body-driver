@@ -1793,6 +1793,10 @@ package body Driver.Robot.Boot is
                                 & (if Gone then "no longer an arm of group" & G'Image & " in the graph: its sweep ends"
                                    elsif not Fitted_Now then "not fitted" elsif Told_Now then "fitted"
                                    else "fitted, its joints' order not told"));
+               --  Its sweep ended, its terms' uncertainty across its joints joins its covariance at the next estimate.
+               if Fitted_Now and then not Gone then
+                  Driver.Robot.Kinematics.Weigh_Across_Joints (M, A);
+               end if;
             end;
             declare
                Waited_Here : Natural;   --  each arm's own: arms are swept at once

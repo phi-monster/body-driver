@@ -3,10 +3,13 @@
 --  The fit of an arm (Driver.Robot.Kinematics.Fit.Fit) made again from a dump of its inputs, which the driver writes
 --  with BD_DUMP_FITS naming a folder: its stages' lines as the driver logs them, then what it found, the time it took.
 --  A fit studied so takes the seconds it takes, not the replay of a whole recording up to it.
+--  With BD_ACROSS_JOINTS set, the fit takes the jackknife over its joints into its covariance, as the driver asks
+--  for it once an arm's sweep has ended (Fit's Across_Joints).
 
 with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Vectors;
+with Ada.Environment_Variables;
 with Ada.Long_Float_Text_IO;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
@@ -210,7 +213,8 @@ begin
          Began := Ada.Calendar.Clock;
          if Play = null then
             Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
-                     Who => To_String (Who), From => From);
+                     Who => To_String (Who), From => From,
+                     Across_Joints => Ada.Environment_Variables.Exists ("BD_ACROSS_JOINTS"));
          else
             declare
                --  The slack the driver began from: the one a file names (two numbers a joint), else the dump's, else
@@ -243,7 +247,8 @@ begin
                end loop;
                New_Line;
                Fit.Fit (Changes, Asked, Visible, Sightings.all, Width, Height, Unit_Frames, Joints, Chain, L, Report,
-                        Who => To_String (Who), From => From, Play => Play.all, Slack_Start => Measured);
+                        Who => To_String (Who), From => From, Play => Play.all, Slack_Start => Measured,
+                        Across_Joints => Ada.Environment_Variables.Exists ("BD_ACROSS_JOINTS"));
             end;
          end if;
          Put ("half slacks:");

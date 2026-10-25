@@ -8681,42 +8681,209 @@ package body Driver.Robot.Kinematics.Fit is
       Who        : String := "";
       From       : Fit_Start := No_Start;
       Play       : Play_Paths := No_Play;
-      Slack_Start : Real_Array := No_Slack)
+      Slack_Start : Real_Array := No_Slack;
+      Across_Joints : Boolean := False)
    is
-      Relays : Natural := 0;
+      N      : constant Natural := Visible'Length;
+      Frames : constant Natural := Changes'Length (1);
+
+      --  The stages on these sightings, the relayed ones (a later keyframe's points, Sighting.Anchor) apart.
+      procedure Stages
+        (Sight : Sighting_Array; Start : Fit_Start; Who_Now : String; Jx : out Joint_Array; Cx : out Chain_Order;
+         Lx : out Lens; Rx : out Fit_Report)
+      is
+         Relays : Natural := 0;
+      begin
+         for X of Sight loop
+            if X.Anchor > 1 then
+               Relays := Relays + 1;
+            end if;
+         end loop;
+         if Relays = 0 then
+            Fit_Stages (Changes, Asked, Visible, Sight, Sight (Sight'First .. Sight'First - 1), Width, Height,
+                        Unit_Frames, Jx, Cx, Lx, Rx, Who_Now, Start, Play, Slack_Start);
+         else
+            declare
+               type Sighting_Access is access Sighting_Array;
+               procedure Free is new Ada.Unchecked_Deallocation (Sighting_Array, Sighting_Access);
+               Own     : Sighting_Access := new Sighting_Array (1 .. Sight'Length - Relays);
+               Relayed : Sighting_Access := new Sighting_Array (1 .. Relays);
+               K, R    : Natural := 0;
+            begin
+               for X of Sight loop
+                  if X.Anchor > 1 then
+                     R := R + 1;
+                     Relayed (R) := X;
+                  else
+                     K := K + 1;
+                     Own (K) := X;
+                  end if;
+               end loop;
+               Fit_Stages (Changes, Asked, Visible, Own.all, Relayed.all, Width, Height, Unit_Frames, Jx, Cx, Lx, Rx,
+                           Who_Now, Start, Play, Slack_Start);
+               Free (Own);
+               Free (Relayed);
+            end;
+         end if;
+      end Stages;
+
+      --  Whether keyframe F asked joint J and no other.
+      function Alone (F, J : Positive) return Boolean is
+        (Asked (F, J) and then (for all C in 1 .. N => C = J or else not Asked (F, C)));
    begin
       if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
          Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play, Slack_Start);
       end if;
-      for X of Sightings loop
-         if X.Anchor > 1 then
-            Relays := Relays + 1;
-         end if;
-      end loop;
-      if Relays = 0 then
-         Fit_Stages (Changes, Asked, Visible, Sightings, Sightings (Sightings'First .. Sightings'First - 1), Width,
-                     Height, Unit_Frames, Joints, Chain, L, Report, Who, From, Play, Slack_Start);
-      else
+      Stages (Sightings, From, Who, Joints, Chain, L, Report);
+
+      --  The terms' uncertainty across the joints (the jackknife over joints), where the caller asks for it
+      --  (Across_Joints): the fit begun from itself again, its last stage alone, on the sightings less those of the
+      --  keyframes that asked one joint alone, joint by joint; how far each such fit lands from this one, term by term
+      --  in the covariance's own terms (Move_Term's), spreads into a covariance that joins this one. The covariance
+      --  takes the errors of a joint's own keyframes as independent, and they are not: they share its gears' slack and
+      --  landing, the shadow and the mirror image its arm throws, a texture its turns slide along; left out in turn,
+      --  each joint moves the terms by what it alone put there. The ambient-lit world's 63 arms (p352s2, 10-25): with
+      --  the covariance alone 74 % of the focal lengths lay within three sigmas of the truth (an honest one, all but a
+      --  few in a thousand) and the median ratio of error to sigma was 2.07; with the jackknife's spread beside it, 90 %
+      --  and 1.26 (the hall's 62: 67 % and 2.09 against 84 % and 1.69). A bias every joint's data share (a shadow over
+      --  the whole sweep, a first fit's basin) it does not see. Each such fit costs a last stage: 3.9 times the fit's
+      --  seconds over the 63, so it is asked for once an arm's sweep has ended, not at every estimate.
+      if Across_Joints and then Report.Fitted and then Report.Determined and then N > 0
+        and then Natural (Report.Covariance.Length) = Terms (N) ** 2
+      then
          declare
-            type Sighting_Access is access Sighting_Array;
-            procedure Free is new Ada.Unchecked_Deallocation (Sighting_Array, Sighting_Access);
-            Own     : Sighting_Access := new Sighting_Array (1 .. Sightings'Length - Relays);
-            Relayed : Sighting_Access := new Sighting_Array (1 .. Relays);
-            K, R    : Natural := 0;
+            T     : constant Positive := Terms (N);
+            Start : Fit_Start (N);
+            type Step_Rows is array (1 .. N, 1 .. T) of Real;
+            Steps : Step_Rows;
+            function Lens_At (Term : Lens_Term) return Positive is (Lens_Term'Pos (Term) + 1);
+            Count : Natural := 0;
          begin
-            for X of Sightings loop
-               if X.Anchor > 1 then
-                  R := R + 1;
-                  Relayed (R) := X;
-               else
-                  K := K + 1;
-                  Own (K) := X;
-               end if;
+            Start.Valid := True;
+            Start.Whole := False;
+            Start.Joints := Joints;
+            Start.Chain := Chain;
+            Start.L := L;
+            Start.Focal_Within := Report.Focal_Within;
+            Start.Searched_Least := Report.Searched_Least;
+            Start.Searched_Most := Report.Searched_Most;
+            Start.Profiled_Over := Report.Profiled_Over;
+            Start.Order_Told := Report.Order_Told;
+            Start.Slide_Turns := Slide_Turns_Of (Report, N);
+            Start.Turns_Told := Turns_Told_Of (Report, N);
+            for P of Report.Untold_Orders loop
+               Start.Untold_Orders.Append (P);
             end loop;
-            Fit_Stages (Changes, Asked, Visible, Own.all, Relayed.all, Width, Height, Unit_Frames, Joints, Chain, L,
-                        Report, Who, From, Play, Slack_Start);
-            Free (Own);
-            Free (Relayed);
+            for J in 1 .. N loop
+               declare
+                  Kept : Natural := 0;
+                  Own  : Natural := 0;
+               begin
+                  for X of Sightings loop
+                     if X.Frame <= Frames and then Alone (X.Frame, J) then
+                        Own := Own + 1;
+                     else
+                        Kept := Kept + 1;
+                     end if;
+                  end loop;
+                  if Own > 0 and then Kept > 0 then
+                     declare
+                        type Sighting_Access is access Sighting_Array;
+                        procedure Free is new Ada.Unchecked_Deallocation (Sighting_Array, Sighting_Access);
+                        Sight : Sighting_Access := new Sighting_Array (1 .. Kept);
+                        K     : Natural := 0;
+                        Jx    : Joint_Array (1 .. N);
+                        Cx    : Chain_Order (1 .. N);
+                        Lx    : Lens;
+                        Rx    : Fit_Report;
+                     begin
+                        for X of Sightings loop
+                           if not (X.Frame <= Frames and then Alone (X.Frame, J)) then
+                              K := K + 1;
+                              Sight (K) := X;
+                           end if;
+                        end loop;
+                        Stages (Sight.all, Start, "", Jx, Cx, Lx, Rx);
+                        if Rx.Fitted and then Lx.Fx > 0.0 and then Lx.Fy > 0.0 then
+                           Count := Count + 1;
+                           --  The step from this fit to that one in Move_Term's terms.
+                           Steps (Count, Lens_At (Log_Fx)) := Ada.Numerics.Long_Elementary_Functions.Log (Lx.Fx / L.Fx);
+                           Steps (Count, Lens_At (Log_Fy)) := Ada.Numerics.Long_Elementary_Functions.Log (Lx.Fy / L.Fy);
+                           Steps (Count, Lens_At (Centre_X)) := Lx.Cx - L.Cx;
+                           Steps (Count, Lens_At (Centre_Y)) := Lx.Cy - L.Cy;
+                           Steps (Count, Lens_At (Radial_1)) := Lx.K1 - L.K1;
+                           Steps (Count, Lens_At (Radial_2)) := Lx.K2 - L.K2;
+                           for A in 1 .. N loop
+                              declare
+                                 W      : Joint renames Joints (Joints'First + A - 1);
+                                 V      : Joint renames Jx (Jx'First + A - 1);
+                                 E1, E2 : Vec3;
+                                 Along  : constant Real := Dot (V.W, W.W);
+                              begin
+                                 Perp (W.W, E1, E2);
+                                 if Along /= 0.0 then
+                                    Steps (Count, Term_Of (A, Tilt_1)) := Dot (V.W, E1) / Along;
+                                    Steps (Count, Term_Of (A, Tilt_2)) := Dot (V.W, E2) / Along;
+                                 else
+                                    Steps (Count, Term_Of (A, Tilt_1)) := 0.0;
+                                    Steps (Count, Term_Of (A, Tilt_2)) := 0.0;
+                                 end if;
+                                 Steps (Count, Term_Of (A, Point_1)) := Dot (V.P - W.P, E1);
+                                 Steps (Count, Term_Of (A, Point_2)) := Dot (V.P - W.P, E2);
+                                 Steps (Count, Term_Of (A, Scale)) := V.C - W.C;
+                              end;
+                           end loop;
+                        end if;
+                        Free (Sight);
+                     end;
+                  end if;
+               end;
+            end loop;
+            --  A spread needs two of them.
+            if Count >= 2 then
+               declare
+                  Mean  : array (1 .. T) of Real := [others => 0.0];
+                  Was   : constant Real := Report.Focal_Sigma;
+               begin
+                  for C in 1 .. Count loop
+                     for P in 1 .. T loop
+                        Mean (P) := Mean (P) + Steps (C, P) / Real (Count);
+                     end loop;
+                  end loop;
+                  for P in 1 .. T loop
+                     for Q in 1 .. T loop
+                        declare
+                           Sum : Real := 0.0;
+                           At_PQ : constant Positive := Report.Covariance.First_Index + (P - 1) * T + Q - 1;
+                        begin
+                           for C in 1 .. Count loop
+                              Sum := Sum + (Steps (C, P) - Mean (P)) * (Steps (C, Q) - Mean (Q));
+                           end loop;
+                           Report.Covariance (At_PQ) :=
+                             Report.Covariance (At_PQ) + Real (Count - 1) / Real (Count) * Sum;
+                        end;
+                     end loop;
+                  end loop;
+                  declare
+                     Square : Real := 0.0;
+                     Spread : Real;
+                  begin
+                     for C in 1 .. Count loop
+                        Square := Square + (Steps (C, Lens_At (Log_Fx)) - Mean (Lens_At (Log_Fx))) ** 2;
+                     end loop;
+                     Spread := L.Fx * Sqrt (Real (Count - 1) / Real (Count) * Square);
+                     if Report.Focal_Sigma < Real'Last then
+                        Report.Focal_Sigma := Sqrt (Report.Focal_Sigma ** 2 + Spread ** 2);
+                     end if;
+                     if Who /= "" then
+                        Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & "'s terms across its joints, each's own"
+                                         & " keyframes left out in turn:" & Count'Image & " fits spread its focal"
+                                         & " length by " & Driver.Log.Image (Spread, 2) & " px beside the covariance's "
+                                         & Driver.Log.Image (Was, 2) & ", which takes in their spread of every term");
+                     end if;
+                  end;
+               end;
+            end if;
          end;
       end if;
    end Fit;

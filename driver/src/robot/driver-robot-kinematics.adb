@@ -2518,6 +2518,17 @@ package body Driver.Robot.Kinematics is
       end;
    end Table_Estimate;
 
+   procedure Weigh_Across_Joints (M : in out Model; A : Arm_Id) is
+   begin
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            R.Across_Due := True;
+            --  Its answers count as changed, so the next estimate fits it again (Refit).
+            R.Revision := R.Revision + 1;
+         end if;
+      end loop;
+   end Weigh_Across_Joints;
+
    procedure Refit (M : in out Model; Again : Boolean := False) is
       Start : constant Duration := Driver.Clock.Seconds;
       Fitted : Duration;
@@ -2882,7 +2893,7 @@ package body Driver.Robot.Kinematics is
                            Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
                                     M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,
                                     Who => "arm" & R.Arm'Image, From => Start, Play => Play.all,
-                                    Slack_Start => Slack.all);
+                                    Slack_Start => Slack.all, Across_Joints => R.Across_Due);
                         else
                            declare
                               Index     : array (1 .. Count) of Positive;   --  the channel of each joint fitted
@@ -2966,7 +2977,8 @@ package body Driver.Robot.Kinematics is
                                        Slack_Start =>
                                          (if Slack'Length = 2 * N
                                           then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]
-                                          else Fit.No_Slack));
+                                          else Fit.No_Slack),
+                                       Across_Joints => R.Across_Due);
                               --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
                               --  of the chain, their terms nought.
                               for C in 1 .. N loop
@@ -3233,6 +3245,7 @@ package body Driver.Robot.Kinematics is
                         R.Result.Matches := Result.Matches;
                         R.Result.Why := Result.Why;
                      end if;
+                     R.Across_Due := False;
                      Driver.Log.Line
                        (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " "
                         & (if Report.Fitted
@@ -3241,6 +3254,8 @@ package body Driver.Robot.Kinematics is
                                 & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px and "
                                & Driver.Log.Image (Report.Own_Gain, 2) & " of what the matcher states; focal "
                                 & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
+                                & (if Report.Focal_Sigma < Real'Last then " +- " & Driver.Log.Image (Report.Focal_Sigma, 2)
+                                   & " px" else "")
                                 & "; its joints from the base, by their readings: " & Chain_Image (Chain)
                                 & Slacks_Image (Report)
                                 & (if Report.Errors.Measured

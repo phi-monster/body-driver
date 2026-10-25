@@ -440,9 +440,12 @@ package Driver.Robot.Kinematics.Fit is
       --  the readings' way between the keyframes (Play_Paths); given, the nonlinear stages fit each joint's half slack
       --  and where its slack stood at the reference (Fit_Report.Slacks, Slack_Places), every keyframe's change taken
       --  less its slack's since the reference
-      Slack_Start : Real_Array := No_Slack)
+      Slack_Start : Real_Array := No_Slack;
       --  with Play, per joint its half slack and place at the reference as measured (Measure_Slack): the stages before
       --  the refinement take the changes less the slack's, and the refinement begins from it
+      Across_Joints : Boolean := False)
+      --  the jackknife over joints joins the covariance (each joint's own keyframes left out in turn, the fit begun
+      --  from itself, its last stage alone): asked for once an arm's sweep has ended, not at every estimate
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
                  and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);

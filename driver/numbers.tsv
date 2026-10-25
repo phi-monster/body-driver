@@ -2110,6 +2110,7 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rs.All_Median_Px, 3)	3	
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rt.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sd, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Single_F, 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sqrt (Chi / Said), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Visible (Visible'First + C - 1), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Real'Image (C) & "" & Real'Image (Sqrt (Variance (O + 5)))	5	structure	the positions of the parameters in the reduced vector: the lens (6), then per joint its tilt (2), its point across the axis (2) and its reading scale (1)
@@ -2143,6 +2144,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Walked (Way).Flat_To, 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Was, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
@@ -2953,6 +2955,7 @@ driver-robot-kinematics-fit.adb	if (if Way = 1 then Up_Frame (J) else Down_Frame
 driver-robot-kinematics-fit.adb	if Above_Typical (0.0) then	0.0	structure	a gain of zero: what is stated counts for nothing beside the floor
 driver-robot-kinematics-fit.adb	if All_In >= 1.0 then	1.0	math	a probability of one: every sample is of agreeing points
 driver-robot-kinematics-fit.adb	if Count <= 3 or else Determinant (M) = 0.0 then	3	statistics	more points than the plane's three parameters, or their spread is not measured
+driver-robot-kinematics-fit.adb	if Count >= 2 then	2	structure	a spread needs two values (the jackknife over joints: two fits left out at least)
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
 driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
@@ -3486,6 +3489,7 @@ driver-robot-kinematics.adb	& "" & Driver.Log.Image (Step_Of (M, R.Arm, C), 4));
 driver-robot-kinematics.adb	& (if Channels.Noise (M, G, C) < Real'Last then Driver.Log.Image (Channels.Noise (M, G, C), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "") & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Known (V) then Driver.Log.Image (V.Value, 2) else "") & "");	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& (if Report.Focal_Sigma < Real'Last then "" & Driver.Log.Image (Report.Focal_Sigma, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (G.Cov.UU, G.Cov.VV)), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message

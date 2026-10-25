@@ -925,7 +925,12 @@ private
       Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
       Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
-      Revision : Natural := 0;   --  how many keyframes were aligned again from the fitted arm (Kinematics.Realign)
+      Revision : Natural := 0;
+      --  How many keyframes were aligned again from the fitted arm (Kinematics.Realign), and fits asked for again
+      --  (Kinematics.Weigh_Across_Joints): a count above its matches', so that the next estimate fits it again.
+      Across_Due : Boolean := False;
+      --  The arm's next fit takes the jackknife over its joints into its covariance (Fit's Across_Joints): asked once
+      --  its sweep has ended (Kinematics.Weigh_Across_Joints).
       Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
       Shifts   : Real_Vectors.Vector;
       --  Per channel: how far the eye's view moves per reading unit of it, in pixels, as the aligner measured it over
