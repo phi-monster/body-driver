@@ -539,6 +539,14 @@ private
       --  nothing against it (not measured, undecided, a patch)
       Closer_Rivals : Flag_Vectors.Vector;
       --  per eye (from 0): it rode an arm when Closer_Eye was chosen, and was weighed against it (Graph.Derive)
+      Moved_Tests : Count_Vectors.Vector;
+      Moved_Seen  : Count_Vectors.Vector;
+      --  per group (from 0): the views of that group's sweep keyframes the group's patch was tested in, a view of an eye
+      --  the swept arm does not carry, and of them those that left the patch beyond the flow's reach while the view's
+      --  other cells stayed (Kinematics.Note_Closers)
+      Moved_By    : Group_Id'Base := 0;
+      --  the one group whose sweep moved the group's patch so by more than chance, of every group swept: the arm that
+      --  carries it (Graph.Derive's closers); none until one does
       Channels_Alone : Boolean := False;
       --  its channels were pushed one at a time (Boot): the lock-in's verdicts on each tell them apart, and the graph
       --  may part the group by the eyes they move (Graph.Derive)
@@ -628,6 +636,8 @@ private
       Away_Last     : Real := 0.0;           --  the picture's change from it at the beat before
       Away_Run      : Natural := 0;          --  beats in a row the picture went farther from it than the beat before, and
                                             --  farther than rest moves a picture: a drift too slow for one beat to show
+      Closer_Reference : Luma_Access;        --  the frame the sweep of the arm of group Closer_Reference_Arm began
+      Closer_Reference_Arm : Group_Id'Base := 0;   --  from, at its reference (Kinematics.Note_Closers)
       Origin        : Luma_Access;           --  the frame a push began from (Stillness.Set_Origin), and
       Has_Origin    : Boolean := False;      --  it is in effect
       Origin_At     : Natural := 0;          --  the beat it was taken at

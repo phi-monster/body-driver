@@ -3550,6 +3550,7 @@ driver-robot-kinematics.adb	Active (C) := Active (C) and then Moving (C) >= 2;	2
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, "" & Driver.Log.Image (Change (C), 5));	5	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"0	format	a channel asked (1) or not (0) in the recording record Q
 driver-robot-kinematics.adb	Ada.Strings.Unbounded.Append (Text, (if F then "" else ""));	"1	format	a channel asked (1) or not (0) in the recording record Q
+driver-robot-kinematics.adb	Alarm : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z) / 2.0;	2.0	math	one tail of a Gaussian is half its two tails
 driver-robot-kinematics.adb	Along := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	Along := [(Up.U - Down.U) / (2.0 * Step), (Up.V - Down.V) / (2.0 * Step)];	2.0	math	a central difference over a step each way is the difference over twice the step
 driver-robot-kinematics.adb	Append (Detail, "" & C'Image & "" & Driver.Log.Image (D (C), 2) & "");	2	format	digits printed in a log line or a message
@@ -3574,6 +3575,7 @@ driver-robot-kinematics.adb	D (P, P) := JtJ (P, P) * (1.0 + Lambda) + Lambda * R
 driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	a joint the fit gives no turn per reading is weighed by its reading
 driver-robot-kinematics.adb	D := (1.0 / (H * (if C = 0.0 then 1.0 else C))) * (Eye_In_Reference (M, A, Xp).Translation - T0.Translation);	1.0	math	the derivative of the place: one over the step
 driver-robot-kinematics.adb	Ends : array (1 .. 2) of Vec3;	2	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	First := Natural (R.Frames.Length) = 1;	1	structure	the first keyframe of a sweep is its reference
 driver-robot-kinematics.adb	Fixed_Terms : constant := Fit.Lens_Terms + 6;	6	structure	an arm's six terms in a fixed eye's fit: the camera's turn about its own axes and its centre
 driver-robot-kinematics.adb	Free_Terms : constant Natural := Fit.Lens_Terms + (if In_World then 3 else 0);	3	structure	the turn's three terms follow the lens's
 driver-robot-kinematics.adb	Fu : constant Regression.Fit := Regression.Solve (X, Yu, 1.0, Pass_1);	1.0	statistics	the rows are scaled by their answers standard deviations: a residual has unit variance at the least
@@ -3591,6 +3593,7 @@ driver-robot-kinematics.adb	G_A2 : constant Vec3 := (-1.0 / Gap2) * Pose2.Transl
 driver-robot-kinematics.adb	G_C1 : constant Vec3 := (-1.0 / Gap1) * A1;	1.0	math	the derivative of a distance and a normalisation
 driver-robot-kinematics.adb	G_C2 : constant Vec3 := (-1.0 / Gap2) * A2;	1.0	math	the derivative of a distance and a normalisation
 driver-robot-kinematics.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	structure	a place's two coordinates, u and v
+driver-robot-kinematics.adb	Gs.Moved_By := (if Shown = 1 and then Swept > Shown then By else 0);	1	structure	one group alone moved the patch, another swept did not: the arm that carries it is that one
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	a finite-difference step scales with the reading, and with one where the reading is smaller than one, so that it stays above the reading's own rounding
 driver-robot-kinematics.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Q (Q'First + K - 1));	1.0	numerics	forward differences at the square root of the float's resolution relative to each reading's size
 driver-robot-kinematics.adb	Hk : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (K));	1.0	numerics	the scale floor of a finite difference
