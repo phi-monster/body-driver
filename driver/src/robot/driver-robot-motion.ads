@@ -14,8 +14,9 @@ package Driver.Robot.Motion is
 
    use Ada.Strings.Unbounded;
 
-   procedure Settle (M : in out Model; Beats_Waited : out Natural);
-   --  Holds until Still (M) and returns how many beats that took.
+   procedure Settle (M : in out Model; Beats_Waited : out Natural; Noted : Group_Id'Base := 0; Way : Real := 0.0);
+   --  Holds until Still (M) and returns how many beats that took; the push of group Noted (Way its sign) noted where
+   --  the body settled (Note_Stayed), none for nought.
 
    procedure Settle
      (M            : in out Model;
@@ -23,7 +24,9 @@ package Driver.Robot.Motion is
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
       Kept_Eyes    : out Channel_Flags;
-      Came_Back    : out Boolean)
+      Came_Back    : out Boolean;
+      Noted        : Group_Id'Base := 0;
+      Way          : Real := 0.0)
      with Pre => Kept_Eyes'Length = Eye_Count (M);
    --  Holds until Still (M), as Settle, the push before it held meanwhile; but when every commanded reading stands
    --  and some eye's picture goes on drifting (Stillness.Eye_Drift_Run: two beats running, the least that tells a
@@ -32,6 +35,8 @@ package Driver.Robot.Motion is
    --  push began (Mark_Origins) rather than came back: a body a speed carried stops where it got to, a joint sent
    --  back comes back; Kept_Eyes: the eyes that stayed away, one a Boolean per eye from 1.
    --  Came_Back: Back was sent and every eye came back: a joint's push.
+   --  Noted, Way: the push of group Noted (Way its sign) is noted as it stood (Note_Stayed), once: as its drift sends
+   --  the body back, before the hold it goes back to, or where the body settled with it held; none for nought.
 
    function Eyes_From_Origin (M : Model) return Real_Array;
    --  Each eye's picture's change from where the push began (Mark_Origins) at the latest beat, from 1
@@ -62,7 +67,8 @@ package Driver.Robot.Motion is
    --  motions of the body (Flow), and the push's own displacements tell how far it reaches.
 
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real);
-   --  After a push of group G (Way: its sign) from a body at rest, held until the body settled: for every eye with an
+   --  After a push of group G (Way: its sign) from a body at rest, held until the body settled or its drift sent the
+   --  body back (Settle's Noted): for every eye with an
    --  origin (Mark_Origins), the cells whose picture moved from the origin's and stayed moved, by the flow from the
    --  origin's frame to the latest one (displaced beyond the cell's noise at rest, or too far to resolve), of the
    --  eye's textured cells: what the push left changed. A shake or a swing the body settled from leaves nothing.

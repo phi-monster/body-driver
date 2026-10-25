@@ -109,7 +109,9 @@ package body Driver.Robot.Motion is
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
       Kept_Eyes    : out Channel_Flags;
-      Came_Back    : out Boolean)
+      Came_Back    : out Boolean;
+      Noted        : Group_Id'Base;
+      Way          : Real)
    is
       B : Driver.Clock.Beat;
       --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
@@ -383,6 +385,17 @@ package body Driver.Robot.Motion is
             Drifting := Use_Back and then Standing and then Beats_Waited - Stood_Since > Lag
               and then (for some E in 1 .. Eyes => Drifted (Eye_Id (E)));
             if Drifting and then not Done and then not Sent_Back then
+               --  The push as it stood, noted before it is sent back (Note_Stayed): what it did while held, whatever its
+               --  drift does after. Noted only where the body settled with the push held, a push sent back on a drift
+               --  told nothing: the G1's arms, the body swaying on after each of their pushes, were sent back at every
+               --  one and came back, and in four of the six G1 boots of round p373s2 no push of one arm was noted
+               --  (10-25); that arm's wrist eye rode its hand, and the head's eye rode the arm. Noted as they stood,
+               --  rec315's ten recorded boots replayed came out right in 9 against 8, the G1's seed 2 boot with its
+               --  arm's pushes leaving 178 of its wrist eye's 510 cells beyond the flow's reach, against 37 of the
+               --  head eye's.
+               if Natural (Noted) > 0 then
+                  Note_Stayed (M, Noted, Way);
+               end if;
                Sent_Back := True;
                Stood_Before := Beats_Waited - Stood_Since;
                for E in 1 .. Eyes loop
@@ -415,6 +428,10 @@ package body Driver.Robot.Motion is
             Tell_At := 2 * Tell_At;
          end if;
       end loop;
+      --  And a push the body settled with, held: noted where it settled.
+      if Natural (Noted) > 0 and then not Sent_Back then
+         Note_Stayed (M, Noted, Way);
+      end if;
       --  The longest wait the body took to settle, from waits whose every eye stilled: one an eye ended going no
       --  farther (Eye_Nowhere) waited at least the longest before, and kept so it lengthened every wait after it.
       --  The G1, its balance swaying an eye on for a hundred beats after one push, then waited 114, 159 and 153
@@ -711,11 +728,11 @@ package body Driver.Robot.Motion is
       end loop;
    end Note_Stayed;
 
-   procedure Settle (M : in out Model; Beats_Waited : out Natural) is
+   procedure Settle (M : in out Model; Beats_Waited : out Natural; Noted : Group_Id'Base := 0; Way : Real := 0.0) is
       Kept, Back : Boolean;
       Eyes       : Channel_Flags (1 .. Eye_Count (M));
    begin
-      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes, Back);
+      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes, Back, Noted, Way);
    end Settle;
 
    procedure Settle
@@ -724,9 +741,11 @@ package body Driver.Robot.Motion is
       Beats_Waited : out Natural;
       Kept_Going   : out Boolean;
       Kept_Eyes    : out Channel_Flags;
-      Came_Back    : out Boolean) is
+      Came_Back    : out Boolean;
+      Noted        : Group_Id'Base := 0;
+      Way          : Real := 0.0) is
    begin
-      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes, Came_Back);
+      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes, Came_Back, Noted, Way);
    end Settle;
 
    procedure Judge
@@ -2492,16 +2511,14 @@ package body Driver.Robot.Motion is
             Kept, Came : Boolean;
             Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
          begin
-            Settle (M, Base, Waited, Kept, Kept_Eyes, Came);
+            --  What the last level's push left, as it stood (Settle's Noted), as a group's recognition notes it: the
+            --  graph tells an eye's own group and a closer's eye by it (Graph.Best_Of), and a group recognized one
+            --  channel at a time had none. RB-Y1's left finger, probed so, went to the arm whose wrist's eye showed it
+            --  in 43 cells against its own wrist's 42 (seed 1, paced rounds p89c and p96b, 10-24).
+            Settle (M, Base, Waited, Kept, Kept_Eyes, Came,
+                    Noted => (if Last_Offset > 0.0 then Ref.Group else 0), Way => Signs (Last_Way));
             if Came then
                Note_Comes_Back (M, Ref.Group, Ref.Channel);
-            end if;
-            --  What the last level's push left, held and neither sent back nor come back (Note_Stayed), as a group's
-            --  recognition notes it: the graph tells an eye's own group and a closer's eye by it (Graph.Best_Of), and a
-            --  group recognized one channel at a time had none. RB-Y1's left finger, probed so, went to the arm whose
-            --  wrist's eye showed it in 43 cells against its own wrist's 42 (seed 1, paced rounds p89c and p96b, 10-24).
-            if not Kept and then not Came and then Last_Offset > 0.0 then
-               Note_Stayed (M, Ref.Group, Signs (Last_Way));
             end if;
             if Kept then
                Note_Keeps_Going (M, Ref.Group, Ref.Channel, Kept_Eyes);

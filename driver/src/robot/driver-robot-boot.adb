@@ -348,19 +348,16 @@ package body Driver.Robot.Boot is
                      end if;
                   end Note;
                begin
+                  --  What the push left, as it stood (Settle's Noted; Graph: each eye's own group).
                   if Comes_Back (M, G, P.Channel) then
-                     Driver.Robot.Motion.Settle (M, Waited);
+                     Driver.Robot.Motion.Settle (M, Waited, Noted => G, Way => P.Sign);
                   else
                      Driver.Commands.Set_Target (Back, G, Here);
-                     Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                     Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came, Noted => G, Way => P.Sign);
                      Only_Whole (G, Kept, Kept_Eyes, Came);
                      Told := Kept or else Came;
                      Pushed := Driver.Robot.Motion.Eyes_From_Origin (M);
                      Note;
-                  end if;
-                  --  What the push left, where the settle did not send the body back (Graph: each eye's own group).
-                  if not Kept and then not Came then
-                     Driver.Robot.Motion.Note_Stayed (M, G, P.Sign);
                   end if;
                   Settled := Settled + Waited;
                   --  And back to where it was pushed from, a second push the same size the other way: a round of pushes
@@ -526,7 +523,7 @@ package body Driver.Robot.Boot is
                   --  from 7.06 to 3.93 and it "came back") drives on as it is pushed the other way, and a plain settle
                   --  waited a thousand beats for its view to still. Sent back as its pictures drift on while every
                   --  reading stands, and kept going: a speed after all.
-                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came, Noted => G, Way => Sign);
                   Only_Whole (G, Kept, Kept_Eyes, Came);
                   if Kept then
                      for C in 1 .. Size loop
@@ -534,8 +531,6 @@ package body Driver.Robot.Boot is
                      end loop;
                      Driver.Log.Line (Driver.Log.Robot, "boot: group" & G'Image & " keeps the body going as it is"
                                       & " pushed the other way: a speed");
-                  elsif not Came then
-                     Driver.Robot.Motion.Note_Stayed (M, G, Sign);
                   end if;
                end if;
                Go_To (G, Hold, Report);
@@ -638,11 +633,10 @@ package body Driver.Robot.Boot is
                   Driver.Robot.Motion.Settle (M, Waited);
                   Driver.Robot.Motion.Mark_Origins (M);
                   Go_To (G, Away, Report);
-                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                  --  What the push left, as it stood (Settle's Noted).
+                  Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came, Noted => G, Way => Sign);
                   Only_Whole (G, Kept, Kept_Eyes, Came);
-                  --  What the push left, where the settle did not send the body back.
                   if not Kept and then not Came then
-                     Driver.Robot.Motion.Note_Stayed (M, G, Sign);
                      declare
                         procedure Read_Ratio is
                         begin
