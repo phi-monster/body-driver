@@ -99,14 +99,20 @@ def room(spec):
 
 
 def plain_light(spec, parts):
-    """A diagnostic, never a hall's world (BD_PLAIN_LIGHT=1, or some of shadows,highlights,headlight,reflections): no
-    shadow falls (the shadow maps' frusta shrunk to nothing; every light shines as before: in MuJoCo 3.16 a light that
-    casts no shadow gives no light at all, and taking castshadow away left only the headlight and the ambient, 10-25),
-    no light or material gives a highlight, the headlight (which moves with whichever camera renders) gives no diffuse
-    light, no material reflects; all four, a surface looks the same from wherever a camera sees it: what the driver's
-    matches err by then is the matcher's own and not the scene's shadows of the moving arm, its mirror image in the
-    floor or the light that moves with the eye (step 2's fits, 10-25)."""
+    """A diagnostic, never a hall's world (BD_PLAIN_LIGHT=1, or some of shadows, highlights, headlight, reflections
+    and followers, comma-separated): no shadow falls (the shadow maps' frusta shrunk to nothing; every light shines as
+    before: in MuJoCo 3.16 a light that casts no shadow gives no light at all, and taking castshadow away left only the
+    headlight and the ambient, 10-25), no light or material gives a highlight, the headlight (which moves with
+    whichever camera renders) gives no diffuse light, no material reflects; all four, a surface looks the same from
+    wherever a camera sees it: what the driver's matches err by then is the matcher's own and not the scene's shadows
+    of the moving arm, its mirror image in the floor or the light that moves with the eye (step 2's fits, 10-25)."""
     every = parts == {"1"}
+    if "followers" in parts:
+        # Not among the four of "1": a light the scene aims at the robot or carries along with it (the Menagerie's
+        # UR5e and Shadow spotlight at wrist_2_link, ALOHA's two at the grippers, Panda's top light on its centre of
+        # mass) stays where the scene put it and shines the way it is set, as a room's lamp does.
+        for light in spec.lights:
+            light.mode = mujoco.mjtCamLight.mjCAMLIGHT_FIXED
     if every or "shadows" in parts:
         spec.visual.map.shadowclip = 1e-6
         spec.visual.map.shadowscale = 0.0
