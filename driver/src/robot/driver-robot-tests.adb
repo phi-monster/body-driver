@@ -8040,13 +8040,11 @@ package body Driver.Robot.Tests is
    --  Hadamard matrix of the pair's signs at the sweep's widest level, and the arm fitted again with them; until
    --  the order is told or no pair is named that was not turned. Scored against each arm's true order: told and
    --  right, told and wrong (the fit claims what is false), not told (its best order right or wrong).
-   --  Watched: an eye the arm does not carry saw the order of every two joints that are not neighbours along the arm
-   --  (Fit's Before; the parts between neighbours too small to see apart, as the hall's renders of 10-25 had them).
    --  Named: each pair is turned by the sizes of the turns the fit names for it (Fit_Report.Untold_Turns), as Boot
    --  turns it, in place of the sweep's widest level.
    procedure Order_Exam_At
      (Width, Height : Positive; Focal, Kept_Share, Matcher_Noise, Frame_Error, Tilt : Real; Seed : Long_Long_Integer;
-      Widest_Level : Real := 0.2; Watched : Boolean := False; Named : Boolean := False)
+      Widest_Level : Real := 0.2; Named : Boolean := False)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N        : constant := 6;
@@ -8145,23 +8143,8 @@ package body Driver.Robot.Tests is
                   Asked (F, I) := Changes (F, Order_Of (I)) /= 0.0;
                end loop;
             end loop;
-            if Watched then
-               declare
-                  --  Reading I is the true joint Order_Of (I), the true joints numbered from the base.
-                  Before : Fit.Flag_Matrix (1 .. N, 1 .. N);
-               begin
-                  for I in 1 .. N loop
-                     for K in 1 .. N loop
-                        Before (I, K) := Order_Of (I) + 1 < Order_Of (K);
-                     end loop;
-                  end loop;
-                  Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01], All_Seen (1 .. Seen), Width, Height, 0,
-                           Joints, Chain, Found, Report, Before => Before);
-               end;
-            else
-               Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01], All_Seen (1 .. Seen), Width, Height, 0,
-                        Joints, Chain, Found, Report);
-            end if;
+            Fit.Fit (Given, Asked, [for I in 1 .. N => abs Gain (I) * 0.01], All_Seen (1 .. Seen), Width, Height, 0,
+                     Joints, Chain, Found, Report);
          end Fit_Now;
       begin
          --  The arm: each axis tilted and each joint's place scaled and moved by a draw.
@@ -8310,18 +8293,12 @@ package body Driver.Robot.Tests is
    end Order_Exam_Hard;
 
    --  The order exam's arms swept a quarter as wide (the hall's wrist eyes near their tables, 10-25: a shoulder turns a
-   --  few degrees before its eye's view has moved half the picture), each watched by an eye that tells the order of its
-   --  joints that are not neighbours (Fit's Before): no wrong order may be told.
-   procedure Order_Exam_Watched is
-   begin
-      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000, Widest_Level => 0.05, Watched => True);
-   end Order_Exam_Watched;
-
-   --  The same, each pair turned by the sizes of the turns the fit names for it, as Boot turns it: no wrong order may
-   --  be told. Boot had taken a turn named with a minus sign for none (10-25, Fit_Report.Untold_Turns).
+   --  few degrees before its eye's view has moved half the picture), each pair the fit names turned by the sizes of the
+   --  turns it names, as Boot turns it: no wrong order may be told. Boot had taken a turn named with a minus sign for
+   --  none (10-25, Fit_Report.Untold_Turns).
    procedure Order_Exam_Named is
    begin
-      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000, Widest_Level => 0.05, Watched => True, Named => True);
+      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000, Widest_Level => 0.05, Named => True);
    end Order_Exam_Named;
 
    procedure Kinematics_Of_A_Drawn_Synthetic_Arm is
@@ -9454,12 +9431,9 @@ package body Driver.Robot.Tests is
                              & "and in other units is not determined, its lens off by a percent, or its joints' order "
                              & "along the arm not found", Kinematics_On_A_Drawn_Recording'Access);
       Driver.Tests.Register ("robot.order.exam", "the order exam's arms come out with a wrong order told", Order_Exam'Access);
-      Driver.Tests.Register ("robot.order.watched", "the order exam's arms, swept a quarter as wide and watched by an eye "
-                             & "that tells their joints' order but between neighbours, come out with a wrong order told",
-                             Order_Exam_Watched'Access);
-      Driver.Tests.Register ("robot.order.exam_named", "the order exam's arms, swept a quarter as wide and watched, each pair "
-                             & "the fit names turned by the sizes it names as Boot turns it, come out with a wrong order "
-                             & "told", Order_Exam_Named'Access);
+      Driver.Tests.Register ("robot.order.exam_named", "the order exam's arms, swept a quarter as wide, each pair the fit "
+                             & "names turned by the sizes it names as Boot turns it, come out with a wrong order told",
+                             Order_Exam_Named'Access);
       Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",

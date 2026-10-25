@@ -459,330 +459,6 @@ package body Driver.Robot.Kinematics is
         and then M.Graph.Effects (K).Verdict in Patch | Whole;
    end Sees;
 
-   --  A part of an arm moves with every joint between it and the base and with none beyond it. So an eye the arm does
-   --  not carry, seeing a part of its picture move with the arm (the lock-in's patch), shows the arm's joints in their
-   --  order: the cells a joint nearer the base moves hold every cell a joint farther out moves, and more. An arm's
-   --  watchers are such eyes, taken with their pictures as its sweep's reference is taken (Begin_Watch); at every
-   --  keyframe after it they tell, cell by cell, what moved and what stood (Watch_Keyframe); the joints' order they saw
-   --  goes to the arm's fit (Watched_Order, Fit's Before). Rendered in the hall at the reference poses of round p363s2
-   --  (10-25), each joint of an arm turned alone either way by 0.05 rad, the fixed eye of UR5e seed 3a told 11 of its
-   --  15 pairs of joints, Panda 1a's 16 of 21, ALOHA 1a's overhead eye 14 of 15, RB-Y1's and G1's heads 18 and 9 of
-   --  21, every one right; where the arm's eye saw it, the round's own fits had the order right and told for 3 of 55
-   --  arms of more than two joints. A cell a joint left standing is one it did not move by more than the flow tells:
-   --  a part an upstream joint moves along the line of sight stands by that reading, and a downstream joint seen to
-   --  move it says the reverse (RB-Y1's shoulder at 0.03 rad of the same renders: four pairs reversed, at 0.05 none).
-
-   --  Eye W sees a part of group G move, and not its whole view: the lock-in told a patch, or could not tell a patch
-   --  from the whole (UR5e seed 1a's base eye, half its cells on the arm, 10-25); an eye the group carries sees its view
-   --  move whole.
-   function Patch_Of (M : Model; W : Eye_Id; G : Group_Id) return Boolean is
-      K : constant Natural := (Natural (G) - 1) * Natural (M.Eyes.Length) + Natural (W);
-   begin
-      return K in M.Graph.Effects.First_Index .. M.Graph.Effects.Last_Index
-        and then M.Graph.Effects (K).Verdict in Patch | Undecided;
-   end Patch_Of;
-
-   --  The arm's watchers from its reference keyframe on: every eye but its own, not mounted on the arm, that sees a part
-   --  of its group move, and whose picture has stopped, with that picture.
-   procedure Begin_Watch (M : Model; R : in out Arm_Evidence) is
-   begin
-      R.Watchers.Clear;
-      for W in 1 .. Eye_Count (M) loop
-         declare
-            S      : Eye_Stream renames M.Eyes (Eye_Id (W));
-            Latest : constant Luma_Access := Latest_Frame (S);
-         begin
-            if Eye_Id (W) /= R.Eye and then Patch_Of (M, Eye_Id (W), R.Group) and then Latest /= null
-              and then not (Eye_Mount (M, Eye_Id (W)).Kind = Arm_Carried and then Eye_Mount (M, Eye_Id (W)).Arm = R.Arm)
-              and then Stillness.Eye_Settled (M, Eye_Id (W)) and then Latest'Length = S.Grid.Width * S.Grid.Height
-            then
-               declare
-                  Wr : Watcher := (Eye => Eye_Id (W), others => <>);
-               begin
-                  Wr.Reference.Reserve_Capacity (Ada.Containers.Count_Type (Latest'Length));
-                  for X of Latest.all loop
-                     Wr.Reference.Append (X);
-                  end loop;
-                  R.Watchers.Append (Wr);
-               end;
-            end if;
-         end;
-      end loop;
-   end Begin_Watch;
-
-   --  What the arm's watchers see at keyframe K (Keyframe.Watched): of every watcher whose picture has stopped, each
-   --  cell of its grid that can show a displacement either moved from the reference's picture (beyond the flow's reach,
-   --  or by more than its noise at the driver's gate, as Motion reads a push's lasting change) or stood. At the
-   --  reference's readings (Same) the moved ones are the noise's, counted into the watcher's rate.
-   procedure Watch_Keyframe (M : Model; R : in out Arm_Evidence; K : in out Keyframe; Same : Boolean) is
-      Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
-      type Flag_Access is access Flow.Flag_Array;
-      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Real_Access);
-      procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flag_Access);
-   begin
-      for I in R.Watchers.First_Index .. R.Watchers.Last_Index loop
-         declare
-            Wr     : Watcher renames R.Watchers (I);
-            S      : Eye_Stream renames M.Eyes (Wr.Eye);
-            N      : constant Natural := Cells (S.Grid);
-            Latest : constant Luma_Access := Latest_Frame (S);
-         begin
-            if Latest /= null and then Stillness.Eye_Settled (M, Wr.Eye) and then N > 0
-              and then Natural (Wr.Reference.Length) = Latest'Length
-              and then Natural (S.Luma_Variance.Length) >= N
-            then
-               declare
-                  Ref      : Real_Access := new Real_Array (1 .. Latest'Length);
-                  Du       : Real_Access := new Real_Array (1 .. N);
-                  Dv       : Real_Access := new Real_Array (1 .. N);
-                  Cond     : Real_Access := new Real_Array (1 .. N);
-                  Noise    : Real_Access := new Real_Array (1 .. N);
-                  Resolved : Flag_Access := new Flow.Flag_Array (1 .. N);
-                  Wt       : Watch := (Eye => Wr.Eye, others => <>);
-                  Moved_N, Told_N : Natural := 0;
-               begin
-                  for P in Ref'Range loop
-                     Ref (P) := Wr.Reference (P - 1);
-                  end loop;
-                  for C in 1 .. N loop
-                     Noise (C) := S.Luma_Variance (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
-                  end loop;
-                  Flow.Displacements (S.Grid, Ref.all, Latest.all, Noise.all, Du.all, Dv.all, Cond.all, Resolved.all);
-                  --  An eye the body carries (a head on a torso that sways, on a base that creeps) moves whole by a
-                  --  little between the reference and a keyframe: what every cell moved by, the median of the followed
-                  --  ones', is that, and each cell is judged by what it moved beyond it. An eye fixed in the world has no
-                  --  motion of its own, and the median of its cells is the arm's where the arm fills half its view
-                  --  (UR5e seed 1a's base eye in p366s2, 10-25: its standing cells then read as moved by every wide
-                  --  turn, and the joints that moved the most were put first, a wrong order told).
-                  if Eye_Mount (M, Wr.Eye).Kind /= World_Fixed then
-                  declare
-                     Us, Vs : Real_Access := new Real_Array (1 .. N);
-                     Kept   : Natural := 0;
-                  begin
-                     for C in 1 .. N loop
-                        if Cond (C) > 0.0 and then Resolved (C)
-                          and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1))
-                        then
-                           Kept := Kept + 1;
-                           Us (Kept) := Du (C);
-                           Vs (Kept) := Dv (C);
-                        end if;
-                     end loop;
-                     if Kept > 0 then
-                        declare
-                           Mu : constant Real := Driver.Stats.Median (Us (1 .. Kept));
-                           Mv : constant Real := Driver.Stats.Median (Vs (1 .. Kept));
-                        begin
-                           for C in 1 .. N loop
-                              Du (C) := Du (C) - Mu;
-                              Dv (C) := Dv (C) - Mv;
-                           end loop;
-                        end;
-                     end if;
-                     Free (Us);
-                     Free (Vs);
-                  end;
-                  end if;
-                  for C in 1 .. N loop
-                     declare
-                        Mv, St : Boolean := False;
-                     begin
-                        if Cond (C) > 0.0 and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1)) then
-                           Mv := not Resolved (C)
-                             or else Driver.Uncertain.Significant
-                                       (Gate, Ada.Numerics.Long_Elementary_Functions.Sqrt (Du (C) ** 2 + Dv (C) ** 2),
-                                        Rest_Factor_Of (S, C - 1) * Flow.Noise_Floor (Cond (C), S.Luma_Variance (C - 1)));
-                           St := not Mv;
-                        end if;
-                        Wt.Moved.Append (Mv);
-                        Wt.Stood.Append (St);
-                        Moved_N := Moved_N + (if Mv then 1 else 0);
-                        Told_N := Told_N + (if Mv or else St then 1 else 0);
-                     end;
-                  end loop;
-                  if Same then
-                     Wr.Twin_Moved := Wr.Twin_Moved + Moved_N;
-                     Wr.Twin_Told := Wr.Twin_Told + Told_N;
-                  end if;
-                  K.Watched.Append (Wt);
-                  Free (Ref);
-                  Free (Du);
-                  Free (Dv);
-                  Free (Cond);
-                  Free (Noise);
-                  Free (Resolved);
-               end;
-            end if;
-         end;
-      end loop;
-   end Watch_Keyframe;
-
-   --  The joints' order the arm's watchers saw (Fit's Before). Per joint, its widest keyframe either way of those that
-   --  turned it alone (asked, by the step a keyframe counts from, and every other joint within its step), what each
-   --  watcher saw there; a cell the joint moved at both, and one it left standing at both (a joint not turned both ways
-   --  tells nothing). By a watcher, joint J lies before K when the cells J moved that K left standing are more than the
-   --  watcher's noise gives (the binomial's upper tail at Z, at the square of its cells' rate of moving at the
-   --  reference's readings, Laplace's: one more over two more) and the cells K moved that J left standing are not; by
-   --  the arm, when some watcher says so and none the reverse. Pairs that would go round in a circle say nothing. One
-   --  keyframe a way read a twentieth of a fixed eye's cells as moved at the reference's own readings, and a joint
-   --  turned one way alone was put before one turned both (UR5e seed 1a of p366s2, 10-25).
-   procedure Watched_Order
-     (M : Model; R : Arm_Evidence; N : Positive; Before : out Fit.Flag_Matrix;
-      Said : out Ada.Strings.Unbounded.Unbounded_String)
-     with Pre => Before'First (1) = 1 and then Before'First (2) = 1 and then Before'Length (1) = N
-                 and then Before'Length (2) = N
-   is
-      Frames : constant Natural := Natural (R.Frames.Length);
-      Tail   : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z) / 2.0;
-      Steps  : Real_Array (1 .. N);
-      Alone  : array (1 .. Frames) of Natural := [others => 0];   --  the joint a keyframe turned alone; 0, none
-      Change : array (1 .. Frames) of Real := [others => 0.0];   --  and its change there
-      Said_By : array (1 .. N, 1 .. N) of Boolean := [others => [others => False]];
-   begin
-      Before := [others => [others => False]];
-      Said := Ada.Strings.Unbounded.Null_Unbounded_String;
-      if Frames < 2 or else R.Watchers.Is_Empty then
-         return;
-      end if;
-      for C in 1 .. N loop
-         Steps (C) := Step_Of (M, R.Arm, C);
-      end loop;
-      for F in 2 .. Frames loop
-         declare
-            J0     : Natural := 0;
-            Beside : Boolean := False;   --  another joint stands off the reference by its step
-         begin
-            for C in 1 .. N loop
-               declare
-                  D    : constant Real := R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1);
-                  Away : constant Boolean := (if Steps (C) > 0.0 then abs D >= Steps (C) else D /= 0.0);
-                  Ask  : constant Boolean :=
-                    C - 1 < Natural (R.Frames (F).Asked.Length) and then R.Frames (F).Asked (C - 1);
-               begin
-                  if Away and then Ask and then Steps (C) > 0.0 and then J0 = 0 then
-                     J0 := C;
-                     Change (F) := D;
-                  elsif Away then
-                     Beside := True;
-                  end if;
-               end;
-            end loop;
-            if J0 > 0 and then not Beside then
-               Alone (F) := J0;
-            end if;
-         end;
-      end loop;
-      for Wi in R.Watchers.First_Index .. R.Watchers.Last_Index loop
-         declare
-            Wr    : Watcher renames R.Watchers (Wi);
-            Plus, Minus : array (1 .. N) of Natural := [others => 0];
-            Most, Least : array (1 .. N) of Real := [others => 0.0];
-            Uses  : array (1 .. N) of Natural := [others => 0];
-            Count : Natural := 0;   --  the watcher's cells
-            P     : constant Real := (Real (Wr.Twin_Moved) + 1.0) / (Real (Wr.Twin_Told) + 2.0);
-            --  The watcher's watch of keyframe F: its index in Watched, 0 for none.
-            function Watch_At (F : Positive) return Natural is
-            begin
-               for I in R.Frames (F).Watched.First_Index .. R.Frames (F).Watched.Last_Index loop
-                  if R.Frames (F).Watched (I).Eye = Wr.Eye then
-                     return I;
-                  end if;
-               end loop;
-               return 0;
-            end Watch_At;
-         begin
-            for F in 2 .. Frames loop
-               if Alone (F) > 0 and then Watch_At (F) > 0 then
-                  declare
-                     J : constant Positive := Alone (F);
-                  begin
-                     Count := Natural (R.Frames (F).Watched (Watch_At (F)).Moved.Length);
-                     if Change (F) > Most (J) then
-                        Most (J) := Change (F);
-                        Plus (J) := F;
-                     elsif Change (F) < Least (J) then
-                        Least (J) := Change (F);
-                        Minus (J) := F;
-                     end if;
-                  end;
-               end if;
-            end loop;
-            if Count > 0 then
-               declare
-                  type Cell_Grid_Flags is array (1 .. N, 1 .. Count) of Boolean;
-                  Moves  : Cell_Grid_Flags := [others => [others => True]];
-                  Stands : Cell_Grid_Flags := [others => [others => True]];
-               begin
-                  for J in 1 .. N loop
-                     for F of Natural_Array'[Plus (J), Minus (J)] loop
-                        if F > 0 and then Natural (R.Frames (F).Watched (Watch_At (F)).Moved.Length) = Count then
-                           Uses (J) := Uses (J) + 1;
-                           declare
-                              Wt : Watch renames R.Frames (F).Watched (Watch_At (F));
-                           begin
-                              for C in 1 .. Count loop
-                                 Moves (J, C) := Moves (J, C) and then Wt.Moved (C - 1);
-                                 Stands (J, C) := Stands (J, C) and then Wt.Stood (C - 1);
-                              end loop;
-                           end;
-                        end if;
-                     end loop;
-                  end loop;
-                  for J in 1 .. N loop
-                     for K in 1 .. N loop
-                        if J /= K and then Uses (J) = 2 and then Uses (K) = 2 then
-                           declare
-                              Jk, Kj, Stand_K, Stand_J : Natural := 0;
-                              function Significant (E, Of_N : Natural) return Boolean is
-                                (Driver.Distributions.Binomial_Upper_Tail (E, Of_N, P ** 2) < Tail);
-                           begin
-                              for C in 1 .. Count loop
-                                 Stand_K := Stand_K + (if Stands (K, C) then 1 else 0);
-                                 Stand_J := Stand_J + (if Stands (J, C) then 1 else 0);
-                                 Jk := Jk + (if Moves (J, C) and then Stands (K, C) then 1 else 0);
-                                 Kj := Kj + (if Moves (K, C) and then Stands (J, C) then 1 else 0);
-                              end loop;
-                              if Significant (Jk, Stand_K) and then not Significant (Kj, Stand_J) then
-                                 Said_By (J, K) := True;
-                                 Ada.Strings.Unbounded.Append
-                                   (Said, " c" & Driver.Log.Image (J) & " before c" & Driver.Log.Image (K) & " (eye"
-                                          & Wr.Eye'Image & ":" & Jk'Image & " of" & Stand_K'Image & " cells, against"
-                                          & Kj'Image & " of" & Stand_J'Image & ")");
-                              end if;
-                           end;
-                        end if;
-                     end loop;
-                  end loop;
-               end;
-            end if;
-         end;
-      end loop;
-      for J in 1 .. N loop
-         for K in 1 .. N loop
-            Before (J, K) := Said_By (J, K) and then not Said_By (K, J);
-         end loop;
-      end loop;
-      --  Pairs that go round in a circle (no joint left whose every joint before it is placed) say nothing.
-      declare
-         Placed : array (1 .. N) of Boolean := [others => False];
-         Moved  : Boolean := True;
-      begin
-         while Moved loop
-            Moved := False;
-            for J in 1 .. N loop
-               if not Placed (J) and then (for all I in 1 .. N => Placed (I) or else not Before (I, J)) then
-                  Placed (J) := True;
-                  Moved := True;
-               end if;
-            end loop;
-         end loop;
-         if (for some X of Placed => not X) then
-            Before := [others => [others => False]];
-            Ada.Strings.Unbounded.Append (Said, "; these go round in a circle: none taken");
-         end if;
-      end;
-   end Watched_Order;
-
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
@@ -900,13 +576,7 @@ package body Driver.Robot.Kinematics is
                                  end loop;
                                  K.Image := O.Images (E);
                                  K.Asked := R.Asking;
-                                 if not R.Frames.Is_Empty then
-                                    Watch_Keyframe (M, R, K, Same => At_Reference);
-                                 end if;
                                  R.Frames.Append (K);
-                                 if Natural (R.Frames.Length) = 1 then
-                                    Begin_Watch (M, R);
-                                 end if;
                               end;
                               if At_Reference and then Natural (R.Frames.Length) > 1 then
                                  R.Twin_Taken := True;
@@ -3197,26 +2867,7 @@ package body Driver.Robot.Kinematics is
                      declare
                         Turned : array (1 .. N) of Boolean := [others => False];
                         Count  : Natural := 0;
-                        --  The joints' order the eyes that watch the arm saw (Watched_Order).
-                        Before : Fit.Flag_Matrix (1 .. N, 1 .. N);
-                        Watched_Text : Ada.Strings.Unbounded.Unbounded_String;
                      begin
-                        Watched_Order (M, R, N, Before, Watched_Text);
-                        if not R.Watchers.Is_Empty then
-                           declare
-                              Eyes : Ada.Strings.Unbounded.Unbounded_String;
-                           begin
-                              for Wr of R.Watchers loop
-                                 Ada.Strings.Unbounded.Append
-                                   (Eyes, Wr.Eye'Image & " (its cells moved at the reference's readings" & Wr.Twin_Moved'Image
-                                          & " of" & Wr.Twin_Told'Image & ")");
-                              end loop;
-                              Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & "'s joints as the eyes"
-                                               & Ada.Strings.Unbounded.To_String (Eyes) & " saw them move:"
-                                               & (if Ada.Strings.Unbounded.Length (Watched_Text) = 0 then " none told"
-                                                  else Ada.Strings.Unbounded.To_String (Watched_Text)));
-                           end;
-                        end if;
                         for C in 1 .. N loop
                            for F in 1 .. Frames loop
                               if abs Changes (F, C) >= Visible (C) then
@@ -3242,7 +2893,7 @@ package body Driver.Robot.Kinematics is
                            Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
                                     M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,
                                     Who => "arm" & R.Arm'Image, From => Start, Play => Play.all,
-                                    Slack_Start => Slack.all, Across_Joints => R.Across_Due, Before => Before);
+                                    Slack_Start => Slack.all, Across_Joints => R.Across_Due);
                         else
                            declare
                               Index     : array (1 .. Count) of Positive;   --  the channel of each joint fitted
@@ -3257,7 +2908,6 @@ package body Driver.Robot.Kinematics is
                               Chain_R   : Fit.Chain_Order (1 .. Count);
                               Start_R   : Fit.Fit_Start (if Start.N > 0 then Count else 0);
                               Held      : Ada.Strings.Unbounded.Unbounded_String;
-                              Before_R  : Fit.Flag_Matrix (1 .. Count, 1 .. Count);
                            begin
                               for C in 1 .. N loop
                                  if Turned (C) then
@@ -3273,11 +2923,6 @@ package body Driver.Robot.Kinematics is
                                     Changes_R (F, J) := Changes (F, Index (J));
                                     Asked_R (F, J) := Asked (F, Index (J));
                                     Play_R.Upto (F, J) := Play.Upto (F, Index (J));
-                                 end loop;
-                              end loop;
-                              for J in 1 .. Count loop
-                                 for L in 1 .. Count loop
-                                    Before_R (J, L) := Before (Index (J), Index (L));
                                  end loop;
                               end loop;
                               for J in 1 .. Count loop
@@ -3333,7 +2978,7 @@ package body Driver.Robot.Kinematics is
                                          (if Slack'Length = 2 * N
                                           then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]
                                           else Fit.No_Slack),
-                                       Across_Joints => R.Across_Due, Before => Before_R);
+                                       Across_Joints => R.Across_Due);
                               --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
                               --  of the chain, their terms nought.
                               for C in 1 .. N loop

@@ -769,37 +769,13 @@ private
    end record;
 
    --  The kinematics' evidence for one arm and its eye (Driver.Robot.Kinematics).
-   --  What an eye the arm does not carry, seeing the arm as a patch of its picture, saw at one keyframe of the arm's
-   --  sweep against its picture at the arm's reference (Kinematics.Watch_Keyframe): per cell of its grid, whether the
-   --  cell's content moved (beyond its noise, or beyond the flow's reach) and whether it stood (followed, within its
-   --  noise); a cell with nothing to follow neither.
-   type Watch is record
-      Eye          : Eye_Id'Base := 0;
-      Moved, Stood : Flag_Vectors.Vector;
-   end record;
-
-   package Watch_Vectors is new Ada.Containers.Vectors (Positive, Watch);
-
    type Keyframe is record
       Beat     : Natural := 0;
       Readings : Real_Vectors.Vector;   --  the arm's readings, still
       Image    : Driver.Images.Image;    --  what its eye saw, still
       Asked    : Flag_Vectors.Vector;    --  per channel: the sweep asked the joint to turn for this frame
                                          --  (Kinematics.Asking); none for a frame no push of the sweep's asked for
-      Watched  : Watch_Vectors.Vector;   --  what each eye that watches the arm saw of it (Arm_Evidence.Watchers)
    end record;
-
-   --  An eye that watches an arm's sweep (Kinematics.Watch_Keyframe): its picture at the arm's reference, row after
-   --  row, and of the keyframes at the reference's readings, how many of its cells moved by its noise alone of how many
-   --  it could tell: how often a cell that stood is read as moved.
-   type Watcher is record
-      Eye        : Eye_Id'Base := 0;
-      Reference  : Real_Vectors.Vector;
-      Twin_Moved : Natural := 0;
-      Twin_Told  : Natural := 0;
-   end record;
-
-   package Watcher_Vectors is new Ada.Containers.Vectors (Positive, Watcher);
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
 
@@ -947,9 +923,6 @@ private
       --  told yet). Before its keyframes tell which points ride with the eye (Still), these are the points that
       --  tell the view's common motion (Keyframes.Add's Riding).
       Chain    : Driver.Alignment.Keyframes.Chain;   --  the reference's pyramid and what its keyframes showed
-      Watchers : Watcher_Vectors.Vector;
-      --  The eyes the arm does not carry that saw it as a patch of their pictures when its reference was taken, each
-      --  with its picture then: what they see of its keyframes tells its joints' order (Kinematics.Watched_Order).
       Aligned  : Natural := 0;   --  how many of Frames are aligned into Matches (Kinematics.Align_New)
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
       Revision : Natural := 0;

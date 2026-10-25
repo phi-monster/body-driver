@@ -361,9 +361,6 @@ package Driver.Robot.Kinematics.Fit is
 
    type Flag_Matrix is array (Positive range <>, Positive range <>) of Boolean;
 
-   No_Before : constant Flag_Matrix (1 .. 0, 1 .. 0) := [others => [others => False]];
-   --  No pair of joints whose order an eye the arm does not carry saw (Fit's Before).
-
    --  Where a fit may begin from (Fit's From): a fit of the same arm just made, on nearly the same sightings, its joints,
    --  their order along the arm, its lens, and its focal search's width and range (Fit_Report); none unless Valid.
    type Fit_Start (N : Natural) is record
@@ -448,18 +445,12 @@ package Driver.Robot.Kinematics.Fit is
       Slack_Start : Real_Array := No_Slack;
       --  with Play, per joint its half slack and place at the reference as measured (Measure_Slack): the stages before
       --  the refinement take the changes less the slack's, and the refinement begins from it
-      Across_Joints : Boolean := False;
+      Across_Joints : Boolean := False)
       --  the jackknife over joints joins the covariance (each joint's own keyframes left out in turn, the fit begun
       --  from itself, its last stage alone): asked for once an arm's sweep has ended, not at every estimate
-      Before     : Flag_Matrix := No_Before)
-      --  per pair of joints (J, K): an eye the arm does not carry saw joint J lie between joint K and the base (the parts
-      --  of the arm K moved J moved too, and J moved parts K left standing: Kinematics' watchers); no order that puts K
-      --  before J is weighed or kept, and the order is told against every such order
      with Pre => Changes'Length (2) = Visible'Length and then Joints'Length = Visible'Length
                  and then Asked'Length (1) = Changes'Length (1) and then Asked'Length (2) = Visible'Length
-                 and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1)
-                 and then (Before'Length (1) = 0
-                           or else (Before'Length (1) = Visible'Length and then Before'Length (2) = Visible'Length));
+                 and then Chain'Length = Visible'Length and then Unit_Frames <= Changes'Length (1);
    --  The covariance is the inverse normal equations around the spread of the
    --  gradient (Conley's sandwich), made positive semi-definite (Sandwich). The
    --  spread weights every pair of residual rows by the covariance of their

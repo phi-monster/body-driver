@@ -3987,8 +3987,7 @@ package body Driver.Robot.Kinematics.Fit is
       Who        : String := "";
       From       : Fit_Start := No_Start;
       Play       : Play_Paths := No_Play;
-      Slack_Start : Real_Array := No_Slack;
-      Before     : Flag_Matrix := No_Before)
+      Slack_Start : Real_Array := No_Slack)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -7178,55 +7177,6 @@ package body Driver.Robot.Kinematics.Fit is
 
             Arm : constant String := (if Who = "" then "the arm" else Who);
 
-            --  What an eye that watched the arm saw of its order (Before): joint J lies between joint K and the base when
-            --  the parts K moved J moved too, and J moved parts K left standing. An order that puts K before J is no
-            --  order of this arm: none such is scored, weighed or kept, and every one is told against.
-            Watched : constant Boolean := Before'Length (1) = N and then N > 1;
-            function Violates (C : Chain_Order) return Boolean is
-               Pos : array (1 .. N) of Natural := [others => 0];
-            begin
-               if not Watched then
-                  return False;
-               end if;
-               for P in 1 .. N loop
-                  Pos (C (C'First + P - 1)) := P;
-               end loop;
-               for J in 1 .. N loop
-                  for K in 1 .. N loop
-                     if Before (Before'First (1) + J - 1, Before'First (2) + K - 1) and then Pos (K) < Pos (J) then
-                        return True;
-                     end if;
-                  end loop;
-               end loop;
-               return False;
-            end Violates;
-            --  C as near as Before lets it stand: joint after joint, the first of C's not placed yet whose every joint
-            --  seen before it is placed (Kinematics gives no Before that goes round in a circle).
-            function Agreeing (C : Chain_Order) return Chain_Order is
-               Result : Chain_Order (1 .. N) := C;
-               Placed : array (1 .. N) of Boolean := [others => False];
-            begin
-               for P in 1 .. N loop
-                  for Q in 1 .. N loop
-                     declare
-                        J : constant Positive := C (C'First + Q - 1);
-                     begin
-                        if not Placed (J)
-                          and then (for all I in 1 .. N =>
-                                      Placed (I) or else not Before (Before'First (1) + I - 1, Before'First (2) + J - 1))
-                        then
-                           Result (P) := J;
-                           Placed (J) := True;
-                           exit;
-                        end if;
-                     end;
-                  end loop;
-               end loop;
-               return Result;
-            end Agreeing;
-            --  The orders one move from the order kept (and the cheap score's least) that Before ruled out, this pass.
-            Against : Natural := 0;
-
             --  The sightings by keyframe: those of keyframe F are By_Frame (First_Of (F) .. First_Of (F) + Count_Of (F)
             --  - 1), indices into Sight.
             Count_Of, First_Of : array (1 .. Frames) of Natural := [others => 0];
@@ -7314,9 +7264,6 @@ package body Driver.Robot.Kinematics.Fit is
             function Cheap (C : Chain_Order) return Real is
                K : Natural := 0;
             begin
-               if Violates (C) then
-                  return Real'Last;
-               end if;
                Cheaps := Cheaps + 1;
                for M in 1 .. Multi_Count loop
                   declare
@@ -8099,11 +8046,6 @@ package body Driver.Robot.Kinematics.Fit is
             if From.Valid and then From.N = N then
                Start := From.Chain;
             end if;
-            --  Begun from an order Before rules out (the fit begun from was made before an eye saw it), from the order
-            --  nearest it that Before allows.
-            if Violates (Start) then
-               Start := Agreeing (Start);
-            end if;
             --  Every order is fitted from the joints and lens of the keyframes of one joint each (Unordered), which
             --  no order changes: from the joints of the order kept, fitted to it, the true order of the bench's s36
             --  (10-20) came to 1.3 px on the keyframes of several joints, its own fit from those of one joint's to 0.24.
@@ -8137,7 +8079,6 @@ package body Driver.Robot.Kinematics.Fit is
                   Adequacy (Here, Single_M, Multi_M, Adequate);
                   Global (Here.Order, G, Gm, Starts);
                   Closes := 0;
-                  Against := 0;
                   if G /= Here.Order then
                      Closes := 1;
                      Close (1) := G;
@@ -8156,9 +8097,7 @@ package body Driver.Robot.Kinematics.Fit is
                               --  does, and weighing only the moves that score close to it kept the wrong order: w20's
                               --  arm 1 at 77 keyframes (replayed from its dump, 10-20) was told as 2 1 6 3 5 4 with no
                               --  order weighed, where the truth, 1 6 3 2 5 4, is one move from it.
-                              if Violates (C) then
-                                 Against := Against + 1;
-                              elsif C /= G then
+                              if C /= G then
                                  Closes := Closes + 1;
                                  Close (Closes) := C;
                                  Close_M (Closes) := Mc;
@@ -8284,9 +8223,7 @@ package body Driver.Robot.Kinematics.Fit is
                                    & Fitted_Now'Image & " of" & Closes'Image & " orders weighed fitted in themselves"
                                    & (if Best > 0 then ", the least " & Image (Close (Best)) & " at "
                                       & Driver.Log.Image (Best_M, 3) & " px"
-                                      else ", none less")
-                                   & (if Watched then ";" & Against'Image & " against what the eyes that watch it saw"
-                                      else ""));
+                                      else ", none less"));
                   exit when Best = 0;
                   Here := Close_Fit (Best);
                end;
@@ -8341,7 +8278,11 @@ package body Driver.Robot.Kinematics.Fit is
                   and then (for all J of Here.Joints =>
                               Finite (J.C) and then (for all A in 1 .. 3 => Finite (J.W (A)) and then Finite (J.P (A)))));
 
-               procedure Separation (C : Chain_Order; Mv : Move; Median, Reached : out Real; Count : out Natural) is
+               --  Anywhere: over every point both orders put in front of the eye, in the picture or not (how far apart
+               --  the two arms are, not what a keyframe of the move would show).
+               procedure Separation
+                 (C : Chain_Order; Mv : Move; Median, Reached : out Real; Count : out Natural; Anywhere : Boolean := False)
+               is
                begin
                   Count := 0;
                   Median := 0.0;
@@ -8367,10 +8308,10 @@ package body Driver.Robot.Kinematics.Fit is
                            begin
                               Project (Here.L, Back_1 * P, U1, V1, A1);
                               Project (Here.L, Back_2 * P, U2, V2, A2);
-                              if A1 and then In_Picture (U1, V1) then
+                              if A1 and then (Anywhere or else In_Picture (U1, V1)) then
                                  Kf := Kf + 1;
                                  Far (Kf) := (if A2 then Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2) else Real'Last);
-                                 if A2 and then In_Picture (U2, V2) then
+                                 if A2 and then (Anywhere or else In_Picture (U2, V2)) then
                                     Count := Count + 1;
                                     Dist (Count) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2);
                                  end if;
@@ -8393,6 +8334,7 @@ package body Driver.Robot.Kinematics.Fit is
                --  Per order weighed and untold, the move that tells it most and how much.
                Move_Of  : array (1 .. Neighbours) of Move;
                Pow_Of   : Real_Array (1 .. Neighbours) := [others => 0.0];
+               Followed_Of : array (1 .. Neighbours) of Boolean := [others => False];   --  Move_Of is such a turn
                --  And how many keyframes put it and the order kept apart (Judge over every keyframe): an order no
                --  keyframe tells from the order kept waits for the turns that would.
                Telling_Of : array (1 .. Neighbours) of Natural := [others => 0];
@@ -8442,6 +8384,9 @@ package body Driver.Robot.Kinematics.Fit is
                            Pos       : array (1 .. N) of Natural := [others => 0];
                            Best_Mv   : Move;
                            Best_Pow  : Real := 0.0;
+                           --  And the most any pair it swaps tells it by turned as wide as the sweep turned each, every
+                           --  point both arms put before the eye counted (Separation's Anywhere).
+                           Reach_Pow : Real := 0.0;
                         begin
                            for P in 1 .. N loop
                               Pos (Close (K) (P)) := P;
@@ -8463,6 +8408,18 @@ package body Driver.Robot.Kinematics.Fit is
                                                    D, Far : Real;
                                                    Cnt    : Natural;
                                                 begin
+                                                   if Share = 1.0 then
+                                                      declare
+                                                         Da, Fa : Real;
+                                                         Ca     : Natural;
+                                                      begin
+                                                         Separation (Close (K), Mv, Da, Fa, Ca, Anywhere => True);
+                                                         if Ca > 0 then
+                                                            Reach_Pow := Real'Max
+                                                              (Reach_Pow, Da / Driver.Stats.Median_Sigma (Scatter, Ca));
+                                                         end if;
+                                                      end;
+                                                   end if;
                                                    Separation (Close (K), Mv, D, Far, Cnt);
                                                    if Cnt > 0 and then Far <= Followable then
                                                       declare
@@ -8490,6 +8447,7 @@ package body Driver.Robot.Kinematics.Fit is
                            end loop;
                            if Best_Pow > Driver.Conventions.Z then
                               Untold_Of (K) := True;
+                              Followed_Of (K) := True;
                               Untold_Here := Untold_Here + 1;
                               Move_Of (K) := Best_Mv;
                               Pow_Of (K) := Best_Pow;
@@ -8501,10 +8459,25 @@ package body Driver.Robot.Kinematics.Fit is
                                                                                               Ada.Strings.Left)
                                        & " with c" & Ada.Strings.Fixed.Trim (Best_Mv.J'Image, Ada.Strings.Left)
                                        & " tells it by " & Driver.Log.Image (Best_Pow, 1) & " of its error]");
+                           --  Untold where the two arms part as the sweep turns them, though no turn a narrow window
+                           --  follows shows it: no pair is named for it, and the order is not told. Counted as the same
+                           --  arm, the orders no followed turn told were told against: p368s2's Stretch 3b and 2a
+                           --  (10-25) told 1 2 3 4 5 for the arm whose truth is 2 4 1 3 5 and 3 5 1 4 2, eleven and
+                           --  sixteen orders "the same arm", the wrist's yaw put before the arm's lift and reach.
+                           elsif Reach_Pow > Driver.Conventions.Z then
+                              Untold_Of (K) := True;
+                              Untold_Here := Untold_Here + 1;
+                              Telling_Of (K) := Judge (Hu.all, Hv.all, Cu.all, Cv.all, 0).Telling;
+                              Ada.Strings.Unbounded.Append
+                                (Said, " [" & Image (Close (K)) & ", not told on "
+                                       & Why_Not_Told (Hu.all, Hv.all, Cu.all, Cv.all)
+                                       & "; turned as wide as the sweep turned them its pairs tell it by "
+                                       & Driver.Log.Image (Reach_Pow, 1) & " of its error, no turn a narrow window"
+                                       & " follows by Z]");
                            else
                               Same_Arm := Same_Arm + 1;
                               Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
-                                                            & " followed tells it by Z)");
+                                                            & " as wide as the sweep's tells it by Z)");
                            end if;
                         end;
                      end if;
@@ -8602,7 +8575,7 @@ package body Driver.Robot.Kinematics.Fit is
                end if;
                --  The moves of the orders still untold.
                for K in 1 .. Closes loop
-                  if Untold_Of (K) then
+                  if Untold_Of (K) and then Followed_Of (K) then
                      declare
                         Mv : Move renames Move_Of (K);
                      begin
@@ -8658,8 +8631,6 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
                                 & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
                                 & Same_Arm'Image & " the same arm"
-                                & (if Watched then "," & Against'Image & " against what the eyes that watch it saw"
-                                   else "")
                                 & (if Adequate then "" else "; it explains the keyframes of several joints worse ("
                                    & Driver.Log.Image (Multi_M, 3) & " px against "
                                    & Driver.Log.Image (Single_M, 3) & ")")
@@ -8739,8 +8710,7 @@ package body Driver.Robot.Kinematics.Fit is
       From       : Fit_Start := No_Start;
       Play       : Play_Paths := No_Play;
       Slack_Start : Real_Array := No_Slack;
-      Across_Joints : Boolean := False;
-      Before     : Flag_Matrix := No_Before)
+      Across_Joints : Boolean := False)
    is
       N      : constant Natural := Visible'Length;
       Frames : constant Natural := Changes'Length (1);
@@ -8759,7 +8729,7 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          if Relays = 0 then
             Fit_Stages (Changes, Asked, Visible, Sight, Sight (Sight'First .. Sight'First - 1), Width, Height,
-                        Unit_Frames, Jx, Cx, Lx, Rx, Who_Now, Start, Play, Slack_Start, Before);
+                        Unit_Frames, Jx, Cx, Lx, Rx, Who_Now, Start, Play, Slack_Start);
          else
             declare
                type Sighting_Access is access Sighting_Array;
@@ -8778,7 +8748,7 @@ package body Driver.Robot.Kinematics.Fit is
                   end if;
                end loop;
                Fit_Stages (Changes, Asked, Visible, Own.all, Relayed.all, Width, Height, Unit_Frames, Jx, Cx, Lx, Rx,
-                           Who_Now, Start, Play, Slack_Start, Before);
+                           Who_Now, Start, Play, Slack_Start);
                Free (Own);
                Free (Relayed);
             end;
