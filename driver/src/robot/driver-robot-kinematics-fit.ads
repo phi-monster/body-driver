@@ -304,9 +304,11 @@ package Driver.Robot.Kinematics.Fit is
       Slack_Places : Real_Lists.Vector;
       --  Per joint, where its slack stood at the reference keyframe, from the slack's middle, in reading units.
       Untold_Turns : Real_Lists.Vector;
-      --  Per pair of Untold, two: the turns of its Earlier joint and of its Later one, in their readings' units, that
-      --  tell the untold orders apart most (by the pixels between their places of the points times the root of how
-      --  many stay in the picture) of those that put the points no farther apart than a narrow window follows.
+      --  Per pair of Untold, two: the sizes of the turns of its Earlier joint and of its Later one, in their readings'
+      --  units, that tell the untold orders apart most (by the pixels between their places of the points times the
+      --  root of how many stay in the picture) of those that put the points no farther apart than a narrow window
+      --  follows. Sizes: Boot turns a pair every way at them (Together's rows), and a turn named with its sign was
+      --  taken for none by Boot's floor of the least turn a keyframe counts (Real'Max of a negative turn and it).
       Untold_Orders : Joint_Lists.Vector;
       --  Every order of the joints the sightings do not tell from the best (stage 4's search over all of them),
       --  one after another, each as many joints long as the fit has: where the arm may be at a keyframe still to

@@ -8640,9 +8640,17 @@ package body Driver.Robot.Kinematics.Fit is
                         end loop;
                      end loop;
                      exit when Bi = 0;
+                     --  By their sizes: Boot turns the pair both ways at each, every sign together (Together's rows),
+                     --  so a sign tells it nothing, and Boot floors each at the least turn a keyframe counts. Named with
+                     --  its sign, a turn the other way was floored to that least: p366s2's UR5e 3a (10-25, its last fit
+                     --  replayed) named c1 with c3 by -1.020 and -0.068 units to tell its untold orders by 71.4 of its
+                     --  error, c2 with c1 by 0.015 and -0.510, c1 with c5 by -0.510 and -0.320; Boot turned them by
+                     --  0.011 and 0.006, 0.015 and 0.011, 0.011 and 0.012 (c1's 0.011 moving its view half a pixel, its
+                     --  1.020 fifty), and after their keyframes, found at 84 to 91 of 125 points, none put an untold
+                     --  order apart from the order kept (larger by 0.00 px against 0.45).
                      Untold.Append (Joint_Pair'(Earlier => Bi, Later => Bj));
-                     Untold_Turns.Append (Turn_I (Bi, Bj));
-                     Untold_Turns.Append (Turn_J (Bi, Bj));
+                     Untold_Turns.Append (abs Turn_I (Bi, Bj));
+                     Untold_Turns.Append (abs Turn_J (Bi, Bj));
                      Tells (Bi, Bj) := 0;
                   end;
                end loop;

@@ -1517,6 +1517,11 @@ package body Driver.Robot.Tests is
                 and then (for some P of Report.Untold => (P.Earlier = 2 and then P.Later = 3)
                                                          or else (P.Earlier = 3 and then P.Later = 2)),
                 "the pairs whose swap is not told are" & Report.Untold.Length'Image & ", not 2 with 3 alone");
+         --  Named by the sizes of its turns (Boot turns the pair every way at them).
+         Check (Natural (Report.Untold_Turns.Length) = 2 * Natural (Report.Untold.Length)
+                and then (for all T of Report.Untold_Turns => T > 0.0),
+                "the pair's turns are named" & Report.Untold_Turns.Length'Image & " for" & Report.Untold.Length'Image
+                & " pairs, or not by their sizes");
          Fit_Of (Both => True, Report => Report);
          Check (Report.Fitted and then Report.Order_Told and then Report.Untold.Is_Empty,
                 "every pair turned together leaves the order untold, or names a pair:" & Report.Untold.Length'Image);
@@ -8037,9 +8042,11 @@ package body Driver.Robot.Tests is
    --  right, told and wrong (the fit claims what is false), not told (its best order right or wrong).
    --  Watched: an eye the arm does not carry saw the order of every two joints that are not neighbours along the arm
    --  (Fit's Before; the parts between neighbours too small to see apart, as the hall's renders of 10-25 had them).
+   --  Named: each pair is turned by the sizes of the turns the fit names for it (Fit_Report.Untold_Turns), as Boot
+   --  turns it, in place of the sweep's widest level.
    procedure Order_Exam_At
      (Width, Height : Positive; Focal, Kept_Share, Matcher_Noise, Frame_Error, Tilt : Real; Seed : Long_Long_Integer;
-      Widest_Level : Real := 0.2; Watched : Boolean := False)
+      Widest_Level : Real := 0.2; Watched : Boolean := False; Named : Boolean := False)
    is
       package Fit renames Driver.Robot.Kinematics.Fit;
       N        : constant := 6;
@@ -8219,22 +8226,31 @@ package body Driver.Robot.Tests is
                Fresh : Natural := 0;
                First : constant Positive := Frames + 1;
             begin
-               for P of Report.Untold loop
-                  --  A pair is turned once, whichever way along the arm the fit puts it: the order the fit keeps
-                  --  changes between rounds, and a pair named both ways was turned twice, past the keyframes the
-                  --  exam keeps (arm 5 of the hard exam, 10-20).
-                  if not Turned (P.Earlier, P.Later) and then not Turned (P.Later, P.Earlier) then
-                     Turned (P.Earlier, P.Later) := True;
-                     Fresh := Fresh + 1;
-                     --  The pair's joints by the truth's numbering: the readings are drawn from them.
-                     for S1 of Real_Array'[1.0, -1.0] loop
-                        for S2 of Real_Array'[1.0, -1.0] loop
-                           Frames := Frames + 1;
-                           Changes (Frames, Order_Of (P.Earlier)) := S1 * Widest;
-                           Changes (Frames, Order_Of (P.Later)) := S2 * Widest;
+               for K in Report.Untold.First_Index .. Report.Untold.Last_Index loop
+                  declare
+                     P     : constant Joint_Pair := Report.Untold (K);
+                     Place : constant Natural := Report.Untold_Turns.First_Index + 2 * (K - Report.Untold.First_Index);
+                     --  Each joint's turn by the truth's numbering: a reading is its joint's change times its gain.
+                     function Size_Of (Turn : Positive; Reading : Positive) return Real is
+                       (if Named and then Place + 1 <= Report.Untold_Turns.Last_Index
+                        then Report.Untold_Turns (Turn) / abs Gain (Reading) else Widest);
+                  begin
+                     --  A pair is turned once, whichever way along the arm the fit puts it: the order the fit keeps
+                     --  changes between rounds, and a pair named both ways was turned twice, past the keyframes the
+                     --  exam keeps (arm 5 of the hard exam, 10-20).
+                     if not Turned (P.Earlier, P.Later) and then not Turned (P.Later, P.Earlier) then
+                        Turned (P.Earlier, P.Later) := True;
+                        Fresh := Fresh + 1;
+                        --  The pair's joints by the truth's numbering: the readings are drawn from them.
+                        for S1 of Real_Array'[1.0, -1.0] loop
+                           for S2 of Real_Array'[1.0, -1.0] loop
+                              Frames := Frames + 1;
+                              Changes (Frames, Order_Of (P.Earlier)) := S1 * Size_Of (Place, P.Earlier);
+                              Changes (Frames, Order_Of (P.Later)) := S2 * Size_Of (Place + 1, P.Later);
+                           end loop;
                         end loop;
-                     end loop;
-                  end if;
+                     end if;
+                  end;
                end loop;
                exit when Fresh = 0;
                Sight (First);
@@ -8300,6 +8316,13 @@ package body Driver.Robot.Tests is
    begin
       Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000, Widest_Level => 0.05, Watched => True);
    end Order_Exam_Watched;
+
+   --  The same, each pair turned by the sizes of the turns the fit names for it, as Boot turns it: no wrong order may
+   --  be told. Boot had taken a turn named with a minus sign for none (10-25, Fit_Report.Untold_Turns).
+   procedure Order_Exam_Named is
+   begin
+      Order_Exam_At (640, 480, 400.0, 1.0, 0.3, 0.1, 0.3, 1000, Widest_Level => 0.05, Watched => True, Named => True);
+   end Order_Exam_Named;
 
    procedure Kinematics_Of_A_Drawn_Synthetic_Arm is
    begin
@@ -9434,6 +9457,9 @@ package body Driver.Robot.Tests is
       Driver.Tests.Register ("robot.order.watched", "the order exam's arms, swept a quarter as wide and watched by an eye "
                              & "that tells their joints' order but between neighbours, come out with a wrong order told",
                              Order_Exam_Watched'Access);
+      Driver.Tests.Register ("robot.order.exam_named", "the order exam's arms, swept a quarter as wide and watched, each pair "
+                             & "the fit names turned by the sizes it names as Boot turns it, come out with a wrong order "
+                             & "told", Order_Exam_Named'Access);
       Driver.Tests.Register ("robot.order.exam_hard", "the order exam's arms, seen as the fake robot's eyes see, come out with a wrong order told", Order_Exam_Hard'Access);
       Driver.Tests.Register ("robot.kinematics.drawn", "the synthetic arm with its readings in another order and in "
                              & "other units comes out with its axes, scales, lens, order or eye at a new pose wrong",

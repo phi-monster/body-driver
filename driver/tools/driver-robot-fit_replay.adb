@@ -265,6 +265,25 @@ begin
                    & Report.Stage'Image & ", order told " & Report.Order_Told'Image & ", flipped "
                    & Report.Flipped'Image);
          Put_Line ("why: " & To_String (Report.Why));
+         --  The pairs the fit names to tell its untold orders, each with its two turns as named (signed, reading units).
+         Put ("untold pairs:");
+         for K in Report.Untold.First_Index .. Report.Untold.Last_Index loop
+            declare
+               Place : constant Natural :=
+                 Report.Untold_Turns.First_Index + 2 * (K - Report.Untold.First_Index);
+            begin
+               Put (" c" & Report.Untold (K).Earlier'Image & " with c" & Report.Untold (K).Later'Image);
+               if Place + 1 <= Report.Untold_Turns.Last_Index then
+                  declare
+                     First_Turn  : constant Long_Float := Report.Untold_Turns (Place);
+                     Second_Turn : constant Long_Float := Report.Untold_Turns (Place + 1);
+                  begin
+                     Put (" by" & First_Turn'Image & " and" & Second_Turn'Image);
+                  end;
+               end if;
+            end;
+         end loop;
+         New_Line;
          Put ("chain:");
          for C of Chain loop
             Put (C'Image);
