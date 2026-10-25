@@ -2101,7 +2101,6 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (L.Fy / L.Fx, 4)	4	forma
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Le.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Lens0.Fx, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Mo, 3)	3	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Multi_M, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Power, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Power, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rep.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
@@ -2111,7 +2110,6 @@ driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rp.Cost_Judged - Report
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rs.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Rt.All_Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sd, 3)	3	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Single_F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Spread, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Sqrt (Chi / Said), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& "" & Driver.Log.Image (Visible (Visible'First + C - 1), 2));	2	format	digits printed in a log line or a message
@@ -2131,7 +2129,6 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.I
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Le.Fy, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& Driver.Log.Image (Multi_M, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (R.Focal_Sigma, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Reach_Pow, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
@@ -2141,8 +2138,6 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element,
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rs.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & "")	3	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	& Driver.Log.Image (Single_M, 3) & (if Adequate then "" else "")	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -2169,7 +2164,6 @@ driver-robot-kinematics-fit.adb	(P <= 6 or else not Slacked or else (P - 7) mod 
 driver-robot-kinematics-fit.adb	(P <= 6 or else not Slacked or else (P - 7) mod Per_Reduced < 5);	6	structure	the reduced terms' layout: six of the lens, then per joint its tilt (2), its point across the axis (2), its reading scale (1) and, slacked, its slack's two: of a joint's terms, from the seventh on, its first five are reported and its slack's two not
 driver-robot-kinematics-fit.adb	(P <= 6 or else not Slacked or else (P - 7) mod Per_Reduced < 5);	7	structure	the reduced terms' layout: six of the lens, then per joint its tilt (2), its point across the axis (2), its reading scale (1) and, slacked, its slack's two: of a joint's terms, from the seventh on, its first five are reported and its slack's two not
 driver-robot-kinematics-fit.adb	(Said, "" & C'Image & "" & Driver.Log.Image (Change (B, C), 2)	2	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	(Said, "" & Driver.Log.Image (Multi_F, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	(Slacked and then (P - 7) mod Per_Joint >= 6);	6	structure	a joint's six terms before its slack's two: its tilt (2), its point (3), its reading scale (1)
 driver-robot-kinematics-fit.adb	(Slacked and then (P - 7) mod Per_Joint >= 6);	7	structure	the joints' terms after the lens's six: the first joint's first term is the seventh
 driver-robot-kinematics-fit.adb	(Sqrt (Real'Max (0.0, E (Errors.Both_Across) + E (Errors.Both_Down)) / 2.0));	2.0	math	the mean of the two components' variances
@@ -2214,7 +2208,6 @@ driver-robot-kinematics-fit.adb	/ Sqrt ((Real (Width) / 2.0) ** 2 + (Real (Heigh
 driver-robot-kinematics-fit.adb	/ Sqrt ((Real (Width) / 2.0) ** 2 + (Real (Height) / 2.0) ** 2)	2.0	math	half the picture: its centre to its corner
 driver-robot-kinematics-fit.adb	/ Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged) / Design, 1.0)));	1.0	statistics	no step's rise counts below one sigma's half (the cost of a step at one sigma), as before
 driver-robot-kinematics-fit.adb	/ Sqrt (Real'Max (2.0 * (Rp.Cost_Judged - Report.Cost_Judged) / Design, 1.0)));	2.0	statistics	a rise of the cost C is a deviation of the root of 2 C sigmas
-driver-robot-kinematics-fit.adb	> Driver.Conventions.Z * Sqrt (Real (Ks * Km * (Ks + Km + 1)) / 12.0));	12.0	statistics	Mann-Whitney's U has the variance n1 n2 (n1 + n2 + 1) / 12
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	a 3 by 3 matrix's rows and columns
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	a 3 by 3 matrix's rows and columns
 driver-robot-kinematics-fit.adb	A : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three-dimensional space
@@ -2233,7 +2226,6 @@ driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, 
 driver-robot-kinematics-fit.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	structure	the exponent's least width
 driver-robot-kinematics-fit.adb	Ada.Strings.Unbounded.Append (Trace, "" & Driver.Log.Image (F, 1) & "" & Driver.Log.Image (Sum, 3));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	Ada.Strings.Unbounded.Append (Trace, "" & Driver.Log.Image (F, 1) & "" & Driver.Log.Image (Sum, 3));	3	format	digits printed in a log line or a message
-driver-robot-kinematics-fit.adb	Adequate := not (U - Real (Ks * Km) / 2.0	2.0	statistics	Mann-Whitney's U has the mean of half its pairs
 driver-robot-kinematics-fit.adb	Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)	1	structure	the four entries of the planar essential matrix and their rows
 driver-robot-kinematics-fit.adb	Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)	2	structure	the four entries of the planar essential matrix and their rows
 driver-robot-kinematics-fit.adb	Algebraic : constant Real := G (1) * V (1) + G (2) * V (2) + G (3) * V (3)	3	structure	the four entries of the planar essential matrix and their rows
@@ -2290,10 +2282,8 @@ driver-robot-kinematics-fit.adb	D (J, T) := (1.0 / Width) * (Moved (Sigma) - Mov
 driver-robot-kinematics-fit.adb	D (J, T) := (Moved (Sigma) - Moved (-Sigma)) / (Sigma + Sigma);	2xSigma	math	a central difference: one standard deviation either way spans two
 driver-robot-kinematics-fit.adb	D (J, T).Place := (1.0 / Width) * (Up.Translation - Down.Translation);	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
 driver-robot-kinematics-fit.adb	D (J, T).Turn := (1.0 / Width) * Driver.Numerics.Log (Up.Rotation * Transpose (Down.Rotation));	1.0	math	a central difference: the change between one standard deviation either way, over the width it spans
-driver-robot-kinematics-fit.adb	D (K + 2) := (if Pv (I) < Real'Last then abs (Pv (I) - Sight (Sight'First + I - 1).V)	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	D (K + 2) := (if Pv (I) >= Real'Last then Real'Last else abs (Pv (I) - Sight (Sight'First + I - 1).V));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	D (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
-driver-robot-kinematics-fit.adb	D : Real_Array (1 .. 2 * Count_Of (F));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	D : Real_Array (1 .. 2 * Count_Of (F));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;	1.0	math	the radial distortion polynomial
 driver-robot-kinematics-fit.adb	D : constant Real := 1.0 + L.K1 * R2 + L.K2 * R2 * R2;	1.0	math	the radial distortion polynomial
@@ -2433,7 +2423,6 @@ driver-robot-kinematics-fit.adb	Jv (3 + K) := -Vp (K);	3	structure	the step's th
 driver-robot-kinematics-fit.adb	K : Real_Matrix (1 .. 3, 1 .. Terms) := [others => [others => 0.0]];	3	math	three coordinates
 driver-robot-kinematics-fit.adb	K : constant Positive := (I1 + 1) / 2;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	a reprojection has two residuals, across and down
-driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	K := K + 2;	2	structure	two residuals a sighting, across and down
@@ -2707,8 +2696,6 @@ driver-robot-kinematics-fit.adb	Tt : constant Vec3 := Plus (Scaled (-V (2), E1),
 driver-robot-kinematics-fit.adb	Tt : constant Vec3 := Plus (Scaled (-V (2), E1), Scaled (V (1), E2));	2	structure	the translation's two terms across the axis in the eigenvector (A, B), turned a quarter
 driver-robot-kinematics-fit.adb	Turns (J) (A) := Report.Slide_Turns (Report.Slide_Turns.First_Index + 3 * (J - 1) + A - 1);	3	structure	a turn per reading unit is three numbers
 driver-robot-kinematics-fit.adb	Tz (I) := Sight (Sight'First + Natural (Index ((I + 1) / 2)) - 1).Track;	2	structure	two residuals a sighting, across and down
-driver-robot-kinematics-fit.adb	U := U + (if A > B then 1.0 elsif A = B then 0.5 else 0.0);	0.5	statistics	Mann-Whitney's U: a tie counts half
-driver-robot-kinematics-fit.adb	U := U + (if A > B then 1.0 elsif A = B then 0.5 else 0.0);	1.0	statistics	Mann-Whitney's U: a pair counts one when the first is the larger
 driver-robot-kinematics-fit.adb	U1 : constant Real := Best_M (1, 1) * V (1) + Best_M (1, 2) * V (2) + Best_M (1, 3) * V (3);	1	structure	the rank-one part's rows and columns
 driver-robot-kinematics-fit.adb	U1 : constant Real := Best_M (1, 1) * V (1) + Best_M (1, 2) * V (2) + Best_M (1, 3) * V (3);	2	structure	the rank-one part's rows and columns
 driver-robot-kinematics-fit.adb	U1 : constant Real := Best_M (1, 1) * V (1) + Best_M (1, 2) * V (2) + Best_M (1, 3) * V (3);	3	structure	the rank-one part's rows and columns

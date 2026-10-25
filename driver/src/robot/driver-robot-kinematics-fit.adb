@@ -7124,14 +7124,24 @@ package body Driver.Robot.Kinematics.Fit is
       --  The search: from the order kept before (From) or the joints' own, the order the cheap score finds least over
       --  every order (Cheap with the order kept's own joints, lens and depths: Global) and every order one joint's move
       --  from the order kept that it puts as near, each fitted in itself; the order kept gives way to the one whose
-      --  fit leaves every sighting least, until none does. When the order kept explains the keyframes of several
-      --  joints worse than those of one (Adequacy), every order one move from it is weighed: the cheap score with
-      --  joints fitted to a wrong order screened the right one out (s36 of the bench, 10-20: one swap from the truth).
+      --  fit leaves every sighting least, until none does. Every order one move from it is weighed: the cheap score
+      --  with joints fitted to a wrong order screened the right one out (s36 of the bench, 10-20: one swap from the
+      --  truth).
       --  Moved by single moves alone, the search stood in wrong orders whose every neighbour, its joints fitted to
       --  the order, scored worse (f16b's arm 1, 10-15; the bench's s39, 10-20, at 1 2 5 3 4 6 for 5 4 1 6 2 3), where
       --  the cheap score over every order with those same joints put the truth first.
-      --  The order is told when it explains the keyframes of several joints as it does those of one, and every order
-      --  weighed against it is told from it by the keyframes that put the two apart (Told_Over: over every keyframe,
+      --  No test of how the order explains the keyframes of several joints against how it does those of one: that
+      --  the two come from one distribution under the true order is false. Panda 1a of round p370s2 (replayed from
+      --  its dump, 10-25), its order true, left the keyframes of several joints 15 to 20 % further off than those of
+      --  one at the same error stated (residual over stated, by its quarters 0.536, 0.527, 0.538 against 0.439,
+      --  0.462, 0.463), every term refined too (0.832 px against 0.638 by the root mean square). Over the 134 such
+      --  tests of rounds p370s2 and p371s2 (every arm's last fit replayed, its orders against the truth), it held 23
+      --  of 87 true orders and 14 of 47 false ones: no telling the two apart. Of the orders it alone held untold in
+      --  those rounds, 8 of 8 were true; every false one it held, the orders weighed against it held too. The halves
+      --  of the keyframes' tracks agreeing on a keyframe's offset (what a false order leaves, a pose error its points
+      --  share) held 1 of 87 and 5 of 47, every one of the 5 untold already.
+      --  The order is told when every order weighed against it is told from it by the keyframes that put the two
+      --  apart (Told_Over: over every keyframe,
       --  and over each half alone) or is the same arm within what its joints can turn: no turn of the pairs it swaps
       --  that the aligner follows puts the points apart by Z of the median's error (two slides; a slide along a
       --  turn's axis). The pairs the untold ones swap are turned by Boot together (Untold, Untold_Turns), each by the
@@ -7768,66 +7778,6 @@ package body Driver.Robot.Kinematics.Fit is
                Descend (Best, Best_M, Two => True);
             end Global;
 
-            --  Whether X's order explains the keyframes of several joints as the joints explain their own: those
-            --  keyframes' median residuals ranked against the keyframes of one joint's (Mann and Whitney's U, the
-            --  pairs in which the several's is the larger), not above half the pairs by more than Z of U's spread
-            --  when the two come from one distribution. Judged by the medians' own spread, an order that missed some
-            --  keyframes by pixels and others not at all spread them so wide that 1.255 px against 0.230 passed (s36
-            --  of the bench, 10-20).
-            procedure Adequacy (X : Order_Fit; Single_M, Multi_M : out Real; Adequate : out Boolean) is
-               Pu, Pv : Real_Access := new Real_Array (1 .. S);
-               Ms, Mm : Real_Array (1 .. Frames);
-               Ks, Km : Natural := 0;
-            begin
-               Predict (X, X.Order, Pu.all, Pv.all);
-               for F in 1 .. Frames loop
-                  if Count_Of (F) > 0 then
-                     declare
-                        D : Real_Array (1 .. 2 * Count_Of (F));
-                        K : Natural := 0;
-                     begin
-                        for Q in First_Of (F) .. First_Of (F) + Count_Of (F) - 1 loop
-                           declare
-                              I : constant Positive := By_Frame (Q);
-                           begin
-                              D (K + 1) := (if Pu (I) < Real'Last then abs (Pu (I) - Sight (Sight'First + I - 1).U)
-                                            else Real'Last);
-                              D (K + 2) := (if Pv (I) < Real'Last then abs (Pv (I) - Sight (Sight'First + I - 1).V)
-                                            else Real'Last);
-                              K := K + 2;
-                           end;
-                        end loop;
-                        if Several (F) then
-                           Km := Km + 1;
-                           Mm (Km) := Driver.Stats.Median (D (1 .. K));
-                        elsif Own_Joint (F) > 0 then
-                           Ks := Ks + 1;
-                           Ms (Ks) := Driver.Stats.Median (D (1 .. K));
-                        end if;
-                     end;
-                  end if;
-               end loop;
-               Free (Pu);
-               Free (Pv);
-               Single_M := (if Ks > 0 then Driver.Stats.Median (Ms (1 .. Ks)) else 0.0);
-               Multi_M := (if Km > 0 then Driver.Stats.Median (Mm (1 .. Km)) else 0.0);
-               if Ks = 0 or else Km = 0 then
-                  Adequate := True;
-                  return;
-               end if;
-               declare
-                  U : Real := 0.0;
-               begin
-                  for A of Mm (1 .. Km) loop
-                     for B of Ms (1 .. Ks) loop
-                        U := U + (if A > B then 1.0 elsif A = B then 0.5 else 0.0);
-                     end loop;
-                  end loop;
-                  Adequate := not (U - Real (Ks * Km) / 2.0
-                                   > Driver.Conventions.Z * Sqrt (Real (Ks * Km * (Ks + Km + 1)) / 12.0));
-               end;
-            end Adequacy;
-
             --  Whether A's places of the sightings (Au, Av) tell it from B's (Bu, Bv) as the better, over the keyframes
             --  of Half (0 every one, 1 the odd, 2 the even): only a keyframe where the two put the sightings apart, by
             --  the median, more than Z errors of the mean of its sightings (A's residuals' scatter over the root
@@ -7992,8 +7942,7 @@ package body Driver.Robot.Kinematics.Fit is
             Skipped    : array (1 .. Neighbours) of Boolean := [others => False];
             Closes     : Natural := 0;
             Passes     : Natural := 0;
-            Adequate   : Boolean := True;
-            Single_M, Multi_M : Real := 0.0;
+            Beaten     : Boolean := False;   --  an order refined beside the one kept was told the better this pass
             Fitted_Now : Natural := 0;   --  of the pass's orders weighed, those fitted
             --  The orders a verdict was given from, one after another, N joints each; and whether the last verdict
             --  went to an order its refinement told better than the one kept, the search to go on from it.
@@ -8076,7 +8025,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Mo := Cheap (Here.Order);
                   Co := Cheap_Count;
                   Best_M := Mo;
-                  Adequacy (Here, Single_M, Multi_M, Adequate);
+                  Beaten := False;
                   Global (Here.Order, G, Gm, Starts);
                   Closes := 0;
                   if G /= Here.Order then
@@ -8126,13 +8075,13 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   end loop;
                   --  The orders one move away that the fit begun from told from this same order stay told while it is
-                  --  kept and explains the keyframes of several joints as it does those of one: only the untold among
-                  --  them are weighed again, with the cheap score's least. An arm of ten joints weighed its 82 orders
+                  --  kept: only the untold among them are weighed again, with the cheap score's least. An arm of ten
+                  --  joints weighed its 82 orders
                   --  one move away in their own fits every round, 34 to 92 s of each with 6 of them untold (the step 2
                   --  bench's base s2_2, 10-21).
                   Skipped := [others => False];
                   if From.Valid and then From.N = N and then not From.Fixed and then Here.Order = From.Chain
-                    and then Adequate and then (From.Order_Told or else not From.Untold_Orders.Is_Empty)
+                    and then (From.Order_Told or else not From.Untold_Orders.Is_Empty)
                   then
                      for K in 1 .. Closes loop
                         if Close (K) /= G then
@@ -8213,10 +8162,7 @@ package body Driver.Robot.Kinematics.Fit is
                   Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Arm & ": the order" & Image (Here.Order)
                                    & " (focal " & Driver.Log.Image (Here.L.Fx, 1) & " px)"
                                    & " leaves the sightings of keyframes of several joints " & Driver.Log.Image (Mo, 3)
-                                   & " px, those keyframes " & Driver.Log.Image (Multi_M, 3)
-                                   & " px (the median of their medians) against those of one "
-                                   & Driver.Log.Image (Single_M, 3) & (if Adequate then "" else ", NOT as well")
-                                   & "; the cheap score's least order" & Image (G) & " ("
+                                   & " px; the cheap score's least order" & Image (G) & " ("
                                    & Driver.Log.Image (Gm, 3) & " px against " & Driver.Log.Image (Mo, 3) & ","
                                    & Cheaps'Image & " orders scored"
                                    & (if Starts > 0 then "," & Starts'Image & " starts" else "") & ");"
@@ -8485,18 +8431,15 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
                --  Weighed again with every term refined in each order, its depths too (Refine_Tracks on every
                --  sighting), where the fits from the joints of the keyframes of one joint each (Quick_Fit: those
-               --  keyframes' depths held) leave an order untold that some keyframe puts apart from the order kept, or
-               --  the order kept explaining the keyframes of several joints worse than those of one: those depths held,
-               --  the true order left its keyframes of several joints at 0.44 px where its true joints leave them 0.27
-               --  (the bench's s1_2 and s10_1, 10-21), not adequate and its alternative untold round after round.
-               --  Only where the refinements could tell the order this round: every untold order put apart from the
-               --  order kept by some keyframe (one that none puts apart waits for its turns whatever they find); the
-               --  order kept alone when it is not adequate. Refining every untold order some keyframe put apart took
-               --  a nine-joint arm's first round past a minute, its turns not yet taken (the bench's humanoid s2_1,
-               --  10-21).
-               if (Untold_Here > 0
-                   and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0))
-                 or else not Adequate
+               --  keyframes' depths held) leave an order untold that some keyframe puts apart from the order kept:
+               --  those depths held, the true order left its keyframes of several joints at 0.44 px where its true
+               --  joints leave them 0.27 (the bench's s1_2 and s10_1, 10-21). Only where the refinements could tell the
+               --  order this round: every untold order put apart from the order kept by some keyframe (one that none
+               --  puts apart waits for its turns whatever they find). Refining every untold order some keyframe put
+               --  apart took a nine-joint arm's first round past a minute, its turns not yet taken (the bench's
+               --  humanoid s2_1, 10-21).
+               if Untold_Here > 0
+                 and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0)
                then
                   declare
                      Kept_At : constant Positive := Closes + 1;   --  Here's place among the refined
@@ -8521,8 +8464,6 @@ package body Driver.Robot.Kinematics.Fit is
                      procedure Refine_All is new Driver.Parallel_For (Refine_One);
                      Fu, Fv : Real_Access := new Real_Array (1 .. S);
                      Su, Sv : Real_Access := new Real_Array (1 .. S);
-                     Single_F, Multi_F : Real;
-                     Adequate_F : Boolean;
                      --  An order the refinements tell as the better one: the search goes on from it (its own fit
                      --  from the joints of one joint's keyframes had not shown it).
                      Beaten_By  : Natural := 0;
@@ -8532,7 +8473,6 @@ package body Driver.Robot.Kinematics.Fit is
                         Fits_Made := Fits_Made + Boolean'Pos (Resolvable and then Untold_Of (K));
                      end loop;
                      Fits_Made := Fits_Made + 1;
-                     Adequacy (Refined (Kept_At), Single_F, Multi_F, Adequate_F);
                      Predict (Refined (Kept_At), Here.Order, Fu.all, Fv.all);
                      for K in 1 .. Closes loop
                         if Resolvable and then Untold_Of (K) then
@@ -8549,16 +8489,9 @@ package body Driver.Robot.Kinematics.Fit is
                            end if;
                         end if;
                      end loop;
-                     Ada.Strings.Unbounded.Append
-                       (Said, " (every term refined: the keyframes of several joints " & Driver.Log.Image (Multi_F, 3)
-                              & " px against " & Driver.Log.Image (Single_F, 3)
-                              & (if Adequate_F then "" else ", NOT as well") & ")");
-                     Adequate := Adequate_F;
-                     Single_M := Single_F;
-                     Multi_M := Multi_F;
                      if Beaten_By > 0 then
                         Here := Refined (Beaten_By);
-                        Adequate := False;
+                        Beaten := True;
                         Again := True;
                         for W in 0 .. Natural (Judged_From.Length) / N - 1 loop
                            Again := Again and then
@@ -8588,7 +8521,7 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   end if;
                end loop;
-               Order_Is_Told := Adequate and then Untold_Here = 0;
+               Order_Is_Told := not Beaten and then Untold_Here = 0;
                Untold.Clear;
                Untold_Turns.Clear;
                Untold_Orders.Clear;
@@ -8631,9 +8564,8 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
                                 & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
                                 & Same_Arm'Image & " the same arm"
-                                & (if Adequate then "" else "; it explains the keyframes of several joints worse ("
-                                   & Driver.Log.Image (Multi_M, 3) & " px against "
-                                   & Driver.Log.Image (Single_M, 3) & ")")
+                                & (if Beaten then "; an order refined beside it is the better, the search goes on from it"
+                                   else "")
                                 & "; passes" & Passes'Image & "," & Fits_Made'Image & " fits"
                                 & Ada.Strings.Unbounded.To_String (Said));
                Free (Hu);
