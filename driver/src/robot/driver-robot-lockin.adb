@@ -654,7 +654,14 @@ package body Driver.Robot.Lockin is
                      Began  : constant Natural := Push_Start (Pusher, Natural (R));
                      Before : constant Integer := Integer (Began) - 1;
                   begin
-                     if Before < 0 or else Before >= Natural (S.Settled_At.Length) or else not S.Settled_At (Before) then
+                     --  Settled before the push, or moving no more than the eye does at rest (Moved: no more of its
+                     --  cells than its resting beats move): a body that sways as it stands never settles by the
+                     --  picture's rule, and the G1's right arm, pushed at 19 beats, had 2 rows in its own wrist eye
+                     --  (8 unsettled before), its eye undecided, and the wrist eye rode its hand (rec315 g12a, 10-25:
+                     --  its head eye moving 252 of 255 cells at rest).
+                     if Before < 0 or else Before >= Natural (S.Settled_At.Length)
+                       or else not (S.Settled_At (Before) or else not Moved (M, E, Before))
+                     then
                         return Unsettled_Before;
                      end if;
                      --  Nor was another group pushed at any beat of the push or
