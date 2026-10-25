@@ -100,21 +100,23 @@ def room(spec):
 
 def plain_light(spec, parts):
     """A diagnostic, never a hall's world (BD_PLAIN_LIGHT=1, or some of shadows,highlights,headlight,reflections): no
-    light casts a shadow, none gives a highlight, the headlight (which moves with whichever camera renders) gives none at
-    all, no material reflects; all four, a surface looks the same from wherever a camera sees it: what the driver's
+    shadow falls (the shadow maps' frusta shrunk to nothing; every light shines as before: in MuJoCo 3.16 a light that
+    casts no shadow gives no light at all, and taking castshadow away left only the headlight and the ambient, 10-25),
+    no light or material gives a highlight, the headlight (which moves with whichever camera renders) gives no diffuse
+    light, no material reflects; all four, a surface looks the same from wherever a camera sees it: what the driver's
     matches err by then is the matcher's own and not the scene's shadows of the moving arm, its mirror image in the
-    floor or the highlights that move with the eye (step 2's fits, 10-25)."""
+    floor or the light that moves with the eye (step 2's fits, 10-25)."""
     every = parts == {"1"}
-    for light in spec.lights:
-        if every or "shadows" in parts:
-            light.castshadow = False
-        if every or "highlights" in parts:
+    if every or "shadows" in parts:
+        spec.visual.map.shadowclip = 1e-6
+        spec.visual.map.shadowscale = 0.0
+    if every or "highlights" in parts:
+        for light in spec.lights:
             light.specular = [0.0, 0.0, 0.0]
     if every or "highlights" in parts or "headlight" in parts:
         spec.visual.headlight.specular = [0.0, 0.0, 0.0]
     if every or "headlight" in parts:
         spec.visual.headlight.diffuse = [0.0, 0.0, 0.0]
-        spec.visual.headlight.ambient = [0.7, 0.7, 0.7]
     for mat in spec.materials:
         if every or "reflections" in parts:
             mat.reflectance = 0.0
