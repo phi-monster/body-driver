@@ -532,21 +532,6 @@ package body Driver.Robot.Graph is
       end loop;
 
       --  Closers and parts.
-      declare
-         --  The arm of the group whose sweep moved closer G's patch (Group_Stream.Moved_By); 0 for none.
-         function Moved_Arm (G : Group_Id) return Arm_Id'Base is
-            Found : Arm_Id'Base := 0;
-         begin
-            if M.Groups (G).Moved_By > 0 then
-               for A in Gr.Arms.First_Index .. Gr.Arms.Last_Index loop
-                  if Gr.Arms (A) = M.Groups (G).Moved_By then
-                     Found := A;
-                  end if;
-               end loop;
-            end if;
-            return Found;
-         end Moved_Arm;
-      begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
          if Own (G) and then Gr.Roles (G) = Unclassified then
             declare
@@ -659,13 +644,7 @@ package body Driver.Robot.Graph is
                --  arm 2's eye and of 36 in arm 1's own, which was known to ride arm 1 from beat 2543 on; the
                --  remembered eye kept the closer on arm 2, and arm 1 was given none). Nor does it hold against an eye on an
                --  arm that rode none when it was chosen (Rival_Since): it was never weighed against it.
-               --  Before all that, the arm whose sweep moved its patch in a view the arm does not carry, of every arm
-               --  swept the only one (Group_Stream.Moved_By, Kinematics.Note_Closers): it carries the closer, where the
-               --  views tell no more than which eye sees it moved most.
-               if Patched and then Moved_Arm (G) > 0 then
-                  Gr.Roles.Replace_Element (G, Closer);
-                  Gr.Arm_Of.Replace_Element (G, Moved_Arm (G));
-               elsif Undecided_Eye then
+               if Undecided_Eye then
                   null;
                elsif M.Groups (G).Closer_Eye > 0
                  and then Gr.Mounts (M.Groups (G).Closer_Eye).Kind = Arm_Carried
@@ -693,7 +672,6 @@ package body Driver.Robot.Graph is
             end;
          end if;
       end loop;
-      end;
 
       --  Porting contract, clauses 1 and 2.
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop

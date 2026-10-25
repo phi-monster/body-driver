@@ -459,173 +459,6 @@ package body Driver.Robot.Kinematics is
         and then M.Graph.Effects (K).Verdict in Patch | Whole;
    end Sees;
 
-   --  Which arm carries each closer, from the arms' sweeps. A closer's patch in an eye's view is where its pushes moved
-   --  the view most: the cells of the view whose gain for the closer's channels stands above the typical gain of the
-   --  cells that respond to it by Z of its own spread (the lock-in's test of the cells far above the rest, Lockin.Cells_Shown),
-   --  the fingers where they are in view and not the shake the body takes from them. An arm's keyframe that leaves those
-   --  cells beyond the flow's reach of the frame its sweep began from (Flow.Displacements), significantly more of them
-   --  than of the view's other cells (Regression.Shares_Apart), in an eye the arm does not carry, took the closer with
-   --  it; one that leaves it where it was did not. The closer is carried by the one arm whose keyframes did so more often
-   --  than one tail of Z explains of the views tested (Regression.Count_Significant, over the arms swept), while another
-   --  arm's sweep was tested and did not: the shake that every arm's motion gives a balancing body, or what moves every
-   --  view alike, is no carriage, and one arm swept alone tells none. By none until then: by the cells it moved in
-   --  each eye, RB-Y1's right gripper went to the left arm, the left wrist eye
-   --  seeing it with cells of 50, 44 and 37 against its own wrist eye's 38, 13 and 12, both arms reaching in front of
-   --  both eyes (seeds 1 and 2, rounds r374 and p373s2, 10-25), and the G1's left hand, its pushes shaking every view,
-   --  to the right arm (seed 3).
-   procedure Note_Closers (M : in out Model; A : Arm_Id; Reference : Boolean) is
-      type Reals_Access is access Real_Array;
-      type Flags_Access is access Flow.Flag_Array;
-      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Reals_Access);
-      procedure Free is new Ada.Unchecked_Deallocation (Flow.Flag_Array, Flags_Access);
-      procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
-      function Sqrt (X : Real) return Real renames Ada.Numerics.Long_Elementary_Functions.Sqrt;
-      Z     : constant Real := Driver.Conventions.Z;
-      AG    : constant Group_Id := Arm_Group (M, A);
-      Alarm : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Z) / 2.0;
-   begin
-      for E in 1 .. Eye_Count (M) loop
-         declare
-            S      : Eye_Stream renames M.Eyes (Eye_Id (E));
-            Latest : constant Luma_Access := Latest_Frame (S);
-            Mt     : constant Mount := Eye_Mount (M, Eye_Id (E));
-            N      : constant Natural := Cells (S.Grid);
-            Kept   : constant Natural := Natural (S.Kept_Groups.Length);
-         begin
-            if Latest = null or else N = 0 then
-               null;
-            elsif Reference then
-               Free (S.Closer_Reference);
-               S.Closer_Reference := new Real_Array'(Latest.all);
-               S.Closer_Reference_Arm := AG;
-            elsif S.Closer_Reference /= null and then S.Closer_Reference_Arm = AG
-              and then S.Closer_Reference'Length = Latest'Length
-              and then not (Mt.Kind = Arm_Carried and then Mt.Arm = A)
-              and then Natural (S.Luma_Variance.Length) >= N
-              and then Kept > 0 and then Natural (S.Gains.Length) = N * Kept
-              and then Natural (S.Gain_Variances.Length) = N * Kept
-            then
-               declare
-                  Du       : Reals_Access := new Real_Array (1 .. N);
-                  Dv       : Reals_Access := new Real_Array (1 .. N);
-                  Cond     : Reals_Access := new Real_Array (1 .. N);
-                  Noise    : Reals_Access := new Real_Array (1 .. N);
-                  Gains    : Reals_Access := new Real_Array (1 .. N);
-                  Resolved : Flags_Access := new Flow.Flag_Array (1 .. N);
-                  Patch    : Flags_Access := new Flow.Flag_Array (1 .. N);
-               begin
-                  for C in 1 .. N loop
-                     Noise (C) := S.Luma_Variance (C - 1) * Rest_Factor_Of (S, C - 1) ** 2;
-                  end loop;
-                  Flow.Displacements (S.Grid, S.Closer_Reference.all, Latest.all, Noise.all, Du.all, Dv.all, Cond.all,
-                                      Resolved.all);
-                  for G in 1 .. Group_Id'Base (Group_Count (M)) loop
-                     if G /= AG and then Role (M, G) = Closer then
-                        Patch.all := [others => False];
-                        for K in 0 .. Kept - 1 loop
-                           if S.Kept_Groups (K) = Natural (G) then
-                              declare
-                                 Count : Natural := 0;
-                              begin
-                                 for C in 1 .. N loop
-                                    if S.Gains ((C - 1) * Kept + K) > 0.0 then
-                                       Count := Count + 1;
-                                       Gains (Count) := S.Gains ((C - 1) * Kept + K);
-                                    end if;
-                                 end loop;
-                                 if Count > 0 then
-                                    declare
-                                       Typical : constant Real := Driver.Stats.Median (Gains (1 .. Count));
-                                    begin
-                                       for C in 1 .. N loop
-                                          if S.Gains ((C - 1) * Kept + K)
-                                             > Typical + Z * Sqrt (Real'Max (0.0, S.Gain_Variances ((C - 1) * Kept + K)))
-                                          then
-                                             Patch (C) := True;
-                                          end if;
-                                       end loop;
-                                    end;
-                                 end if;
-                              end;
-                           end if;
-                        end loop;
-                        declare
-                           In_Patch, Far_In, Out_Patch, Far_Out : Natural := 0;
-                        begin
-                           for C in 1 .. N loop
-                              if Cond (C) > 0.0 and then (C - 1 >= Natural (S.Textured.Length) or else S.Textured (C - 1)) then
-                                 if Patch (C) then
-                                    In_Patch := In_Patch + 1;
-                                    Far_In := Far_In + Boolean'Pos (not Resolved (C));
-                                 else
-                                    Out_Patch := Out_Patch + 1;
-                                    Far_Out := Far_Out + Boolean'Pos (not Resolved (C));
-                                 end if;
-                              end if;
-                           end loop;
-                           if In_Patch > 0 and then Out_Patch > 0 then
-                              declare
-                                 Gs     : Group_Stream renames M.Groups (G);
-                                 Moved  : constant Boolean :=
-                                   Real (Far_In) / Real (In_Patch) > Real (Far_Out) / Real (Out_Patch)
-                                   and then Regression.Shares_Apart (Far_In, In_Patch, Far_Out, Out_Patch);
-                                 Was    : constant Group_Id'Base := Gs.Moved_By;
-                                 Swept  : Natural := 0;   --  the groups whose sweeps tested the patch
-                                 Shown  : Natural := 0;   --  of them, those that moved it more than chance
-                                 By     : Group_Id'Base := 0;
-                              begin
-                                 while Natural (Gs.Moved_Tests.Length) < Natural (AG) loop
-                                    Gs.Moved_Tests.Append (0);
-                                    Gs.Moved_Seen.Append (0);
-                                 end loop;
-                                 Gs.Moved_Tests.Replace_Element (Natural (AG) - 1, Gs.Moved_Tests (Natural (AG) - 1) + 1);
-                                 if Moved then
-                                    Gs.Moved_Seen.Replace_Element (Natural (AG) - 1, Gs.Moved_Seen (Natural (AG) - 1) + 1);
-                                 end if;
-                                 for H in 0 .. Natural (Gs.Moved_Tests.Length) - 1 loop
-                                    Swept := Swept + Boolean'Pos (Gs.Moved_Tests (H) > 0);
-                                 end loop;
-                                 for H in 0 .. Natural (Gs.Moved_Tests.Length) - 1 loop
-                                    if Gs.Moved_Tests (H) > 0
-                                      and then Regression.Count_Significant
-                                                 (Gs.Moved_Seen (H), Gs.Moved_Tests (H), Alarm, Tests => Swept)
-                                    then
-                                       Shown := Shown + 1;
-                                       By := Group_Id'Base (H + 1);
-                                    end if;
-                                 end loop;
-                                 Gs.Moved_By := (if Shown = 1 and then Swept > Shown then By else 0);
-                                 if Gs.Moved_By /= Was then
-                                    Driver.Log.Line
-                                      (Driver.Log.Robot, "kinematics: closer group" & G'Image
-                                       & (if Gs.Moved_By > 0
-                                          then " moves with group" & Gs.Moved_By'Image & "'s sweep: its patch left beyond reach in"
-                                               & Natural'Image (Gs.Moved_Seen (Natural (Gs.Moved_By) - 1)) & " of the"
-                                               & Natural'Image (Gs.Moved_Tests (Natural (Gs.Moved_By) - 1))
-                                               & " views tested, more than chance, and by no other group's of" & Swept'Image
-                                          else " no longer moves with one group's sweep alone")
-                                       & " (eye" & E'Image & ", arm" & A'Image & ": " & Far_In'Image & " of"
-                                       & In_Patch'Image & " patch cells beyond reach," & Far_Out'Image & " of"
-                                       & Out_Patch'Image & " others)");
-                                 end if;
-                              end;
-                           end if;
-                        end;
-                     end if;
-                  end loop;
-                  Free (Du);
-                  Free (Dv);
-                  Free (Cond);
-                  Free (Noise);
-                  Free (Gains);
-                  Free (Resolved);
-                  Free (Patch);
-               end;
-            end if;
-         end;
-      end loop;
-   end Note_Closers;
-
    procedure Observe (M : in out Model; O : Observation) is
       Beat : constant Natural := M.Beats;
    begin
@@ -635,7 +468,6 @@ package body Driver.Robot.Kinematics is
             G   : constant Group_Id := Arm_Group (M, Arm);
             E   : constant Eye_Id'Base := Eye_Of (M, Arm);
             Index : Natural := 0;
-            Took, First : Boolean := False;   --  the arm took a keyframe at this beat, its first
          begin
             if E > 0 then
                --  An arm is a group and the eye it carries: the arms of one group (the 2b split, a humanoid's two eyes)
@@ -745,8 +577,6 @@ package body Driver.Robot.Kinematics is
                                  K.Image := O.Images (E);
                                  K.Asked := R.Asking;
                                  R.Frames.Append (K);
-                                 Took := True;
-                                 First := Natural (R.Frames.Length) = 1;
                               end;
                               if At_Reference and then Natural (R.Frames.Length) > 1 then
                                  R.Twin_Taken := True;
@@ -770,9 +600,6 @@ package body Driver.Robot.Kinematics is
                      end;
                   end if;
                end;
-               if Took then
-                  Note_Closers (M, Arm, Reference => First);
-               end if;
             end if;
          end;
       end loop;
@@ -2693,6 +2520,11 @@ package body Driver.Robot.Kinematics is
 
    procedure Weigh_Across_Joints (M : in out Model; A : Arm_Id) is
    begin
+      --  A decider's call: noted in the recording, so a replay ends the sweep where the boot did (Replay_Note).
+      --  Without it a replay never fitted an arm across its joints, and its last fit was not the boot's (rec315
+      --  replayed, 10-26: RB-Y1 seed 1a's arm2_joints not fitted, and fitted -0.1 % once it was; 10 arms within 2 %
+      --  of 19, against 9).
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("across" & A'Image));
       for R of M.Kinematics loop
          if R.Arm = A then
             R.Across_Due := True;

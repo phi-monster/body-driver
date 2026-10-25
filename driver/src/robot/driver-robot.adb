@@ -340,6 +340,8 @@ package body Driver.Robot is
          Motion.Mark_Origins (M);
       elsif Count >= 2 and then Word (1) = "stepping" then
          M.Stepping := Word (2) = "1";
+      elsif Count >= 2 and then Word (1) = "across" then
+         Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "alone" then
          Note_Channels_Alone (M, Group_Id'Value (Word (2)));
       elsif Count >= 3 and then Word (1) = "back" then
