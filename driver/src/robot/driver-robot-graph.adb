@@ -144,6 +144,23 @@ package body Driver.Robot.Graph is
          and then Driver.Robot.Regression.Shares_Apart
                     (Far_Cells_Of (G, E), Cells_Of (G, E), Far_Cells_Of (H, F), Cells_Of (H, F)));
 
+      --  Every push of group G left eye F's view further beyond the flow's reach than one push of it left eye E's: of
+      --  each eye, the push of G that left it the least share beyond reach (Motion.Note_Stayed), the share F's larger
+      --  by more than chance (Regression.Shares_Apart). A camera a group carries is moved by every push of it; a push
+      --  the body answers by moving whole moves every eye, the carried and the rest.
+      function Least_Far_Of (G : Group_Id; E : Eye_Id) return Natural is
+        (if Natural (G) <= Natural (M.Eyes (E).Stayed_Least_Far.Length) then M.Eyes (E).Stayed_Least_Far (Natural (G) - 1)
+         else 0);
+      function Least_Cells_Of (G : Group_Id; E : Eye_Id) return Natural is
+        (if Natural (G) <= Natural (M.Eyes (E).Stayed_Least_Cells.Length)
+         then M.Eyes (E).Stayed_Least_Cells (Natural (G) - 1) else 0);
+      function Further_Every (G : Group_Id; F, E : Eye_Id) return Boolean is
+        (Least_Cells_Of (G, F) > 0 and then Least_Cells_Of (G, E) > 0
+         and then Real (Least_Far_Of (G, F)) / Real (Least_Cells_Of (G, F))
+                  > Real (Least_Far_Of (G, E)) / Real (Least_Cells_Of (G, E))
+         and then Driver.Robot.Regression.Shares_Apart
+                    (Least_Far_Of (G, F), Least_Cells_Of (G, F), Least_Far_Of (G, E), Least_Cells_Of (G, E)));
+
       type Eye_Flags is array (M.Eyes.First_Index .. M.Eyes.Last_Index) of Boolean;
 
       --  The eyes the arms of each group were for before this derivation: a group split into arms stays so while the lock-in
@@ -341,12 +358,16 @@ package body Driver.Robot.Graph is
       --  further rode on nothing, its arm moving no eye further. Replayed over twenty paced rounds (p82 to p91, 10-23
       --  and 10-24), the own group of 1792 eyes was right in 1677 by the most beyond reach, in 1755 this way; of the
       --  eyes right before, two of the G1's are wrong now and one of Stretch's, its gripper filling its wrist eye's view
-      --  as its arm did and its arm rocking the head's camera too (seed 2, round p89b).
+      --  as its arm did and its arm rocking the head's camera too (seed 2, round p89b). The eye a group moves most is
+      --  told by every push of it (Further_Every), not by their mean: the G1's right arm, the body answering its push
+      --  up by moving whole, left the head's view 71 % beyond reach as the walk's push left it 70 %, and 5 % by its
+      --  push down, against its own wrist eye's 37 and 27 %; by the mean it moved the head's camera most, carried it,
+      --  and took it (seed 3, round r374, 10-25).
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop
          for G in M.Groups.First_Index .. M.Groups.Last_Index loop
             Most (G, E) := Candidate (G, E)
               and then (for all F in M.Eyes.First_Index .. M.Eyes.Last_Index =>
-                          F = E or else not (Further (G, F, G, E)));
+                          F = E or else not Further_Every (G, F, E));
          end loop;
       end loop;
       for E in M.Eyes.First_Index .. M.Eyes.Last_Index loop

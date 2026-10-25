@@ -777,6 +777,12 @@ package body Driver.Robot.Tests is
          S.Stayed_Cells.Replace_Element (Natural (Group) - 1, Cells);
          S.Stayed_Far_Cells.Replace_Element (Natural (Group) - 1, Far);
          S.Stayed_Moved.Replace_Element (Natural (Group) - 1, Far);
+         while Natural (S.Stayed_Least_Cells.Length) < Natural (Group) loop
+            S.Stayed_Least_Far.Append (0);
+            S.Stayed_Least_Cells.Append (0);
+         end loop;
+         S.Stayed_Least_Far.Replace_Element (Natural (Group) - 1, Far);
+         S.Stayed_Least_Cells.Replace_Element (Natural (Group) - 1, Cells);
       end Leave;
    begin
       Exercise_Rig (M);

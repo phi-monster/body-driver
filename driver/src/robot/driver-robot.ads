@@ -690,6 +690,9 @@ private
                                                  --  reach, summed over them
       Stayed_Best_Moved : Count_Vectors.Vector;   --  per group: of the push that left the largest share of the view moved,
       Stayed_Best_Cells : Count_Vectors.Vector;   --  the cells it left moved and the textured cells it was counted of
+      Stayed_Least_Far   : Count_Vectors.Vector;   --  per group: of the push that left the least share of the view
+      Stayed_Least_Cells : Count_Vectors.Vector;   --  beyond the flow's reach, the cells it left so and the textured
+                                                   --  cells it was counted of
       Stayed_Pulled : Count_Vectors.Vector;  --  per group: how many of its pushes left the cells that did not move alone
                                              --  pulled together the same way (Motion.Note_Stayed)
       Last_Stayed_Group : Natural := 0;   --  the group of the latest push noted (Motion.Note_Stayed), none at first,
