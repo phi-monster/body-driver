@@ -32,7 +32,7 @@ project Driver is
                  "feed.adb", "brain_measure.adb", "brain_scene.adb", "fake_brain.adb", "world_check.adb",
                  "action_matrix.adb", "contact_matrix.adb", "truth_warp.adb", "align_study.adb",
                  "grammar_dump.adb", "driver-robot-fit_replay.adb", "driver-robot-walk_replay.adb",
-                 "pool_bench.adb");
+                 "driver-robot-flow_replay.adb", "pool_bench.adb");
 
    --  No loop peeled or versioned for its arrays' alignment: a vectorized loop whose first elements were done apart
    --  where an array happened to lie off the vector's width, its multiply-adds fused in one part and not the other, left

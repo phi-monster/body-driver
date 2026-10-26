@@ -75,8 +75,15 @@ package body Driver.Robot.Kinematics is
      (M : Model; E : Eye_Id; G : Group_Id; Picture : Driver.Images.Image; U, V : out Real_Vectors.Vector;
       Responds : out Flag_Vectors.Vector)
    is
+      --  An eye the group carries sees every point of the world move with it, whatever the lock-in kept of its cells:
+      --  an arm's own eye for its arm, and the body's eye on the carrier for the carrier (the eye under a walking arm,
+      --  Kinematics.Base). A walking G1's pushes moved its head camera's picture beyond the flow's reach at 39 of 49
+      --  beats and shared the others with other groups' pushes: no row was kept, no cell of it followed the carrier,
+      --  and five of six G1 boots walked and never aligned their walk's stills (n17s2, 10-27). The points that ride
+      --  with the eye (its own hands) the walk's stills leave out (Kinematics.Base.Riding_Points).
       Carried : constant Boolean :=
-        Eye_Mount (M, E).Kind = Arm_Carried and then Arm_Group (M, Eye_Mount (M, E).Arm) = G;
+        (Eye_Mount (M, E).Kind = Arm_Carried and then Arm_Group (M, Eye_Mount (M, E).Arm) = G)
+        or else (Eye_Mount (M, E).Kind = Carrier_Carried and then Carrier_Group (M) = G);
       S    : Eye_Stream renames M.Eyes (E);
       N    : constant Natural := Cells (S.Grid);
       Kept : constant Natural := Natural (S.Kept_Groups.Length);

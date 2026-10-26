@@ -387,7 +387,9 @@ def capture(c):
     img = renderer.render().astype(np.float32)
     img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * noise_rng.standard_normal(img.shape, dtype=np.float32)
     img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
-    if c["sensor"]["jpeg"]:
+    # BD_NO_JPEG=1: a diagnostic, never a hall's world: the pictures as the sensor makes them, no codec's loss (what of a
+    # fit's error the compression makes, 10-27: step 3's flows against the rigid-point model on SO-101's base camera).
+    if c["sensor"]["jpeg"] and not os.environ.get("BD_NO_JPEG"):
         buf = io.BytesIO()
         Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
         img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()

@@ -9,7 +9,23 @@ package body Driver.Numerics is
       A (3) * B (1) - A (1) * B (3),
       A (1) * B (2) - A (2) * B (1)];
 
-   function Unit (V : Vec3) return Vec3 is (V / abs V);
+   --  Where the length overflows the float (a component beyond the square root of its largest), the vector over
+   --  its largest component first: V over an infinite length is nought, no direction, and a fit's axis tilted past
+   --  the float's range went to nought so and ended the estimates (n17s2 shadow2a, 10-27). Every other vector as
+   --  before, to the bit.
+   function Unit (V : Vec3) return Vec3 is
+      Length : constant Real := abs V;
+   begin
+      if Length <= Real'Last then
+         return V / Length;
+      end if;
+      declare
+         Largest : constant Real := Real'Max (abs V (1), Real'Max (abs V (2), abs V (3)));
+         W       : constant Vec3 := [V (1) / Largest, V (2) / Largest, V (3) / Largest];
+      begin
+         return W / abs W;
+      end;
+   end Unit;
 
    --  Each sum is accumulated term by term from zero, as the general operators
    --  accumulate it, so that a multiply-add the compiler fuses is fused the
