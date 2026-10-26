@@ -4982,8 +4982,14 @@ package body Driver.Robot.Kinematics.Fit is
       end if;
       declare
          Sighted : array (1 .. Frames) of Boolean := [others => False];
-         --  Every sighting of the keyframe has the motion of the joints it did not ask taken out (Off_Told).
-         Offs_Told : array (1 .. Frames) of Boolean := [others => True];
+         --  Most sightings of the keyframe have the motion of the joints it did not ask taken out (Off_Told), and the
+         --  keyframe stands for its joint alone through them (Pairable takes no other). Every one of them once had to:
+         --  one point whose motion per unit of a joint off its reference was not told took the keyframe from its joint.
+         --  G1's arms (n7s2, 10-26) stood their joints not asked off their references by up to 15 of their steps (seed
+         --  1b, arm 2, joint 4: 0.43 units against its step 0.03, in keyframes of 119 points, 6 of them untold), and 7
+         --  of its 12 arms with an eye ended with a joint that had no keyframe of its own, not fitted.
+         Told, Untold : array (1 .. Frames) of Natural := [others => 0];
+         function Offs_Told (Frame : Positive) return Boolean is (Told (Frame) > Untold (Frame));
          Tracks  : Natural := 0;
 
          --  The one joint the keyframe turned alone, 0 for none: it was asked to (Moved), and every other joint stands
@@ -5010,7 +5016,11 @@ package body Driver.Robot.Kinematics.Fit is
       begin
          for X of Sight loop
             Sighted (X.Frame) := True;
-            Offs_Told (X.Frame) := Offs_Told (X.Frame) and then X.Off_Told;
+            if X.Off_Told then
+               Told (X.Frame) := Told (X.Frame) + 1;
+            else
+               Untold (X.Frame) := Untold (X.Frame) + 1;
+            end if;
             Tracks := Natural'Max (Tracks, X.Track);
          end loop;
          for B in 2 .. Frames loop
@@ -6176,18 +6186,18 @@ package body Driver.Robot.Kinematics.Fit is
             F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
             Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
             Tried_Ln, Tried_Total, Tried_Error : Real_Lists.Vector;   --  every focal length tried (its logarithm), its score and the score's error
-            --  Per joint: its keyframes' median residual as a slide (Slide_Of), at the search's first focal length, and
-            --  what it scores in the search where no turn explains its keyframes at a focal length: a joint that slides
-            --  is a turn of none, and a slide's sightings tell no focal length (the eye's travel along one direction is
-            --  the same picture at every focal length, the points' depths scaled with it). Stretch seed 3a's arm
-            --  (n3s2, replayed 10-26), its lift and its reach no turn at any focal length (1.8E+308 px), had every
-            --  focal length score infinite and the search's comparisons none (113 lengths, "nan"). Not the lesser of
-            --  the two where a turn does explain them: at focal lengths far too short every turn looks a slide, and
-            --  the same arm's search, every joint so capped, ended at 9.5 px.
-            Slide_Cap    : array (1 .. N) of Real := [others => Real'Last];
-            Slides_Known : Boolean := False;
-            function Scored (J : Positive; B : Best_Record) return Real is
-              (if B.Score < Real'Last then B.Score else Slide_Cap (J));
+            --  What a joint scores in the search at a focal length where no turn explains its keyframes (Best_Record's
+            --  Score left at Real'Last): as far off as a sighting stands that the picture holds at all, its diagonal, and
+            --  no error, the same at every focal length it fails at. Summed as Real'Last, Stretch seed 3a's arm (n3s2,
+            --  replayed 10-26), its lift and its reach no turn at any focal length, had every focal length score
+            --  infinite and the search's comparisons none (113 lengths, "nan"). Not the joint's score as a slide: a
+            --  slide tells no focal length, and where a turn fails at a focal length far from the truth, scored as its
+            --  slide it made that focal length look as good as any (n7s2, 10-26: SO-101 seed 1b's and ALOHA seeds 3a's
+            --  and 3b's first arms left a joint without a keyframe of its own, fitted in n6s2 without it).
+            Unexplained : constant Real := Sqrt (Real (Width) ** 2 + Real (Height) ** 2);
+            function Scored (B : Best_Record) return Real is (if B.Score < Real'Last then B.Score else Unexplained);
+            function Scored_Error (B : Best_Record; Count : Natural) return Real is
+              (if B.Score < Real'Last and then Count > 0 then Median_Error (B.Score, Count) else 0.0);
 
             procedure Search (F : Real; Best : out Best_Array) is
                --  The axis of every joint: the direction about which the widest keyframes are each most nearly a turn
@@ -6273,20 +6283,6 @@ package body Driver.Robot.Kinematics.Fit is
                Every_Piece (1, N * Pieces);
                Every_Joint (1, N);
                Free (Of_Piece);
-               if not Slides_Known then
-                  for J in 1 .. N loop
-                     if Every (J)'Length > 4 then
-                        declare
-                           D  : Vec3;
-                           Sd : Real;
-                        begin
-                           Slide_Of (J, F, D, Sd);
-                           Slide_Cap (J) := Sd;
-                        end;
-                     end if;
-                  end loop;
-                  Slides_Known := True;
-               end if;
                --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
                --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
                --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
@@ -6295,8 +6291,8 @@ package body Driver.Robot.Kinematics.Fit is
                   Var : Real := 0.0;
                begin
                   for J in 1 .. N loop
-                     Sum := Sum + Scored (J, Best (J));
-                     Var := Var + Median_Error (Scored (J, Best (J)), Counts (J)) ** 2;
+                     Sum := Sum + Scored (Best (J));
+                     Var := Var + Scored_Error (Best (J), Counts (J)) ** 2;
                   end loop;
                   Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
                   Tried_Ln.Append (Ln (F));
@@ -6309,7 +6305,7 @@ package body Driver.Robot.Kinematics.Fit is
                Sum : Real := 0.0;
             begin
                for J in 1 .. N loop
-                  Sum := Sum + Scored (J, B (J));
+                  Sum := Sum + Scored (B (J));
                end loop;
                return Sum;
             end Total;
@@ -6319,7 +6315,7 @@ package body Driver.Robot.Kinematics.Fit is
                Sum : Real := 0.0;
             begin
                for J in 1 .. N loop
-                  Sum := Sum + Median_Error (Scored (J, B (J)), Counts (J)) ** 2;
+                  Sum := Sum + Scored_Error (B (J), Counts (J)) ** 2;
                end loop;
                return Sqrt (Sum);
             end Total_Error;

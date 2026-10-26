@@ -1093,6 +1093,7 @@ package body Driver.Robot.Boot is
                   Off  : Real := Offset (I);
                   Mark : Level_Mark;
                   Last : Boolean;   --  the level just taken is the push's last
+                  Widest_Next : Boolean := False;   --  the next level is the widest turn itself
                begin
                   Levels (I).Clear;
                   Asked_Now := [others => False];
@@ -1158,11 +1159,32 @@ package body Driver.Robot.Boot is
                         --  itself (the brake below), and doubling from the least turn a keyframe counts took six to eight
                         --  levels a push to get there, each a keyframe aligned and fitted (f16b on 10-15: pass 2 of arm 1, 69
                         --  keyframes from 0.03 units to 2 to 8).
-                        Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
-                                else 2.0 * Off);
-                        Last := Off >= Lost_Least (I);
+                        declare
+                           Taken : constant Real := Off;   --  the level just taken
+                        begin
+                           Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
+                                   else 2.0 * Off);
+                           Last := Off >= Lost_Least (I);
+                           --  The widest turn is the one that moves the view half of it (Half), and a doubling that would
+                           --  pass it stops the ladder short of it, at a half to the whole of it: the turn itself is taken
+                           --  next where it is a step the fit counts beyond the level just taken (Least) and short of a
+                           --  level lost before. Stretch's head (n3s2, seed 2a) stopped at 66 px of its 120, 17 degrees
+                           --  of pan: a turn's focal length is told from how its picture bends across the view, which
+                           --  grows with the turn's square, and the order of two joints from their turns together, by the
+                           --  product of the two (its cells turn each by a share of its widest).
+                           if not Last and then Fitted_Now and then Per_Unit (P.Channel) > 0.0
+                             and then Off * Per_Unit (P.Channel) > Half
+                             and then Half / Per_Unit (P.Channel) - Taken > Least (P.Channel)
+                             and then Half / Per_Unit (P.Channel) < Lost_Least (I)
+                           then
+                              Off := Half / Per_Unit (P.Channel);
+                              Widest_Next := True;
+                           end if;
+                        end;
                      end if;
-                     if not Last then
+                     if not Last and then Widest_Next then
+                        Widest_Next := False;   --  the widest level itself is taken next, and is the last
+                     elsif not Last then
                         --  Before the arm is fitted, the ladder climbs only as far as the aligner follows by itself: an
                         --  extrapolation from the levels before to about a patch of displacement beyond them (A22, A23).
                         --  A doubled level's increment is the level before it, so a level whose whole motion is two

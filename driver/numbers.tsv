@@ -2953,7 +2953,6 @@ driver-robot-kinematics-fit.adb	if Count >= 2 then	2	structure	a spread needs tw
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
 driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
-driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
 driver-robot-kinematics-fit.adb	if F > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if F > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if K > 1 then	1	structure	after the first
