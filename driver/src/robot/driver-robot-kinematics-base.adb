@@ -50,15 +50,17 @@ package body Driver.Robot.Kinematics.Base is
             Free     : constant Boolean := Mount_Of.Kind = Carrier_Carried;
             Count    : Natural := 0;
          begin
-            --  An eye the carrier carries is one, whatever its pushes showed of it: the G1's walk turned its head's
-            --  view beyond the flow's reach at 39 of the 49 beats the recognition pushed it, the lock-in measured
-            --  nothing of it, and an arm's sweep was walked under the other arm's wrist eye instead, or not at all
-            --  (n15s2, 10-27: four of the six G1 boots). An eye on another arm, where the carrier's pushes moved it
-            --  whole and the arm's own do not: an arm that carries the other (a torso under a head) moves that eye
-            --  with it.
-            if (Free or else (Mount_Of.Kind = Arm_Carried and then Mount_Of.Arm /= A
-                              and then Response (M, Carrier, Eye_Id (E)) = Whole))
-              and then Response (M, Arm_Group (M, A), Eye_Id (E)) /= Whole
+            --  An eye the carrier carries is one, whatever its pushes or the arm's showed of it: the G1's walk turned
+            --  its head's view beyond the flow's reach at 39 of the 49 beats the recognition pushed it, the lock-in
+            --  measured nothing of it, and an arm's sweep was walked under the other arm's wrist eye instead, or not
+            --  at all (n15s2, 10-27: four of the six G1 boots); and its body, swaying with every push of an arm, had
+            --  every arm move its head's view whole (n16s2, 10-27: 242 and 248 of 255 cells in seed 1a), the sway the
+            --  walk is for, and no walk. An eye on another arm, where the carrier's pushes moved it whole and the
+            --  arm's own do not: an arm that carries the other (a torso under a head) moves that eye with it.
+            if Free
+              or else (Mount_Of.Kind = Arm_Carried and then Mount_Of.Arm /= A
+                       and then Response (M, Carrier, Eye_Id (E)) = Whole
+                       and then Response (M, Arm_Group (M, A), Eye_Id (E)) /= Whole)
             then
                for T of M.Eyes (Eye_Id (E)).Textured loop
                   if T then

@@ -1474,6 +1474,7 @@ driver-robot-boot.adb	Tried_Up : array (1 .. 2 * Size) of Boolean := [others => 
 driver-robot-boot.adb	Up_From (I) := 2.0 * Offset (I);	2.0	structure	the ladder climbs by doubling the level (the sweep's levels double)
 driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0];	2	structure	a channel has two ways, up and down, and a ladder state for each
 driver-robot-boot.adb	Whole_Amounts.Append (0.0);	0.0	format	nought marks a group whose channels are probed one at a time
+driver-robot-boot.adb	and then (Off - Asked_Most (I)) / 2.0 > Stands);	2.0	structure	two levels' readings, each standing off its target by up to the standoff: their difference by up to twice it
 driver-robot-boot.adb	and then Report.Delivered.Value > 0.5)));	0.5	structure	the level below asked half as much: more than half of this ask delivered is further than all of that one (as Push_Group)
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
@@ -1562,6 +1563,9 @@ driver-robot-flows.adb	(if P <= KFit.Lens_Terms then (case P is when 1 | 2 => 1,
 driver-robot-flows.adb	(if P <= KFit.Lens_Terms then (case P is when 1 | 2 => 1, when 3 => 2, when 4 => 3, when others => 0)	4	structure	Fixed_Fit's lens terms from the flow's: both focal lengths from its one, the principal point from its
 driver-robot-flows.adb	(if P <= KFit.Lens_Terms then P else P + 6 * (World - 1));	6	structure	an arm's six terms in a fixed eye's fit: the camera's turn about its own axes and its centre
 driver-robot-flows.adb	Achieved (J) := (High_R (J) - Low_R (J)) / 2.0;	2.0	math	half the range seen either way of the middle
+driver-robot-flows.adb	Ada.Long_Float_Text_IO.Put (Index, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
+driver-robot-flows.adb	Ada.Long_Float_Text_IO.Put (Index, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
+driver-robot-flows.adb	Ada.Long_Float_Text_IO.Put (Index, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
 driver-robot-flows.adb	Arm : Arm_Id := 1;	1	structure	the record's default before an arm is filled in
 driver-robot-flows.adb	Background (K) := (if P mod 2 = 1 then Column ((P + 1) / 2)	1	statistics	the median of the poses' stills: the middle one of an odd count
 driver-robot-flows.adb	Background (K) := (if P mod 2 = 1 then Column ((P + 1) / 2)	2	statistics	the median of the poses' stills: the middle one of an odd count

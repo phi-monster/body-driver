@@ -24,6 +24,7 @@ with Ada.Text_IO;
 with GNAT.OS_Lib;
 with Driver.Robot.Boot;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Kinematics.Base;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
 with Driver.Robot.Kinematics.Fit;
@@ -659,6 +660,36 @@ package body Driver.Robot.Tests is
       M.Graph.Effects.Replace_Element (Index, (Verdict => Unmeasured, others => <>));
       Check (not Driver.Robot.Kinematics.Sees (M, 3, 1), "a fixed eye not yet measured with the arm sees it");
    end Fixed_Eye_Sees_An_Undecided_Arm;
+
+   --  The walk's body eye (Kinematics.Base.Body_Eye_Of): an eye the carrier carries, though the arm's pushes move
+   --  its view whole, as a swaying body's every push does (the hall's G1, n16s2, 10-27: its head's view moved whole
+   --  by every arm, and no walk); an eye on another arm only where the arm's own pushes do not move it whole (an arm
+   --  under that one carries it).
+   procedure Body_Eye_By_Mounts is
+      M : Model;
+      function Effect (V : Eye_Response) return Eye_Effect is
+        (Verdict => V, Responding => (if V = Nothing then 0 else 40), Textured => 48,
+         Fraction => (Value => (if V = Nothing then 0.0 else 40.0 / 48.0), Sigma => 0.05, Degrees_Of_Freedom => 0),
+         Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
+      Carrier : constant Group_Id := 5;   --  the rig's idle group, taken for what carries the body
+      function Index (G : Group_Id; E : Eye_Id) return Positive is ((Natural (G) - 1) * Eye_Count (M) + Natural (E));
+   begin
+      Exercise_Rig (M);
+      M.Graph.Carrier := Carrier;
+      M.Graph.Mounts.Replace_Element (3, Mount'(Kind => Carrier_Carried));
+      M.Graph.Effects.Replace_Element (Index (Carrier, 3), Effect (Whole));
+      M.Graph.Effects.Replace_Element (Index (Arm_Group (M, 1), 3), Effect (Whole));
+      Check (Driver.Robot.Kinematics.Base.Body_Eye_Of (M, 1) = 3,
+             "an eye the carrier carries, its view moved whole by the arm's pushes too, is not the arm's body eye: got"
+             & Driver.Robot.Kinematics.Base.Body_Eye_Of (M, 1)'Image);
+      M.Graph.Mounts.Replace_Element (3, Mount'(Kind => Arm_Carried, Arm => 2));
+      Check (Driver.Robot.Kinematics.Base.Body_Eye_Of (M, 1) /= 3,
+             "an eye on another arm, its view moved whole by this arm's pushes, is this arm's body eye");
+      M.Graph.Effects.Replace_Element (Index (Arm_Group (M, 1), 3), Effect (Patch));
+      Check (Driver.Robot.Kinematics.Base.Body_Eye_Of (M, 1) = 3,
+             "an eye on another arm that the carrier moves whole and this arm does not is not its body eye: got"
+             & Driver.Robot.Kinematics.Base.Body_Eye_Of (M, 1)'Image);
+   end Body_Eye_By_Mounts;
 
    --  A group whose channels move different eyes (a humanoid's neck moves the head's eye and its arm a wrist's, one
    --  group of every joint) has an arm for each such eye, each carrying its eye; a channel an eye is undecided about
@@ -9797,6 +9828,9 @@ package body Driver.Robot.Tests is
                              & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.base.body_eye", "the walk's body eye is not an eye the carrier carries though the "
+                             & "arm moves its view whole, or is an eye on another arm this arm moves whole",
+                             Body_Eye_By_Mounts'Access);
       Driver.Tests.Register ("robot.kinematics.sees", "a fixed eye an arm's pushes move cells of does not see the arm, "
                              & "or one they move none of does", Fixed_Eye_Sees_An_Undecided_Arm'Access);
       Driver.Tests.Register ("robot.roles.split", "a group whose channels move two eyes apart is not one arm, and a "

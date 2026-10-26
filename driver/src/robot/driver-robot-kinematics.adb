@@ -1234,8 +1234,17 @@ package body Driver.Robot.Kinematics is
                            Far_V := Far_V / Driver.Alignment.Window_Multiple;
                            Variance := [Variance (1) + Far_U ** 2, Variance (2) + Far_U * Far_V, Variance (3) + Far_V ** 2];
                         end;
-                        Into (K).To := Here;
-                        Into (K).Cov := (UU => Variance (1), UV => Variance (2), VV => Variance (3));
+                        --  A covariance the fit's terms carried to the picture as no covariance (a variance below
+                        --  nought, or the two axes' product below their covariance's square: the fit's own not positive
+                        --  semi-definite where its normal equations were near singular) states nothing, and the point
+                        --  stays unpredicted: Stretch 3b's head (n16s2, 10-27), fitted at 216.2 +- 43.6 px, stated
+                        --  negative variances on both axes and its estimates ended on the square root of one.
+                        if Variance (1) >= 0.0 and then Variance (3) >= 0.0
+                          and then Variance (1) * Variance (3) >= Variance (2) ** 2
+                        then
+                           Into (K).To := Here;
+                           Into (K).Cov := (UU => Variance (1), UV => Variance (2), VV => Variance (3));
+                        end if;
                         Through_Plane (Plane, U0, V0, Here, Ok1);
                         Through_Plane (Plane, U0 + 1.0, V0, P1, Ok1);
                         Through_Plane (Plane, U0, V0 + 1.0, P2, Ok2);
@@ -1282,7 +1291,9 @@ package body Driver.Robot.Kinematics is
       Placed : Natural := 0;
    begin
       for K in Given'Range loop
-         if Real'Max (Given (K).Cov.UU, Given (K).Cov.VV) < Unpredicted then
+         if Real'Max (Given (K).Cov.UU, Given (K).Cov.VV) < Unpredicted
+           and then Real'Min (Given (K).Cov.UU, Given (K).Cov.VV) >= 0.0
+         then
             Placed := Placed + 1;
             Sigmas (Placed) :=
               Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (Given (K).Cov.UU, Given (K).Cov.VV));

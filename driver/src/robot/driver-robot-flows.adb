@@ -1,6 +1,12 @@
 with Ada.Containers.Vectors;
+with Ada.Directories;
+with Ada.Environment_Variables;
+with Ada.Long_Float_Text_IO;
 with Ada.Numerics.Long_Elementary_Functions;
+with Ada.Streams.Stream_IO;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Driver.Geometry;
 with Driver.Numerics.Dense;
@@ -817,6 +823,83 @@ package body Driver.Robot.Flows is
 
          --  Every eye not yet placed fitted to every arm it saw two poses of or more, through its one lens: stored when
          --  it is told (in the frame of the first such arm); not when a doubling of the poses left it no surer.
+         --  For a fixed eye's flow fit studied alone (tools/flow_replay): with BD_DUMP_FITS naming a folder (as the arms'
+         --  fits' inputs are, Kinematics.Fit), its inputs in a folder of their own, flow_EYE_BEAT: index.txt (the
+         --  picture's size; per arm its joints along its chain as its fit has them, each one's unit's relative sigma,
+         --  and per pose its readings, its steps and its noise) and per pose its still luma and each joint's turned ones
+         --  either way, row after row, as raw reals (POSE_still.bin, POSE_minus_J.bin, POSE_plus_J.bin, under arm_U).
+         procedure Dump_Flow (E : Positive; Used : Positive; Which : KFit.Count_Array; Width, Height : Positive) is
+            use Ada.Text_IO;
+            function Trim (S : String) return String is (Ada.Strings.Fixed.Trim (S, Ada.Strings.Both));
+            Folder : constant String := Ada.Environment_Variables.Value ("BD_DUMP_FITS") & "/flow_"
+              & Trim (Natural'Image (Eyes (E - 1))) & "_" & Trim (M.Beats'Image);
+            Index  : File_Type;
+            procedure Put_Real (X : Real) is
+            begin
+               Put (Index, " ");
+               Ada.Long_Float_Text_IO.Put (Index, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);
+            end Put_Real;
+            procedure Write (Name : String; Luma : Real_Array) is
+               F : Ada.Streams.Stream_IO.File_Type;
+            begin
+               Ada.Streams.Stream_IO.Create (F, Ada.Streams.Stream_IO.Out_File, Folder & "/" & Name);
+               Real_Array'Write (Ada.Streams.Stream_IO.Stream (F), Luma);
+               Ada.Streams.Stream_IO.Close (F);
+            end Write;
+         begin
+            Ada.Directories.Create_Path (Folder);
+            Create (Index, Out_File, Folder & "/index.txt");
+            Put_Line (Index, "flow eye" & Natural'Image (Eyes (E - 1)) & " beat" & M.Beats'Image & " width"
+                      & Width'Image & " height" & Height'Image & " arms" & Used'Image);
+            for U in 1 .. Used loop
+               declare
+                  Info : Arm_Info renames Arms (Which (U));
+                  P    : constant Natural := Natural (Captures (E, Which (U)).Length);
+               begin
+                  Put_Line (Index, "arm" & Info.Arm'Image & " joints" & Info.N'Image & " poses" & P'Image);
+                  for J in 1 .. Info.N loop
+                     Put (Index, "joint");
+                     for X of Info.Joints (J).W loop
+                        Put_Real (X);
+                     end loop;
+                     for X of Info.Joints (J).P loop
+                        Put_Real (X);
+                     end loop;
+                     Put_Real (Info.Joints (J).C);
+                     Put (Index, Natural'Image (Boolean'Pos (Info.Joints (J).Slide)));
+                     Put_Real (if Info.Unit_Sigma = null then 0.0 else Info.Unit_Sigma (J));
+                     New_Line (Index);
+                  end loop;
+                  for V in 1 .. P loop
+                     declare
+                        C : Pose_Capture renames Captures (E, Which (U)) (V).all;
+                        Stem : constant String := "arm_" & Trim (U'Image) & "_pose_" & Trim (V'Image);
+                     begin
+                        Put (Index, "pose" & V'Image & " noise");
+                        Put_Real (C.Noise);
+                        New_Line (Index);
+                        Put (Index, "readings");
+                        for X of C.Readings loop
+                           Put_Real (X);
+                        end loop;
+                        New_Line (Index);
+                        Put (Index, "steps");
+                        for X of C.Steps loop
+                           Put_Real (X);
+                        end loop;
+                        New_Line (Index);
+                        Write (Stem & "_still.bin", C.Still.all);
+                        for J in 1 .. C.N loop
+                           Write (Stem & "_minus_" & Trim (J'Image) & ".bin", C.Minus (J).all);
+                           Write (Stem & "_plus_" & Trim (J'Image) & ".bin", C.Plus (J).all);
+                        end loop;
+                     end;
+                  end loop;
+               end;
+            end loop;
+            Close (Index);
+         end Dump_Flow;
+
          --  May_Grow: the stills may double yet, and an eye whose places told more than at the stills before waits for
          --  them.
          procedure Fit_All (May_Grow : Boolean) is
@@ -887,6 +970,9 @@ package body Driver.Robot.Flows is
                                        else Arms (A).Unit_Sigma.all'Unchecked_Access));
                               end;
                            end loop;
+                           if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
+                              Dump_Flow (E, Used, [for U in 1 .. Used => Which (U)], Width, Height);
+                           end if;
                            Flow.Fit_Eye (In_Arms, Width, Height, Result);
                            --  Placed again by the world the arms' own eyes saw at their poses (their tables' points
                            --  in this eye's picture at the first arm's first pose).

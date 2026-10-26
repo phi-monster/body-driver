@@ -1212,6 +1212,7 @@ package body Driver.Robot.Boot is
                   Mark : Level_Mark;
                   Last : Boolean;   --  the level just taken is the push's last
                   Widest_Next : Boolean := False;   --  the next level is the widest turn itself
+                  Previous : Real := 0.0;   --  the level before this one in the push: its step asks the difference
                begin
                   Levels (I).Clear;
                   Asked_Now := [others => False];
@@ -1243,12 +1244,26 @@ package body Driver.Robot.Boot is
                      --  it can reach does. t502 of the race (10-23): channel 4's ladder doubled once a pass from pass 4
                      --  to pass 63, its asks to 1.1E19 units, no level of it framed, the view's motion per unit of the
                      --  joint never measured, so no level was the widest either.
+                     --  Neither is judged within how far the joint stands off a target at rest (Steps.Standoff: its
+                     --  dead band and the load it holds): a joint carrying its arm's weight lands off its target by its
+                     --  sag, which shifts with the way it came and with the other joints' poses, and a level asked no
+                     --  farther than that beyond the one before tells nothing of an end. A step blocked within it is
+                     --  one the joint stood still for; a reading no farther along than a level's before it, where the
+                     --  ask grew by less than twice it (each level's reading standing off its target by up to it), is
+                     --  no farther by the sag. Judged at every such level, the hall's loaded joints were taken for
+                     --  ended at their first levels and never pushed again (round n15s2, 10-27: of the pushes judged no
+                     --  farther, 35 of the Shadow's 41, 15 of the G1's 26, 10 of the UR5e's 23 had read along by more
+                     --  than they asked or the other way; UR5e 3b's elbow, asked 0.0043 units, read 0.0253 along
+                     --  against 0.0292 before, its sag about 0.02, turned 0.008 rad in the whole sweep, and the arm
+                     --  ended not fitted).
                      declare
                         Further : Boolean := False;
                         Along   : Real := 0.0;
+                        Stands  : Real := 0.0;   --  the joint's standoff at rest (Steps.Standoff)
                         procedure Read_Along is
                            D : Real_Array (1 .. Size) := [others => 0.0];
                         begin
+                           Stands := Driver.Robot.Steps.Standoff (M, G, P.Channel);
                            if M.Beats > 0 then
                               Along := P.Sign * (Channels.Reading (M, G, M.Beats - 1, P.Channel) - Start (P.Channel));
                               D (P.Channel) := Along - Along_Most (I);
@@ -1257,8 +1272,9 @@ package body Driver.Robot.Boot is
                         end Read_Along;
                      begin
                         Driver.Beats.Within_A_Beat (Read_Along'Access);
-                        Mark.Short := Report.Outcome = Driver.Robot.Motion.Blocked
-                          or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further);
+                        Mark.Short := (Report.Outcome = Driver.Robot.Motion.Blocked and then Off - Previous > Stands)
+                          or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further
+                                   and then (Off - Asked_Most (I)) / 2.0 > Stands);
                         --  Said with the readings it was judged from: SO-101 seed 1's fifth channel (n7s2 1b, n9s2 1a,
                         --  10-26), its readings in steps of 4 units, was judged at its end in its second pass both ways
                         --  and never pushed again, and the log named neither reading.
@@ -1272,6 +1288,7 @@ package body Driver.Robot.Boot is
                         end if;
                         Asked_Most (I) := Real'Max (Asked_Most (I), Off);
                         Along_Most (I) := Real'Max (Along_Most (I), Along);
+                        Previous := Off;
                      end;
                      if Report.Outcome /= Driver.Robot.Motion.Reached then
                         Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " push c"
