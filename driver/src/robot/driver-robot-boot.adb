@@ -1141,6 +1141,17 @@ package body Driver.Robot.Boot is
                         Driver.Beats.Within_A_Beat (Read_Along'Access);
                         Mark.Short := Report.Outcome = Driver.Robot.Motion.Blocked
                           or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further);
+                        --  Said with the readings it was judged from: SO-101 seed 1's fifth channel (n7s2 1b, n9s2 1a,
+                        --  10-26), its readings in steps of 4 units, was judged at its end in its second pass both ways
+                        --  and never pushed again, and the log named neither reading.
+                        if Mark.Short and then Report.Outcome /= Driver.Robot.Motion.Blocked then
+                           Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " push c"
+                                            & Driver.Log.Image (P.Channel) & (if P.Sign > 0.0 then "+" else "-")
+                                            & " at " & Driver.Log.Image (Off, 4) & " units reached, its reading "
+                                            & Driver.Log.Image (Along, 4) & " along it, against "
+                                            & Driver.Log.Image (Along_Most (I), 4) & " at the levels before (the farthest "
+                                            & Driver.Log.Image (Asked_Most (I), 4) & "): no farther, judged at its end");
+                        end if;
                         Asked_Most (I) := Real'Max (Asked_Most (I), Off);
                         Along_Most (I) := Real'Max (Along_Most (I), Along);
                      end;
@@ -1635,7 +1646,20 @@ package body Driver.Robot.Boot is
                                  elsif Last.Short then
                                     State (I) := Blocked;
                                  elsif Per_Unit (P.Channel) > 0.0 and then 2.0 * Last.Offset * Per_Unit (P.Channel) > Half then
-                                    State (I) := Widest;
+                                    --  The doubling would pass the widest turn, the one that moves the view by half of
+                                    --  it. A fitted arm's push takes that turn itself in the next pass, where it lies a
+                                    --  counted step beyond the level taken and short of a level lost before: Take's ladder
+                                    --  takes it in the pass only where the arm was fitted as the pass began, and a push
+                                    --  that stopped before at its brake of two patches was left there (Stretch 2b's head,
+                                    --  n9s2, 10-26: its tilt at 61 px of 120, the arm fitted within the pass).
+                                    if Fitted_Now
+                                      and then Half / Per_Unit (P.Channel) - Last.Offset > Least (P.Channel)
+                                      and then Half / Per_Unit (P.Channel) < Lost_Least (I)
+                                    then
+                                       Offset (I) := Half / Per_Unit (P.Channel);
+                                    else
+                                       State (I) := Widest;
+                                    end if;
                                  elsif Descending (I) then
                                     --  A ladder going down that reaches a level too small to count has no level the
                                     --  aligner follows below its first: once, it is tried above it.

@@ -1081,6 +1081,7 @@ driver-robot-body_file.ads	Noise_Method : constant := 3;	3	format	the third vers
 driver-robot-body_file.ads	Steps_Method : constant := 3;	3	format	the third version of this method; the body file records per channel the least ask a push moved it for (Steps.Executed_Least)
 driver-robot-body_file.ads	Travel_Method : constant := 1;	1	format	the first version of this method; the body file records it so a reload re-measures what a later version measures differently
 driver-robot-boot.adb	& ""	"2	structure	the porting contract's clause the log names
+driver-robot-boot.adb	& "" & Driver.Log.Image (Off, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (P.Reach, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Pulls (G, E), 2));	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& "" & Driver.Log.Image (Report.Delivered.Value, 2)	2	format	digits printed in a log line or a message
@@ -1090,6 +1091,9 @@ driver-robot-boot.adb	& "" & Report.Outcome'Image & "" & Driver.Log.Image (Repor
 driver-robot-boot.adb	& (if P.Sign > 0.0 then "" else "") & "" & Driver.Log.Image (Off, 4)	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (C), 4) & "" else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& (if Unswept.Length = 1 then "" else "" & Unswept.Length'Image	1	structure	one arm left to sweep: nothing to say of the others
+driver-robot-boot.adb	& Driver.Log.Image (Along, 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Along_Most (I), 4) & ""	4	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Asked_Most (I), 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Back_Now, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Back_Now, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3)	3	format	digits printed in a log line or a message
@@ -2121,6 +2125,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Best_M, 3) & ""	3	format	dig
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within), 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Gm, 3) & "" & Driver.Log.Image (Mo, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Gm, 3) & "" & Driver.Log.Image (Mo, 3) & ""	3	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Cy, 1) & "" & Width'Image & "" & Height'Image	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	3	format	digits printed in a log line or a message
@@ -2148,6 +2153,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Walked (Way).Flat_To, 1) & "
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Was, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
+driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Cx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (Rise, 2) & ""	2	format	digits printed in a log line or a message

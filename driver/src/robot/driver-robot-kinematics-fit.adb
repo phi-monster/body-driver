@@ -4802,6 +4802,23 @@ package body Driver.Robot.Kinematics.Fit is
             Driver.Log.Line
               (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
          end if;
+         --  A principal point beyond the picture is one no eye has: an eye's optical axis meets its own picture. The
+         --  fit put it there where its sightings let the lens's terms and the joints' trade one for another, and said
+         --  itself determined: Stretch seeds 2a's and 2b's arms (n7s2, 10-26) at 78 and 74 % of the picture's height
+         --  beyond its centre, their focal lengths +45 and +44 % across and +104 and +99 % down, and RB-Y1 seed 1a's
+         --  head at 71 %, -65 and -55 %; of the 61 arms refitted from their last inputs no other stood farther than 9 %
+         --  of the picture from its centre.
+         if Report.Determined
+           and then (L.Cx < 0.0 or else L.Cx > Real (Width) or else L.Cy < 0.0 or else L.Cy > Real (Height))
+         then
+            Report.Determined := False;
+            Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+              ("the sightings leave the lens undetermined: its principal point, " & Driver.Log.Image (L.Cx, 1) & ", "
+               & Driver.Log.Image (L.Cy, 1) & " px, lies beyond the picture of" & Width'Image & " by" & Height'Image
+               & " px");
+            Driver.Log.Line
+              (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
+         end if;
          --  The pinhole taken in the extras' place takes the step between them in, its profile walked: taken in before,
          --  the step's sigma (some 40 px on the bench's mast head 2:1) set the profile's first step past the range
          --  searched, the fit was left undetermined and the next rounds wandered to 67 px for 173 (10-21).
