@@ -903,6 +903,9 @@ package body Driver.Robot.Boot is
                         & ", dead band "
                         & (if Driver.Robot.Steps.Dead_Band (M, G, C) < Real'Last
                            then Driver.Log.Image (Driver.Robot.Steps.Dead_Band (M, G, C), 4) else "none")
+                        & ", standing off "
+                        & (if Driver.Robot.Steps.Standoff (M, G, C) < Real'Last
+                           then Driver.Log.Image (Driver.Robot.Steps.Standoff (M, G, C), 4) else "none")
                         & ", noise "
                         & (if Driver.Robot.Channels.Noise (M, G, C) < Real'Last
                            then Driver.Log.Image (Driver.Robot.Channels.Noise (M, G, C), 4) else "unknown"));

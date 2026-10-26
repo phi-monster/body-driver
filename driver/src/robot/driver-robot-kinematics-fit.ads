@@ -336,6 +336,9 @@ package Driver.Robot.Kinematics.Fit is
       --  The sightings of the last fit that walked the focal length's profile, this one or one it was begun from; 0
       --  where none did.
       Profiled_Over : Natural := 0;
+      --  And the variance of the focal length's logarithm that fit's profile said (its sigma as wide as the profile
+      --  made it); 0 where none did.
+      Profile_Var : Real := 0.0;
       --  Per joint, three numbers: for a joint that slides, the turn per reading unit (its axis times its rate) of the
       --  turn its own keyframes were explained by nearly as well when stage 1 took it for a slide, which every fit
       --  begun from this one weighs against the slide again (Fit_Start); zero for a joint that turns, or has none.
@@ -376,6 +379,7 @@ package Driver.Robot.Kinematics.Fit is
       --  lens taken for the search's result. Otherwise a fit of this estimate: the last stage alone.
       Whole          : Boolean := False;
       Profiled_Over  : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Profile_Var    : Real := 0.0;   --  the variance of its focal length's logarithm that profile said (Fit_Report)
       Order_Told     : Boolean := False;   --  its joints' order was told (Fit_Report)
       Slide_Turns    : Vec3_Array (1 .. N) := [others => [0.0, 0.0, 0.0]];   --  per joint (Fit_Report)
       Turns_Told     : Flag_Array (1 .. N) := [others => False];   --  per joint (Fit_Report)

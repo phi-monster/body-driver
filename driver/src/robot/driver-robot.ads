@@ -545,6 +545,15 @@ private
       Episodes    : Episode_Vectors.Vector;   --  every push and how it went (Driver.Robot.Steps)
       From, Ask   : Real_Vectors.Vector;   --  of the push under way: the readings before it, and target minus them
       Asks        : Flag_Vectors.Vector;   --  of the push under way: the channels it asked a step the one test of motion sees
+      Changed     : Flag_Vectors.Vector;   --  of the push under way: the channels whose target it changed
+      Rest_Offset : Real_Vectors.Vector;   --  per channel: the load it held where a push last came to rest, its reading
+                                           --  less its target less its dead band's part (Driver.Robot.Steps.Start: a
+                                           --  load it holds sets it off its target by as much again); empty before any
+                                           --  push came to rest
+      Last_Way    : Real_Vectors.Vector;   --  per channel: +1 or -1, the way a push last moved it along its ask, 0 before
+                                           --  one did (its dead band leaves it short that way: Steps.Finish)
+      Stuck       : Flag_Vectors.Vector;   --  per channel: a push judged blocked asked it to go and it stood where it
+                                           --  stood, and none has moved it since (Steps.Finish)
       Free_Shortfalls : Real_Vectors.Vector;   --  of every answered push that was not blocked, along its ask, in order
       Free_Short_Most  : Real_Vectors.Vector;    --  per channel: the most an answered push that was not blocked and asked it a
                                                  --  step fell short of its ask of it, along that ask (Driver.Robot.Steps)
@@ -555,9 +564,12 @@ private
                                            --  the body executes asks that large; a servo stands still for one within
                                            --  its dead band), Real'Last until one did; empty before any push
       Held_Off    : Real_Vectors.Vector;   --  per channel: the farthest its reading stood from its target where a push
-                                           --  came to rest (Driver.Robot.Steps: a servo stops anywhere within its dead
-                                           --  band of a target, and an ask within the band moves nothing); 0 until one
-                                           --  did, empty before any push
+                                           --  came to rest (Driver.Robot.Steps.Standoff: its dead band and any load it
+                                           --  holds there); 0 until one did, empty before any push
+      Short_Up, Short_Down : Real_Vectors.Vector;   --  per channel: the most it stood short of its target, along the
+                                                    --  ask, where a push that asked it up (down) and moved it along
+                                                    --  that ask came to rest (Driver.Robot.Steps.Dead_Band); Real'First
+                                                    --  until one did, empty before any push
       Low_Seen, High_Seen : Real_Vectors.Vector;   --  per channel, the lowest and highest reading so far
       Seen_At     : Real_Vectors.Vector;   --  per channel: the turn at which the recognition's probe saw an eye move
                                            --  with it (Boot), 0 where none did; empty before the groups are recognized
@@ -842,6 +854,7 @@ private
       --  made in: a fit made again within that estimate begins from it (Kinematics.Refit's Again).
       Focal_Within, Searched_Least, Searched_Most : Real := 0.0;
       Profiled_Over : Natural := 0;   --  the sightings its focal length's profile was last walked over (Fit_Report)
+      Profile_Var   : Real := 0.0;   --  the variance of its focal length's logarithm that profile said (Fit_Report)
       Order_Told    : Boolean := False;   --  its joints' order is told by the sightings, not only the best (Fit_Report)
       Untold        : Joint_Pair_Lists.Vector;   --  when not: the joints next to each other along it whose swap is not
                                                  --  told (Fit_Report)

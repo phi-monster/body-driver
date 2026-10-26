@@ -3389,6 +3389,132 @@ package body Driver.Robot.Tests is
       end if;
    end Step_Stuck_Joint_Stays_Stuck;
 
+   --  A joint on a position loop that holds a load lands off its target by the load, the same way whichever way it is
+   --  pushed (the hall's G1, 10-26: its elbows 0.08 rad under their forearms); a servo with a dead band lands short of
+   --  its target whichever way it comes. Pushes 1 to 8 go up by 0.5 and back down: the first joint lands 0.05 above
+   --  each target, the second 0.05 short of it along each ask. The first has no dead band and stands 0.05 off its
+   --  targets; the second has a band of 0.05 and stands as far off.
+   procedure Load_Is_No_Dead_Band is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading : Real_Array (1 .. 2) := [0.0, 0.0];
+      Load : constant Real := 0.05;
+   begin
+      for B in 0 .. 130 loop
+         if B = 64 or else B = 128 then
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               for C in 1 .. 2 loop
+                  S.Kept_Groups.Append (1);
+                  S.Kept_Channels.Append (C);
+                  S.Gains.Append (4.0e12);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 1, Textured => 1,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
+            end;
+         end if;
+         if B in 66 .. 105 then
+            declare
+               K     : constant Natural := (B - 66) / 5 + 1;
+               Phase : constant Natural := (B - 66) mod 5;
+               Up    : constant Boolean := K mod 2 = 1;
+            begin
+               if Phase = 0 then
+                  Target := [others => (if Up then 0.5 else 0.0)];
+               elsif Phase = 1 then
+                  Reading (1) := Target (1) + Load;
+                  Reading (2) := Target (2) - (if Up then Load else -Load);
+               end if;
+            end;
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(Reading (1) + 1.0e-12 * Gaussian (Rng), Reading (2) + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target (1), Target (2)]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 8, "eight pushes, got" & Steps.Episodes (M, 1)'Image);
+      Check (Steps.Dead_Band (M, 1, 1) < 0.1 * Load,
+             "the joint that holds a load of" & Load'Image & " has a dead band of" & Steps.Dead_Band (M, 1, 1)'Image);
+      Check (abs (Steps.Standoff (M, 1, 1) - Load) < 0.1 * Load,
+             "the joint that holds a load of" & Load'Image & " stands" & Steps.Standoff (M, 1, 1)'Image & " off");
+      Check (abs (Steps.Dead_Band (M, 1, 2) - Load) < 0.1 * Load,
+             "the joint with a dead band of" & Load'Image & " has a band of" & Steps.Dead_Band (M, 1, 2)'Image);
+      Check (abs (Steps.Standoff (M, 1, 2) - Load) < 0.1 * Load,
+             "the joint with a dead band of" & Load'Image & " stands" & Steps.Standoff (M, 1, 2)'Image & " off");
+   end Load_Is_No_Dead_Band;
+
+   --  A joint no push has moved yet, standing 0.05 off its target under a load from the start: its target moved 0.02,
+   --  within how far it stands off, and standing still, it is not judged blocked (a servo's band or the friction a
+   --  held load leaves may keep it); moved 0.2 and standing still, it is. Pushes 1 to 4 move the first joint up by 0.5
+   --  and back, and rest; pushes 5 and 7 move the second's target 0.02 and 0.2 from its first, 6 and 8 back.
+   procedure Standing_Off_Is_No_Block is
+      M    : Model;
+      Rng  : Generator;
+      O    : Observation;
+      Sent : Driver.Commands.Command;
+      Target, Reading : Real_Array (1 .. 2) := [0.0, 0.05];
+   begin
+      for B in 0 .. 170 loop
+         if B = 64 or else B = 128 then
+            declare
+               S : Eye_Stream renames M.Eyes (1);
+            begin
+               S.Kept_Groups.Clear;
+               S.Kept_Channels.Clear;
+               S.Gains.Clear;
+               S.Gain_Variances.Clear;
+               for C in 1 .. 2 loop
+                  S.Kept_Groups.Append (1);
+                  S.Kept_Channels.Append (C);
+                  S.Gains.Append (4.0e12);
+                  S.Gain_Variances.Append (1.0);
+               end loop;
+               M.Graph.Effects.Replace_Element
+                 (1, (Verdict => Whole, Responding => 1, Textured => 1,
+                      Fraction => (Value => 1.0, Sigma => 0.0, Degrees_Of_Freedom => 0), Resting => 0.0, Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0));
+            end;
+         end if;
+         --  Pushes 1 to 4 five beats each from beat 66, pushes 5 to 8 twenty each from beat 86.
+         if B in 66 .. 85 and then (B - 66) mod 5 = 0 then
+            Target (1) := (if ((B - 66) / 5) mod 2 = 0 then 0.5 else 0.0);
+         elsif B in 66 .. 85 and then (B - 66) mod 5 = 1 then
+            Reading (1) := Target (1);
+         elsif B in 86 .. 165 and then (B - 86) mod 20 = 0 then
+            Target (2) := (case (B - 86) / 20 is when 0 => 0.02, when 2 => 0.2, when others => 0.0);
+         end if;
+         O := (others => <>);
+         O.Beat := Driver.Clock.Beat (B);
+         O.Images.Append (Driver.Images.No_Image);
+         O.Depth.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Echoes.Append (Real_Array'(1 .. 0 => 0.0));
+         O.Readings.Append (Real_Array'(Reading (1) + 1.0e-12 * Gaussian (Rng), Reading (2) + 1.0e-12 * Gaussian (Rng)));
+         Sent := Driver.Commands.Hold;
+         Driver.Commands.Set_Target (Sent, 1, [Target (1), Target (2)]);
+         Observe (M, O, Sent);
+      end loop;
+      Check (Steps.Episodes (M, 1) = 8, "eight pushes, got" & Steps.Episodes (M, 1)'Image);
+      if Steps.Episodes (M, 1) = 8 then
+         Check (M.Groups (1).Episodes (5).Ended and then not M.Groups (1).Episodes (5).Blocked,
+                "push 5, asking 0.02 of a joint no push has moved, standing 0.05 off its target, is called blocked");
+         Check (M.Groups (1).Episodes (7).Ended and then M.Groups (1).Episodes (7).Blocked,
+                "push 7, asking 0.2 of a joint no push has moved, standing 0.05 off its target, is not called blocked");
+      end if;
+   end Standing_Off_Is_No_Block;
+
    --  A joint no eye watches, read exactly as a simulator reads it: its reading
    --  repeats exactly at rest (noise zero), and every free push lands on its
    --  target to the last bit, so that what the group's free pushes fell short
@@ -3451,9 +3577,9 @@ package body Driver.Robot.Tests is
       O    : Observation;
       Sent : Driver.Commands.Command;
       --  Pushes every twelve beats. The reading answers two beats after a push
-      --  and settles three beats later, 0.05 short of the target with a
-      --  scatter of 0.001, as a joint held against gravity does, which is many
-      --  times the readings' noise. Pushes 1 to 5 and 7 move freely; push 6
+      --  and settles three beats later, 0.05 short of the target along the
+      --  ask with a scatter of 0.001, as a servo's dead band leaves it, which
+      --  is many times the readings' noise. Pushes 1 to 5 and 7 move freely; push 6
       --  meets an obstacle at 2.0; push 8, asking more than any push the
       --  joint executed (a push within a servo's dead band is not judged,
       --  Steps.Executed_Least), is never answered.
@@ -7755,6 +7881,7 @@ package body Driver.Robot.Tests is
             Start.Searched_Least := Report_Own.Searched_Least;
             Start.Searched_Most := Report_Own.Searched_Most;
             Start.Profiled_Over := Report_Own.Profiled_Over;
+            Start.Profile_Var := Report_Own.Profile_Var;
             Start.Order_Told := Report_Own.Order_Told;
             Fit.Fit (Changes, Asked, Visible, All_Seen (1 .. Seen), 640, 480, 0, Joints, Chain, Found_All, Report_All,
                      From => Start);
@@ -9604,6 +9731,12 @@ package body Driver.Robot.Tests is
                              & "millionths off its target, beside a shortfall that no eye can see", Step_Standing_Error_Is_No_Push'Access);
       Driver.Tests.Register ("robot.steps.stuck", "a push is called free though a joint of its group stays stopped by something while the "
                              & "others move on, its target no different from the push before's", Step_Stuck_Joint_Stays_Stuck'Access);
+      Driver.Tests.Register ("robot.steps.load", "a joint that holds a load, landing off its target the same way whichever "
+                             & "way it is pushed, is given a dead band, or one that lands short either way is not",
+                             Load_Is_No_Dead_Band'Access);
+      Driver.Tests.Register ("robot.steps.standing_off", "a joint no push has moved, standing off its target, is called "
+                             & "blocked for an ask within how far it stands off, or not for one beyond",
+                             Standing_Off_Is_No_Block'Access);
       Driver.Tests.Register ("robot.steps.exact", "a push of a joint no eye watches whose readings repeat exactly is called blocked "
                              & "though it stopped short by one place of the float, no more than the float can tell",
                              Step_Short_By_Rounding'Access);

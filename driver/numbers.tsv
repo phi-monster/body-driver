@@ -203,10 +203,10 @@ driver-alignment-keyframes.adb	G => (M11 => A - 1.0, M12 => -B, M21 => B, M22 =>
 driver-alignment-keyframes.adb	G => (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,	1.0	math	the displacement is the place moved less the place: the identity taken off
 driver-alignment-keyframes.adb	H : constant Real_Matrix (1 .. 3, 1 .. 3) := Ti * Hn * T;	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	H : constant Real_Matrix (1 .. 3, 1 .. 3) := Ti * Hn * T;	3	structure	a projective map of the plane, a 3 x 3 matrix
-driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the half picture: the field's coordinates are fractions of the half from the picture's centre (Tell_Linear, as Gradient)
-driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the half picture: the field's coordinates are fractions of the half from the picture's centre (Tell_Linear, as Gradient)
+driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
 driver-alignment-keyframes.adb	Hn : constant Real_Matrix (1 .. 3, 1 .. 3) :=	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	Hn : constant Real_Matrix (1 .. 3, 1 .. 3) :=	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	I = K or else Shift (I) > 0.0 or else not Driver.Uncertain.Significant (Change (I), Noise (I) * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
@@ -1229,6 +1229,7 @@ driver-robot-boot.adb	return Real (G.State) / 2_147_483_647.0;	2_147_483_647.0	m
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Channels.Noise (M, G, C), 4) else ""));	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Steps.Dead_Band (M, G, C), 4) else "")	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Steps.Executed_Least (M, G, C), 3) else "")	3	format	digits printed in a log line or a message
+driver-robot-boot.adb	then Driver.Log.Image (Driver.Robot.Steps.Standoff (M, G, C), 4) else "")	4	format	digits printed in a log line or a message
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
 driver-robot-channels.adb	M.Drift.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	no creep until measured
 driver-robot-channels.adb	M.Noise.Append (0.0, Ada.Containers.Count_Type (Total));	0.0	math	the first round takes every change for motion: noise zero
@@ -2132,6 +2133,8 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Exp (Best_At + Told_Within),
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Gm, 3) & "" & Driver.Log.Image (Mo, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Gm, 3) & "" & Driver.Log.Image (Mo, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Cy, 1) & "" & Width'Image & "" & Height'Image	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx * Sqrt (Carried), 2) & "" & Sight'Length'Image	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx * Sqrt (V11), 2));	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	3	format	digits printed in a log line or a message
@@ -2145,6 +2148,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (R.Focal_Sigma, 2) & "");	2	f
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Reach_Pow, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Cost_Judged, 1) & "" & Driver.Log.Image (Still, 1));	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Focal_Sigma, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Focal_Sigma, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element, 1) & "")	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
@@ -2160,6 +2164,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Was, 2) & "");	2	format	digi
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Cx, 1) & ""	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (Rise, 2) & ""	2	format	digits printed in a log line or a message
@@ -3817,6 +3822,7 @@ driver-robot-lockin.adb	& "" & Driver.Log.Image (S.Shift_V (Cell * Kept + K - 1)
 driver-robot-lockin.adb	& "" & Driver.Log.Image (Sum_Variance, 4) & "" & Far'Image & "");	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& "" & Driver.Log.Image (V, 6));	6	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Driver.Stats.Median (Floors.all), 5));	5	format	digits printed in a log line or a message
+driver-robot-lockin.adb	& Driver.Log.Image (Effect.Rest_Pull, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Mean, 4) & "" & Driver.Log.Image (Sigma, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	& Driver.Log.Image (Real (Driver.Clock.Seconds - Started), 1) & ""	1	format	digits printed in a log line or a message
@@ -4052,6 +4058,7 @@ driver-robot-regression.adb	return 1.0;	1.0	math	no events: at least none is cer
 driver-robot-regression.ads	function Count_Significant (Count, Trials : Natural; Rate : Real; Tests : Positive := 1) return Boolean	1	structure	a count that is no best of many is one test
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
 driver-robot-regression.ads	with Pre => Count <= Trials and then Rate > 0.0 and then Rate < 1.0;	1.0	math	a rate is a probability
+driver-robot-steps.adb	(Channels.Reading (M, G, Beat, C) - S.From (C - 1), Sqrt (2.0) * Channels.Noise (M, G, C))	2.0	math	the difference of two readings has twice the variance of one
 driver-robot-steps.adb	(X.Followed < 2 or else not X.Turned	2	structure	a scatter needs two beats; with fewer there is no chatter to tell a gain from
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
 driver-robot-steps.adb	(if Ask > 0.0 then 1.0 else -1.0) * (Channels.Reading (M, G, Beat, C) - S.From (C - 1));	1.0	math	the sign of the ask: motion along it counts positive
@@ -4060,7 +4067,13 @@ driver-robot-steps.adb	Own (C) := (Unit * Sqrt (2.0) * Sigma) ** 2;	2.0	statisti
 driver-robot-steps.adb	Real'Max (Real'Max (Sqrt (2.0) * Channels.Noise (M, G, C), Floor),	2.0	statistics	a difference of two readings has twice a reading's variance
 driver-robot-steps.adb	S.Free_Short_Most.Append (0.0);	0.0	structure	no free push has fallen short of the channel yet
 driver-robot-steps.adb	S.Held_Off.Append (0.0);	0.0	structure	no push has come to rest off the channel's target yet
+driver-robot-steps.adb	S.Last_Way.Append (0.0);	0.0	structure	no push has moved the channel yet: no way it last came
+driver-robot-steps.adb	S.Last_Way.Replace_Element (C - 1, (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0));	1.0	math	the sense of the channel's ask
+driver-robot-steps.adb	S.Last_Way.Replace_Element (C - 1, (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0));	1.0	math	the sense of the channel's ask
+driver-robot-steps.adb	S.Rest_Offset.Append (0.0);	0.0	structure	no push has come to rest off the channel's target yet: its reading is asked from as it stands
 driver-robot-steps.adb	Sigma : constant Real := Sqrt (2.0 * Spread);	2.0	math	a shortfall is the difference of two readings, before the push and where it stopped
+driver-robot-steps.adb	Way : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);	1.0	math	the sense of the channel's ask
+driver-robot-steps.adb	Way : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);	1.0	math	the sense of the channel's ask
 driver-robot-steps.adb	Way : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);	1.0	math	the sense of the channel's ask
 driver-robot-steps.adb	Way : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);	1.0	math	the sense of the channel's ask
 driver-robot-steps.adb	and then Channels.Has_Reading (M, G, Beat - 2))	2	structure	the last two beats of a push: three readings tell two steps and their ratio, the fewest that tell a run of shrinking steps
@@ -4076,6 +4089,7 @@ driver-robot-steps.adb	if not (Last > 0.0 and then Last < Before and then Driver
 driver-robot-steps.adb	or else (S.Free_Short_Count (C - 1) <= 2 and then Natural (S.Free_Shortfalls.Length) > 2	2	structure	the first three free pushes of a channel have nothing to be compared with: three shortfalls are the fewest that say what its free pushes fall short by; and those of the group, as before the channels were judged apart: the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	or else (S.Free_Short_Count (C - 1) <= 2 and then Natural (S.Free_Shortfalls.Length) > 2	2	structure	the first three free pushes of a channel have nothing to be compared with: three shortfalls are the fewest that say what its free pushes fall short by; and those of the group, as before the channels were judged apart: the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));	2.0	math	a gain is the difference of two beats' values of the quantity, whose variance is twice one beat's
+driver-robot-steps.adb	return Real'Min (Real'Max (0.0, (Up + Down) / 2.0), Least);	2.0	math	the mean of the two ways' standoffs along their asks: a held load's offset, of opposite sense along the two, cancels in it
 driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare

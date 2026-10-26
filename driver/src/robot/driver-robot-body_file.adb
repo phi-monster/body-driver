@@ -93,6 +93,26 @@ package body Driver.Robot.Body_File is
       return V;
    end Executed_Known_Of;
 
+   --  Per channel of a group, the most a push of one way stood short of its target where it came to rest
+   --  (Group_Stream.Short_Up, Short_Down), 0 where none did yet, and which did.
+   function Short_Of (V : Real_Vectors.Vector) return Real_Vectors.Vector is
+      R : Real_Vectors.Vector;
+   begin
+      for X of V loop
+         R.Append (if X > Real'First then X else 0.0);
+      end loop;
+      return R;
+   end Short_Of;
+
+   function Short_Known_Of (V : Real_Vectors.Vector) return Flag_Vectors.Vector is
+      R : Flag_Vectors.Vector;
+   begin
+      for X of V loop
+         R.Append (X > Real'First);
+      end loop;
+      return R;
+   end Short_Known_Of;
+
    function Counts (V : Count_Vectors.Vector) return String is
       T : Unbounded_String := To_Unbounded_String ("[");
    begin
@@ -200,6 +220,10 @@ package body Driver.Robot.Body_File is
               & ", ""executed"": " & Reals (Executed_Of (M.Groups (G)))
               & ", ""executed_known"": " & Flags (Executed_Known_Of (M.Groups (G)))
               & ", ""held_off"": " & Reals (M.Groups (G).Held_Off)
+              & ", ""short_up"": " & Reals (Short_Of (M.Groups (G).Short_Up))
+              & ", ""short_up_known"": " & Flags (Short_Known_Of (M.Groups (G).Short_Up))
+              & ", ""short_down"": " & Reals (Short_Of (M.Groups (G).Short_Down))
+              & ", ""short_down_known"": " & Flags (Short_Known_Of (M.Groups (G).Short_Down))
               & ", ""free_short_most"": " & Reals (M.Groups (G).Free_Short_Most)
               & ", ""free_short_count"": " & Counts (M.Groups (G).Free_Short_Count) & "}");
       end loop;
@@ -630,6 +654,22 @@ package body Driver.Robot.Body_File is
                      --  A body file written before the dead bands were measured where pushes came to rest has none:
                      --  the band is the least executed ask until a push comes to rest (Steps.Dead_Band).
                      S.Held_Off := Reals_Of (Field (Item (Gs, I), "held_off"));
+                     --  And one written before the bands were measured each way has none: the band is the least
+                     --  executed ask until a push moves the channel and comes to rest (Steps.Dead_Band).
+                     declare
+                        procedure Read_Short (Name : String; V : out Real_Vectors.Vector) is
+                           X     : constant Real_Vectors.Vector := Reals_Of (Field (Item (Gs, I), Name));
+                           Known : constant Flag_Vectors.Vector := Flags_Of (Field (Item (Gs, I), Name & "_known"));
+                        begin
+                           V.Clear;
+                           for J in X.First_Index .. X.Last_Index loop
+                              V.Append (if J <= Known.Last_Index and then Known (J) then X (J) else Real'First);
+                           end loop;
+                        end Read_Short;
+                     begin
+                        Read_Short ("short_up", S.Short_Up);
+                        Read_Short ("short_down", S.Short_Down);
+                     end;
                      --  And one written before the free pushes were kept channel by channel has none: a channel is judged
                      --  short once three free pushes asked it again (Steps.Finish).
                      S.Free_Short_Most := Reals_Of (Field (Item (Gs, I), "free_short_most"));

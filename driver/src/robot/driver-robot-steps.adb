@@ -24,9 +24,30 @@ package body Driver.Robot.Steps is
    --  a push the reading never moved for; Settled is False for one the next
    --  push cut short, which is not judged; Rested is False for one given up
    --  while its readings kept moving.
+   --  Whether a push that moved the channel along its ask has come to rest (Group_Stream.Short_Up, Short_Down): the
+   --  channel's dead band is measured.
+   function Band_Measured (M : Model; G : Group_Id; Channel : Positive) return Boolean is
+      S : Group_Stream renames M.Groups (G);
+   begin
+      return (Channel <= Natural (S.Short_Up.Length) and then S.Short_Up (Channel - 1) > Real'First)
+        or else (Channel <= Natural (S.Short_Down.Length) and then S.Short_Down (Channel - 1) > Real'First);
+   end Band_Measured;
+
+   --  Whether the channel, which no push has moved yet (Group_Stream.Executed), may stand still for an ask of Ask: no
+   --  more than it stands off its target at rest (Group_Stream.Held_Off), what a servo's dead band or a load it holds
+   --  keeps it off by. Its band is measured once a push moves it (Dead_Band); standing still meanwhile for an ask within
+   --  how far it stands off says nothing of what stops it. Judged blocked there, the hall's G1 would stop its elbows'
+   --  ladders at their first levels: its elbows stood still through the probe and the lock-in (n12s2 seed 2, 10-26,
+   --  their true angles still to 0.003 rad), the steps an eye sees them make below a hundredth of a unit, their friction
+   --  0.1 N m on loops of 40 N m a rad (0.0025 rad), and they stand 0.083 rad off their targets under their forearms.
+   function Within_Standoff (S : Group_Stream; C : Positive; Ask : Real) return Boolean is
+     (C <= Natural (S.Executed.Length) and then S.Executed (C - 1) >= Real'Last
+      and then C <= Natural (S.Held_Off.Length) and then Ask <= S.Held_Off (C - 1));
+
    procedure Finish (M : in out Model; G : Group_Id; Beat : Natural; Answered, Settled, Rested : Boolean) is
       S : Group_Stream renames M.Groups (G);
       E : Episode := S.Episodes.Last_Element;
+      Went : array (1 .. S.Size) of Boolean := [others => False];   --  per channel: the push executed its ask of it
    begin
       E.Ended := True;
       E.End_At := Beat;
@@ -68,6 +89,7 @@ package body Driver.Robot.Steps is
                  and then Along > abs Ask - Along
                then
                   S.Executed.Replace_Element (C - 1, Real'Min (S.Executed (C - 1), abs Ask));
+                  Went (C) := True;
                end if;
             end;
          end loop;
@@ -81,14 +103,15 @@ package body Driver.Robot.Steps is
       --  2.4 to 3.8 units, every one called blocked where it stood, and no joint had a keyframe of its own). A
       --  push that was answered is judged whatever it asked: a joint that moved was not in its dead band, and one
       --  stopped half way by an obstacle is blocked. A channel no push has moved yet has no such least, and a
-      --  push of it is judged as any: a joint held against its limit from the start answers nothing at any size,
-      --  and is blocked.
+      --  push of it is judged beyond how far the channel stands off its target at rest (Within_Standoff): a joint
+      --  held against its limit from the start answers nothing at any size, and is blocked.
       if Settled and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat)
         and then Channels.Visible (M, G, Along_Ask (S, E.Length, E.Length))
         and then (Answered
                   or else (for some C in 1 .. S.Size =>
                              S.Asks (C - 1)
-                             and then (S.Executed (C - 1) >= Real'Last
+                             and then ((S.Executed (C - 1) >= Real'Last
+                                        and then not Within_Standoff (S, C, abs S.Ask (C - 1)))
                                        or else abs S.Ask (C - 1) >= S.Executed (C - 1))))
       then
          declare
@@ -163,11 +186,12 @@ package body Driver.Robot.Steps is
                            --  stands where it stood. One that went part of the way is not judged so: the first levels of
                            --  the fake's seed 20 (10-22) delivered 0.48 to 0.75 of their asks, and were free.
                            if (S.Free_Short_Count (C - 1) > 2 and then Shorts (C) > Driver.Conventions.Z * Largest
-                               and then (C > Natural (S.Held_Off.Length) or else Shorts (C) > Dead_Band (M, G, C)))
+                               and then (not Band_Measured (M, G, C) or else Shorts (C) > Dead_Band (M, G, C)))
                              or else (S.Free_Short_Count (C - 1) <= 2 and then Natural (S.Free_Shortfalls.Length) > 2
                                       and then abs S.Ask (C - 1) - Shorts (C) <= Driver.Conventions.Z * Largest
-                                      and then (C > Natural (S.Held_Off.Length)
-                                                or else abs S.Ask (C - 1) > Dead_Band (M, G, C)))
+                                      and then (not Band_Measured (M, G, C)
+                                                or else abs S.Ask (C - 1) > Dead_Band (M, G, C))
+                                      and then not Within_Standoff (S, C, abs S.Ask (C - 1)))
                            then
                               Falls_Short := True;
                               Falling (C) := Way * Shorts (C);
@@ -207,8 +231,10 @@ package body Driver.Robot.Steps is
          end;
       end if;
       --  Where a push came to rest unblocked, how far each channel's reading stood from its target
-      --  (Group_Stream.Held_Off, Dead_Band): a servo stops anywhere within its dead band of a target, and stands
-      --  still for an ask within it.
+      --  (Group_Stream.Held_Off, Standoff): a servo stops anywhere within its dead band of a target, and stands
+      --  still for an ask within it; a load it holds sets it off its target too. And of each channel the push moved
+      --  along its ask, how far short of its target it stood along that ask, each way apart (Short_Up, Short_Down,
+      --  Dead_Band): a band leaves it short whichever way it came, a load short one way and past the other.
       --  A blocked push stood off its target by what stopped it, not by the band.
       if Rested and then not E.Blocked and then E.Length > 0.0 and then Channels.Has_Reading (M, G, Beat)
         and then Channels.Has_Target (M, G, Beat)
@@ -220,6 +246,71 @@ package body Driver.Robot.Steps is
             S.Held_Off.Replace_Element
               (C - 1, Real'Max (S.Held_Off (C - 1),
                                 abs (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat, C))));
+         end loop;
+         while Natural (S.Short_Up.Length) < S.Size loop
+            S.Short_Up.Append (Real'First);
+         end loop;
+         while Natural (S.Short_Down.Length) < S.Size loop
+            S.Short_Down.Append (Real'First);
+         end loop;
+         for C in 1 .. S.Size loop
+            if Went (C) then
+               declare
+                  Way   : constant Real := (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0);
+                  Short : constant Real := Way * (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat, C));
+               begin
+                  if Way > 0.0 then
+                     S.Short_Up.Replace_Element (C - 1, Real'Max (S.Short_Up (C - 1), Short));
+                  else
+                     S.Short_Down.Replace_Element (C - 1, Real'Max (S.Short_Down (C - 1), Short));
+                  end if;
+               end;
+            end if;
+         end loop;
+      end if;
+      --  And of each channel, the load it holds there (Group_Stream.Rest_Offset), what the next push asks it from
+      --  (Start): its reading less its target, less the band's part, which leaves it short along the way it last came
+      --  (Last_Way) whichever way that was (Dead_Band); a load sets it off the same way whichever way it came. Taken
+      --  with the band's part, a servo's dead band was carried into the next push's ask: a push turning back asked
+      --  twice the band less than it needs. Of a channel whose target the push left, wherever the push came to rest
+      --  (the load changes with the pose the other joints take); of one whose target it changed, where the push came to
+      --  rest unblocked (in a blocked one it stood off by what stopped it). A channel the push asked to go that stood where
+      --  it stood in a push judged blocked, its reading still within what two readings' noise tells, is stopped by
+      --  something (Stuck): it stands off its target by what stops it, not by a load, and is asked again its target
+      --  until a push moves it along its ask; taken for a load, a joint stuck short of a target kept from one push to
+      --  the next was asked nothing by the next, and the pushes were called free. One that moved at all is not stuck:
+      --  a loaded joint asked less than its load moves by the ask and stands off by the load, short of an ask that
+      --  took its reading for its place.
+      if Settled and then Rested and then Channels.Has_Reading (M, G, Beat) and then Channels.Has_Target (M, G, Beat) then
+         while Natural (S.Rest_Offset.Length) < S.Size loop
+            S.Rest_Offset.Append (0.0);
+         end loop;
+         while Natural (S.Last_Way.Length) < S.Size loop
+            S.Last_Way.Append (0.0);
+         end loop;
+         while Natural (S.Stuck.Length) < S.Size loop
+            S.Stuck.Append (False);
+         end loop;
+         for C in 1 .. S.Size loop
+            declare
+               Changed : constant Boolean := C <= Natural (S.Changed.Length) and then S.Changed (C - 1);
+            begin
+               if Went (C) then
+                  S.Last_Way.Replace_Element (C - 1, (if S.Ask (C - 1) > 0.0 then 1.0 else -1.0));
+                  S.Stuck.Replace_Element (C - 1, False);
+               elsif E.Blocked and then Changed and then S.Asks (C - 1) and then C <= Natural (S.From.Length)
+                 and then Channels.Noise (M, G, C) < Real'Last
+                 and then not Driver.Uncertain.Significant
+                                (Channels.Reading (M, G, Beat, C) - S.From (C - 1), Sqrt (2.0) * Channels.Noise (M, G, C))
+               then
+                  S.Stuck.Replace_Element (C - 1, True);
+               end if;
+               if not S.Stuck (C - 1) and then (not Changed or else not E.Blocked) then
+                  S.Rest_Offset.Replace_Element
+                    (C - 1, Channels.Reading (M, G, Beat, C) - Channels.Target (M, G, Beat, C)
+                            + (if Band_Measured (M, G, C) then Dead_Band (M, G, C) * S.Last_Way (C - 1) else 0.0));
+               end if;
+            end;
          end loop;
       end if;
       S.Episodes.Replace_Element (S.Episodes.Last_Index, E);
@@ -246,6 +337,23 @@ package body Driver.Robot.Steps is
      (if Channel <= Natural (M.Groups (G).Executed.Length) then M.Groups (G).Executed (Channel - 1) else Real'Last);
 
    function Dead_Band (M : Model; G : Group_Id; Channel : Positive) return Real is
+      S     : Group_Stream renames M.Groups (G);
+      Least : constant Real := Executed_Least (M, G, Channel);
+      Up    : constant Real :=
+        (if Channel <= Natural (S.Short_Up.Length) then S.Short_Up (Channel - 1) else Real'First);
+      Down  : constant Real :=
+        (if Channel <= Natural (S.Short_Down.Length) then S.Short_Down (Channel - 1) else Real'First);
+   begin
+      --  No wider than the least ask the body executed: an ask it executed was beyond its band.
+      if Up > Real'First and then Down > Real'First then
+         return Real'Min (Real'Max (0.0, (Up + Down) / 2.0), Least);
+      elsif Up > Real'First or else Down > Real'First then
+         return Real'Min (Real'Max (0.0, Real'Max (Up, Down)), Least);
+      end if;
+      return Least;
+   end Dead_Band;
+
+   function Standoff (M : Model; G : Group_Id; Channel : Positive) return Real is
       S : Group_Stream renames M.Groups (G);
       Least : constant Real := Executed_Least (M, G, Channel);
    begin
@@ -253,7 +361,7 @@ package body Driver.Robot.Steps is
       --  executed: an ask it executed was beyond its band, and a reading standing farther off its target than that
       --  stood off it by something else.
       return (if Channel <= Natural (S.Held_Off.Length) then Real'Min (S.Held_Off (Channel - 1), Least) else Least);
-   end Dead_Band;
+   end Standoff;
 
    procedure Start (M : in out Model; G : Group_Id; Beat : Natural) is
       S : Group_Stream renames M.Groups (G);
@@ -263,9 +371,20 @@ package body Driver.Robot.Steps is
       S.From.Clear;
       S.Ask.Clear;
       S.Asks.Clear;
+      S.Changed.Clear;
       for C in 1 .. S.Size loop
          S.From.Append (Channels.Reading (M, G, Beat - 1, C));
-         S.Ask.Append (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat - 1, C));
+         --  What the push asks of the channel: its target less where its reading comes to rest for it, the reading as it
+         --  stands less how far it stood off its target at its last rest (Rest_Offset). A load the servo holds sets it off
+         --  any target by about as much (an arm's weight on a position loop), a servo's dead band anywhere within it: a
+         --  channel whose target the push leaves is asked nothing however far it stands off, and a loaded joint is asked
+         --  the turn its target takes. Asked its target less its reading, the hall's G1 (n14s2 seed 2, 10-26), its elbows
+         --  0.083 rad off their targets under their forearms (0.67 units of the right's readings), had every push of its
+         --  arm ask the elbow back from its sag, 0.77 units of a push of 0.007, stand still and be judged blocked.
+         S.Ask.Append (Channels.Target (M, G, Beat, C) - Channels.Reading (M, G, Beat - 1, C)
+                       + (if C <= Natural (S.Rest_Offset.Length) then S.Rest_Offset (C - 1) else 0.0));
+         S.Changed.Append (not Channels.Has_Target (M, G, Beat - 1)
+                           or else Channels.Target (M, G, Beat, C) /= Channels.Target (M, G, Beat - 1, C));
          Length := Length + S.Ask.Last_Element ** 2;
          S.Asks.Append (Channels.Visible (M, G, [for I in 1 .. S.Size => (if I = C then S.Ask.Last_Element else 0.0)]));
          if S.Asks.Last_Element then

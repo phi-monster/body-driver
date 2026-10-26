@@ -1131,12 +1131,13 @@ package body Driver.Robot.Motion is
                         declare
                            Noise : constant Real := Channels.Noise (M, Group_Id (G), C);
                            Error : constant Real := Target (Target'First + C - 1) - Reading (Reading'First + C - 1);
-                           --  An error within the channel's dead band (Steps.Dead_Band) is not sent again: the body
-                           --  stands still for an ask within its dead band, and sending
+                           --  An error within what the channel stands off its target at rest (Steps.Standoff: its
+                           --  dead band and a load it holds) is not sent again: the body stands still for an ask
+                           --  within its dead band, and sending
                            --  it bounced the kiwi's joints two or three units either side of their targets, a step
                            --  sent again two to four times each, 340 times in a boot whose sweep then held still
                            --  for no keyframe (R6's eighth start, 10-14).
-                           Least : constant Real := Steps.Dead_Band (M, Group_Id (G), C);
+                           Least : constant Real := Steps.Standoff (M, Group_Id (G), C);
                            Counted : constant Real := Least_Counted (C);
                         begin
                            if not Stopped and then Noise < Real'Last and then Noise > 0.0

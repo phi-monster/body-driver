@@ -150,6 +150,11 @@ begin
          From.Focal_Within := Next_Real;
          From.Searched_Least := Next_Real;
          From.Searched_Most := Next_Real;
+         --  The start's profile variance, where the dump has it (Fit's Profile_Var).
+         if At_Token <= Tokens.Last_Index and then Tokens (At_Token) = "profile" then
+            Expect ("profile");
+            From.Profile_Var := Next_Real;
+         end if;
          From.L.Fx := Next_Real;
          From.L.Fy := Next_Real;
          From.L.Cx := Next_Real;

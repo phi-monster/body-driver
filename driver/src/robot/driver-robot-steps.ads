@@ -108,16 +108,33 @@ private package Driver.Robot.Steps is
 
    function Dead_Band (M : Model; G : Group_Id; Channel : Positive) return Real;
    --  How far from a target the channel may stand still, in reading units: the band a servo neither moves within
-   --  nor lands nearer than. The farthest its reading stood from its target where a push came to rest
-   --  (Group_Stream.Held_Off) once one did; before that, the least ask it is known to execute (Executed_Least): a
-   --  boot begun from a body file has no rests yet. Executed_Least alone missed the band both ways, four of it the
-   --  sweep's least turn (twice in the counted turn, twice for the two landings): where the probe saw a channel
-   --  move at its first level it is that level, and the fake's seed 26 (10-22, default options) asked its base turn
-   --  4.7 units, its wrist eye's view 200 px away, no keyframe of it in six passes; where readings at rest repeat
-   --  exactly (noise 0) their jitter after a push counted asks of 0.001 to 0.08 units executed, and seed 20's first
-   --  levels lay inside its servos' bands, every push of arm 1 blocked in its one pass.
-   --  Held_Off no farther than Executed_Least: an ask the body executed lay beyond the band, and the fake's seed 26
-   --  (10-22) had its shoulder's Held_Off grow to 5.9 units, where its least executed ask was 1.1.
+   --  nor lands nearer than. Where pushes that moved the channel along their asks came to rest (Group_Stream.Short_Up,
+   --  Short_Down): of each way, the most it stood short of its target along the ask, and the band the mean of the two
+   --  ways, one way's where only one is known, no less than nothing. A servo stops on entering its band whichever way
+   --  it comes, short of its target either way; a load it holds (an arm's weight on a position loop) sets it off its
+   --  target by the same amount the same way whichever way it came, short one way and past the other, and leaves the
+   --  mean. Taken as the farthest the reading stood from its target at any rest (Standoff), the hall's G1 (n12s2 seed
+   --  2, 10-26) had its elbows' and wrists' sag under their forearms and hands (0.06 to 0.08 rad, on position loops of
+   --  20 and 40 N m a rad) for bands of 0.13 to 0.67 units and its sweep's first levels four times that (0.34 rad of
+   --  the elbow): their pushes were judged blocked and none of those joints had a keyframe of its own; channels of
+   --  ALOHA's and the Shadow's arms no push had moved stood off by 5 to 50 times their neighbours' bands.
+   --  Before any such rest, the least ask it is known to execute (Executed_Least): a boot begun from a body file has
+   --  no rests yet. Executed_Least alone missed the band both ways, four of it the sweep's least turn (twice in the
+   --  counted turn, twice for the two landings): where the probe saw a channel move at its first level it is that
+   --  level, and the fake's seed 26 (10-22, default options) asked its base turn 4.7 units, its wrist eye's view
+   --  200 px away, no keyframe of it in six passes; where readings at rest repeat exactly (noise 0) their jitter
+   --  after a push counted asks of 0.001 to 0.08 units executed, and seed 20's first levels lay inside its servos'
+   --  bands, every push of arm 1 blocked in its one pass. No wider than Executed_Least: an ask the body executed lay
+   --  beyond the band, and the fake's seed 26 (10-22) had its shoulder stand 5.9 units off at rests, where its least
+   --  executed ask was 1.1.
+
+   function Standoff (M : Model; G : Group_Id; Channel : Positive) return Real;
+   --  How far from its target the channel may stand at rest, in reading units: its dead band and any load it holds
+   --  there (an arm's weight on a position loop). The farthest its reading stood from its target where a push came
+   --  to rest (Group_Stream.Held_Off) once one did, no farther than the least ask it is known to execute
+   --  (Executed_Least); before that, that ask. What a landing's error is not sent again within (Motion.Step), as it
+   --  was before the band left loads out: an error a held load leaves is left again at every landing, and the hall's
+   --  G1 already sent 1614 steps again in six boots for 9149 beats (n13s2, 10-26).
 
    function Latest (M : Model; G : Group_Id) return Episode
      with Pre => Episodes (M, G) > 0;

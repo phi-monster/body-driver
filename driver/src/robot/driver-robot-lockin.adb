@@ -1172,7 +1172,13 @@ package body Driver.Robot.Lockin is
                                                         & Count'Image & " of" & T'Image & " textured cells respond, "
                                                         & Least'Image & " to" & Most'Image & " show the motion"
                                                         & (if Disagree then " and the cells that can tell disagree" else "")
-                                                        & ": " & Effect.Verdict'Image);
+                                                        & ": " & Effect.Verdict'Image
+                                                        --  And how the cells that do not respond pull along with it,
+                                                        --  pooled: the Shadow's hand filled 192 of its wrist eye's 247
+                                                        --  textured cells and was judged to move the view whole, and
+                                                        --  the line said nothing of the other 55 (n9s2, 10-26).
+                                                        & " (the rest pull along by "
+                                                        & Driver.Log.Image (Effect.Rest_Pull, 2) & ")");
                                     end;
                                  end if;
                                  M.Graph.Effects.Replace_Element ((Natural (G) - 1) * Eyes + Natural (E), Effect);

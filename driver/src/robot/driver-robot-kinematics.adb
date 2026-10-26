@@ -2873,6 +2873,7 @@ package body Driver.Robot.Kinematics is
                         Start.Searched_Least := R.Result.Searched_Least;
                         Start.Searched_Most := R.Result.Searched_Most;
                         Start.Profiled_Over := R.Result.Profiled_Over;
+                        Start.Profile_Var := R.Result.Profile_Var;
                         Start.Order_Told := R.Result.Order_Told;
                         for P of R.Result.Untold_Orders loop
                            Start.Untold_Orders.Append (P);
@@ -3096,6 +3097,7 @@ package body Driver.Robot.Kinematics is
                                  Start_R.Searched_Most := Start.Searched_Most;
                                  Start_R.Whole := Start.Whole;
                                  Start_R.Profiled_Over := Start.Profiled_Over;
+                                 Start_R.Profile_Var := Start.Profile_Var;
                                  Start_R.Order_Told := Start.Order_Told;
                                  for J in 1 .. Count loop
                                     Start_R.Turns_Told (J) := Start.Turns_Told (Index (J));
@@ -3307,6 +3309,7 @@ package body Driver.Robot.Kinematics is
                      Result.Searched_Least := Report.Searched_Least;
                      Result.Searched_Most := Report.Searched_Most;
                      Result.Profiled_Over := Report.Profiled_Over;
+                     Result.Profile_Var := Report.Profile_Var;
                      Result.Order_Told := Report.Order_Told;
                      --  The untold pairs of the fit that searched the orders; a fit begun from another keeps the ones before.
                      if Report.Order_Told then

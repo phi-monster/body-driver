@@ -3908,6 +3908,9 @@ package body Driver.Robot.Kinematics.Fit is
       Put_Real (From.Searched_Least);
       Put_Real (From.Searched_Most);
       New_Line (File);
+      Put_Line (File, "profile");
+      Put_Real (From.Profile_Var);
+      New_Line (File);
       Put_Real (From.L.Fx);
       Put_Real (From.L.Fy);
       Put_Real (From.L.Cx);
@@ -4785,6 +4788,56 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end loop;
          end;
+         --  A fit begun from an earlier estimate's that walks no profile keeps the profile's word on its focal length:
+         --  the variance the profile last said, shrunk with the sightings since as independent ones would shrink it,
+         --  where that is more than the covariance's here, raised as the profile raises it (above). Its covariance's
+         --  curvature is the basin's, not the valley's: Stretch seed 1a's head (n9s2, 10-26), walked, 235.0 +- 7.3 px
+         --  over 34 keyframes, and its next two fits, no keyframe more, said +- 0.73 and +- 0.43 (222.8 px for the true
+         --  216.5); the sweep's cells were predicted from them stating 0.1 px, the aligner's windows that narrow found
+         --  the texture beside the points, and with those four keyframes the arm was fitted at 359 +- 30 px.
+         if not Profiled and then From.Valid and then From.Profile_Var > 0.0 and then From.Profiled_Over > 0
+           and then Report.Determined and then L.Fx > 0.0 and then not Report.Covariance.Is_Empty
+         then
+            declare
+               Carried : constant Real :=
+                 From.Profile_Var * Real (From.Profiled_Over) / Real (Natural'Max (Sight'Length, From.Profiled_Over));
+               Reduced : constant Natural := Natural (Sqrt (Real (Natural (Report.Covariance.Length))));
+               V11     : constant Real := Report.Covariance (Report.Covariance.First_Index);
+            begin
+               if Reduced > 0 and then V11 > 0.0 and then Carried > V11 then
+                  declare
+                     Gain : constant Real := (Carried - V11) / V11 ** 2;
+                     Row1 : Real_Array (1 .. Reduced);
+                  begin
+                     for Q in 1 .. Reduced loop
+                        Row1 (Q) := Report.Covariance (Report.Covariance.First_Index + Q - 1);
+                     end loop;
+                     for P in 1 .. Reduced loop
+                        for Q in 1 .. Reduced loop
+                           declare
+                              K : constant Positive := Report.Covariance.First_Index + (P - 1) * Reduced + Q - 1;
+                           begin
+                              Report.Covariance.Replace_Element (K, Report.Covariance (K) + Gain * Row1 (P) * Row1 (Q));
+                           end;
+                        end loop;
+                     end loop;
+                  end;
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: the focal length's sigma kept from its last profile, "
+                                   & Driver.Log.Image (L.Fx * Sqrt (Carried), 2) & " px over" & Sight'Length'Image
+                                   & " sightings (walked over" & From.Profiled_Over'Image & "), from the covariance's "
+                                   & Driver.Log.Image (L.Fx * Sqrt (V11), 2));
+                  Report.Focal_Sigma := L.Fx * Sqrt (Carried);
+                  if not Driver.Uncertain.Significant (L.Fx, Report.Focal_Sigma) then
+                     Report.Determined := False;
+                     Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+                       ("the sightings leave the focal length undetermined: " & Driver.Log.Image (L.Fx, 1) & " +- "
+                        & Driver.Log.Image (Report.Focal_Sigma, 1) & " px, as wide as its last profile");
+                     Driver.Log.Line
+                       (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
+                  end if;
+               end if;
+            end;
+         end if;
          --  A focal length beyond the range the search tried is none the sightings were weighed at: the fit walked
          --  there from the search's best, and its profile, walked only within that range, tells nothing of it; nor
          --  does a refit's from there, which walks no profile. RB-Y1 seed 3a's third arm (n5s2, 10-26): searched
@@ -4915,6 +4968,11 @@ package body Driver.Robot.Kinematics.Fit is
          Report.Searched_Least := Searched_Least;
          Report.Searched_Most := Searched_Most;
          Report.Profiled_Over := (if Profiled then Sight'Length elsif From.Valid then From.Profiled_Over else 0);
+         Report.Profile_Var :=
+           (if Profiled
+            then (if Report.Focal_Sigma > 0.0 and then Report.Focal_Sigma < Real'Last and then L.Fx > 0.0
+                  then (Report.Focal_Sigma / L.Fx) ** 2 else 0.0)
+            elsif From.Valid then From.Profile_Var else 0.0);
          Report.Order_Told := Order_Is_Told;
          Report.Untold := Untold;
          Report.Untold_Turns := Untold_Turns;
@@ -8791,6 +8849,7 @@ package body Driver.Robot.Kinematics.Fit is
             Start.Searched_Least := Report.Searched_Least;
             Start.Searched_Most := Report.Searched_Most;
             Start.Profiled_Over := Report.Profiled_Over;
+            Start.Profile_Var := Report.Profile_Var;
             Start.Order_Told := Report.Order_Told;
             Start.Slide_Turns := Slide_Turns_Of (Report, N);
             Start.Turns_Told := Turns_Told_Of (Report, N);
