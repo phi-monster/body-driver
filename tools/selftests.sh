@@ -8,7 +8,9 @@
 # the environment passes through (ASAN_OPTIONS included). JOBS defaults to the machine's processors,
 # LIMIT_SECONDS to the box's limit (tools/boxtest.sh). A name that is also a prefix of others runs
 # only itself (a filter ending in $). Every test that fails or exceeds the limit is printed with what
-# it printed; the last line counts them. Exit status 0 when every test passes.
+# it printed; the last line counts them. Exit status 0 when every test passes. With BD_KEEP_FAILED
+# set to a directory, every failing test's whole log is copied there (the run's own are deleted with
+# it: robot.boot.step failed once in a box suite on 10-26 and passed 86 times alone, its log gone).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$1"
@@ -26,6 +28,7 @@ find "$ROOT/driver" -name '*.ad[sb]' -not -path '*/obj/*' -print0 \
 awk '$2 != 0' "$OUT/results" | sort > "$OUT/bad"
 while read -r name status; do
   if [ "$status" = 124 ]; then echo "TIMEOUT  $name (over $LIMIT s)"; else echo "FAIL     $name"; fi
+  if [ -n "${BD_KEEP_FAILED:-}" ]; then mkdir -p "$BD_KEEP_FAILED" && cp "$OUT/$name.log" "$BD_KEEP_FAILED/"; fi
   grep -v '^\[' "$OUT/$name.log" | grep -v '^pass\|passed,' | head -5 | sed 's/^/         /'
 done < "$OUT/bad"
 echo "$(awk '$2 == 0' "$OUT/results" | wc -l | tr -d ' ') of $(wc -l < "$OUT/results" | tr -d ' ') passed"
