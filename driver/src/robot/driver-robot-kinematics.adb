@@ -14,6 +14,7 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics.Dense;
 with Driver.Parallel_For;
+with Driver.Robot.Kinematics.Base;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Stillness;
 with Driver.Stats;
@@ -525,6 +526,8 @@ package body Driver.Robot.Kinematics is
                declare
                   R : Arm_Evidence renames M.Kinematics (Index);
                begin
+                  --  A still of the body's walk under the arm, where one is due (Kinematics.Base).
+                  Base.Observe (M, R, O);
                   --  Keyframes from the arm's sweep on (Arm_Evidence.Sweeping, Begin_Anew): the recognition's rounds
                   --  held the kiwi's arms at 23 to 47 poses an arm, every one a keyframe, and the estimates between
                   --  the rounds aligned them for 21 to 115 s each (R5's fifth start, R6's second, 10-14), for a
@@ -601,6 +604,12 @@ package body Driver.Robot.Kinematics is
                                  end loop;
                                  K.Image := O.Images (E);
                                  K.Asked := R.Asking;
+                                 --  And what the body's eye under the arm saw (Kinematics.Base).
+                                 if R.Body_Eye > 0 and then R.Body_Eye <= O.Images.Last_Index
+                                   and then Driver.Observations.Has_Image (O, R.Body_Eye)
+                                 then
+                                    K.Body_Image := O.Images (R.Body_Eye);
+                                 end if;
                                  R.Frames.Append (K);
                               end;
                               if At_Reference and then Natural (R.Frames.Length) > 1 then
@@ -612,6 +621,20 @@ package body Driver.Robot.Kinematics is
                            if Natural (R.Frames.Length) = 1 then
                               Query_Points
                                 (M, E, G, R.Frames.Last_Element.Image, R.Query_U, R.Query_V, R.Query_Responds);
+                              --  The body's eye's points: its cells that follow what carries the body, the world
+                              --  (Kinematics.Base; the arm's hand in its view rides with it as the body walks).
+                              R.Body_Query_U.Clear;
+                              R.Body_Query_V.Clear;
+                              if R.Body_Eye > 0 and then Carrier_Group (M) > 0
+                                and then Driver.Images.Width (R.Frames.Last_Element.Body_Image) > 0
+                              then
+                                 declare
+                                    Follow : Flag_Vectors.Vector;
+                                 begin
+                                    Query_Points (M, R.Body_Eye, Carrier_Group (M), R.Frames.Last_Element.Body_Image,
+                                                  R.Body_Query_U, R.Body_Query_V, Follow);
+                                 end;
+                              end if;
                               R.Still.Clear;
                               R.Stood_Off.Clear;
                               R.Moved_With.Clear;
@@ -920,10 +943,12 @@ package body Driver.Robot.Kinematics is
                Told   : constant Count_Vectors.Vector := R.Shift_Told;
                Error  : constant Real := Match_Sigma (R);
             begin
+               --  And the stills of the body's walk, taken before the reference this sweep begins from
+               --  (Kinematics.Base).
                M.Kinematics.Replace_Element
                  (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
                       Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, Scatter => Error,
-                      Sweeping => True, others => <>));
+                      Sweeping => True, Body_Eye => R.Body_Eye, Stills => R.Stills, others => <>));
             end;
          end;
       end if;
@@ -2395,6 +2420,8 @@ package body Driver.Robot.Kinematics is
                if Natural (R.Frames.Length) > R.Aligned and then not R.Query_U.Is_Empty then
                   Align_Arm (M, R);
                end if;
+               --  The body under the arm: its walk's stills and its eye at every keyframe (Kinematics.Base).
+               Base.Align (M, R);
             end if;
          end;
       end loop;
@@ -2898,13 +2925,17 @@ package body Driver.Robot.Kinematics is
                      --  The joints' slack measured from the keyframes' sightings alone (Fit.Measure_Slack), before the
                      --  sightings are taken less the motion of the joints their keyframes did not ask: that motion is
                      --  of the joints' turns, the readings' changes less the slack's (Linked), and so is the fit's.
+                     --  Every keyframe's sightings where a base that held still would have put them, where its
+                     --  body's eye saw it move (Kinematics.Base).
+                     Base.Shift_Sightings (M, R);
                      for S of R.Matches loop
                         for I in 0 .. Queries - 1 loop
                            if Returns (S, I) then
                               K := K + 1;
                               Seen (K) := (Frame => S.Frame, Track => I + 1,
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
-                                           U => S.To_U (I), V => S.To_V (I),
+                                           U => S.To_U (I) + Base.Shift_U (R, S.Frame, I),
+                                           V => S.To_V (I) + Base.Shift_V (R, S.Frame, I),
                                            Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
                                            others => <>);
                            end if;
@@ -2955,7 +2986,8 @@ package body Driver.Robot.Kinematics is
                               K := K + 1;
                               Seen (K) := (Frame => S.Frame, Track => I + 1,
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
-                                           U => S.To_U (I), V => S.To_V (I),
+                                           U => S.To_U (I) + Base.Shift_U (R, S.Frame, I),
+                                           V => S.To_V (I) + Base.Shift_V (R, S.Frame, I),
                                            Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
                                            Own_Freedom => (if I < Natural (S.Freedom.Length) then S.Freedom (I) else 0),
                                            others => <>);

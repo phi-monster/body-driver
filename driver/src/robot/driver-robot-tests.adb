@@ -16,6 +16,7 @@ with Driver.Log;
 with Driver.Numerics.Dense;
 with Ada.Strings.Fixed;
 with Driver.Robot.Body_File;
+with Driver.Robot.Kinematics.Base.Tests;
 with Driver.Robot.Kinematics.Errors.Tests;
 with Driver.Robot.Surfaces.Tests;
 with Driver.Recording;
@@ -9498,6 +9499,7 @@ package body Driver.Robot.Tests is
                              & "read beside what their sightings state, whatever part of it the residuals bear out, so "
                              & "the sightings that state much are no outliers by those that state little", Scales_Beside_Stated_Sigmas'Access);
       Driver.Robot.Kinematics.Errors.Tests.Register;
+      Driver.Robot.Kinematics.Base.Tests.Register;
       Driver.Robot.Surfaces.Tests.Register;
       Driver.Tests.Register ("robot.estimate.task", "an estimate over a long history fails in a task with the default "
                              & "stack, as the decider's does", Estimate_In_A_Task'Access);

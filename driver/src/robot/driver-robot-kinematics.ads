@@ -14,6 +14,9 @@
 --  is submitted and its reply read on a later beat (Driver.Services), so the
 --  same evidence follows from a recording.
 
+private with Driver.Alignment.Keyframes;
+with Driver.Images;
+
 private package Driver.Robot.Kinematics is
 
    procedure Observe (M : in out Model; O : Observation);
@@ -356,5 +359,30 @@ private package Driver.Robot.Kinematics is
    --  covariance of the fit leaves the direction uncertain by at that pixel, the lens's terms alone (in the eye's
    --  frame) or, In_World, together with the turn, their correlations kept: a line through a pixel the points
    --  pin is far surer than the principal point and the turn are each. Real'Last until determined.
+
+private
+
+   --  For the body under an arm (Kinematics.Base), which picks, aligns and judges points as the arm's own keyframes do.
+
+   function Index_Of (M : Model; A : Arm_Id) return Natural;
+   --  The evidence of arm A as the graph has it now; 0 when there is none.
+
+   procedure Query_Points
+     (M : Model; E : Eye_Id; G : Group_Id; Picture : Driver.Images.Image; U, V : out Real_Vectors.Vector;
+      Responds : out Flag_Vectors.Vector);
+   --  The centres of the eye's cells that respond to the group's push, each at the place of its cell the aligner places
+   --  a patch best (the body's comment).
+
+   function Moving_Point (R : Arm_Evidence; P : Natural) return Boolean;
+   --  The arm's query point P (from 0) moves with the view: not still, not riding with the eye.
+
+   function Unmoving (R : Arm_Evidence) return Flag_Vectors.Vector;
+   --  Per query point, not Moving_Point.
+
+   procedure Set_Of
+     (Who : String; F : Positive; Query_U, Query_V : Real_Vectors.Vector; Still : Flag_Vectors.Vector;
+      Given : Driver.Alignment.Keyframes.Prediction_Array; Answers : Driver.Alignment.Keyframes.Answer_Array;
+      Agree : Driver.Alignment.Keyframes.Flag_Array; Set : out Match_Set);
+   --  A keyframe's answers kept as its match set: where each point went, how sure, and which a fit may rest on.
 
 end Driver.Robot.Kinematics;

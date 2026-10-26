@@ -14,6 +14,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Robot.Body_File;
 with Driver.Robot.Flows;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Kinematics.Base;
 with Driver.Robot.Lag;
 with Driver.Robot.Channels;
 with Driver.Robot.Lockin;
@@ -797,6 +798,105 @@ package body Driver.Robot.Boot is
          begin
             Driver.Robot.Kinematics.Begin_Anew (M, A);
          end Begin_Anew;
+         --  The body's walk under the arm (Kinematics.Base), before the reference keyframe: where an eye the carrier
+         --  moves and the arm does not sees the body (Body_Eye_Of), every channel of what carries it is pushed one way
+         --  and the other, the arm held, and once the body has come to rest after each push a still of both eyes is
+         --  taken. The
+         --  stills tell where that eye sits on the arm's eye and both lenses, and the base's motion under the arm at
+         --  every keyframe is taken out of its sightings by them. Each push by the amount the recognition saw the
+         --  channel move an eye at (Group_Stream.Seen_At), held as the recognition held it: a speed until the pictures
+         --  drift, then sent back to the hold (Push_Group); a joint landed. The hall's G1 leaned with its arms' weight
+         --  as their sweeps moved them, and its arms' focal lengths came out 16 to 18 % long on the truth's own
+         --  sightings (n13s2, 10-26): its torso's motion, which its head camera sees.
+         procedure Walk_Body is
+            Body_Eye : Eye_Id'Base := 0;
+            Carrier  : Group_Id'Base := 0;
+            Size_C   : Natural := 0;
+            procedure Read_Walk is
+            begin
+               Body_Eye := Driver.Robot.Kinematics.Base.Body_Eye_Of (M, A);
+               Carrier := Carrier_Group (M);
+               if Carrier > 0 and then Is_Commandable (M, Carrier) then
+                  Size_C := Group_Size (M, Carrier);
+               end if;
+            end Read_Walk;
+            procedure Begin_Walk is
+            begin
+               Driver.Robot.Kinematics.Base.Begin_Walk (M, A);
+            end Begin_Walk;
+            procedure Take_Still is
+            begin
+               Driver.Robot.Kinematics.Base.Take_Still (M, A);
+            end Take_Still;
+         begin
+            Driver.Beats.Within_A_Beat (Read_Walk'Access);
+            if Natural (Body_Eye) = 0 or else Size_C = 0 then
+               return;
+            end if;
+            declare
+               Amount  : Real_Array (1 .. Size_C) := [others => 0.0];
+               Hold    : constant Real_Array := Holds_Of (Carrier, Size_C);
+               Report  : Driver.Robot.Motion.Step_Report;
+               Back    : Driver.Commands.Command := Driver.Commands.Hold;
+               Speed   : Boolean := False;
+               Stills  : Natural := 0;
+               Began_At, Ended_At : Natural := 0;
+               procedure Read_Amounts is
+               begin
+                  for C in 1 .. Size_C loop
+                     if C <= Natural (M.Groups (Carrier).Seen_At.Length) then
+                        Amount (C) := M.Groups (Carrier).Seen_At (C - 1);
+                     end if;
+                  end loop;
+                  Speed := Keeps_Going (M, Carrier);
+                  Began_At := M.Beats;
+               end Read_Amounts;
+               procedure Read_End is
+               begin
+                  Ended_At := M.Beats;
+               end Read_End;
+               procedure Still is
+               begin
+                  Driver.Beats.Within_A_Beat (Take_Still'Access);
+                  Driver.Robot.Motion.Hold (M, 1);
+                  Stills := Stills + 1;
+               end Still;
+            begin
+               Driver.Beats.Within_A_Beat (Read_Amounts'Access);
+               if (for all X of Amount => X <= 0.0) then
+                  return;
+               end if;
+               Driver.Beats.Within_A_Beat (Begin_Walk'Access);
+               Driver.Commands.Set_Target (Back, Carrier, Hold);
+               for C in 1 .. Size_C loop
+                  if Amount (C) > 0.0 then
+                     for Sign of Real_Array'[1.0, -1.0] loop
+                        declare
+                           Away : Real_Array := Hold;
+                           Kept, Came : Boolean;
+                           Kept_Eyes  : Channel_Flags (1 .. Eye_Count (M));
+                        begin
+                           Away (C) := Hold (C) + Sign * Amount (C);
+                           Driver.Robot.Motion.Settle (M, Waited);
+                           Driver.Robot.Motion.Mark_Origins (M);
+                           Go_To (Carrier, Away, Report);
+                           if Speed then
+                              Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                           end if;
+                           Driver.Robot.Motion.Settle (M, Waited);
+                           Still;
+                        end;
+                     end loop;
+                  end if;
+               end loop;
+               Go_To (Carrier, Hold, Report);
+               Driver.Robot.Motion.Settle (M, Waited);
+               Driver.Beats.Within_A_Beat (Read_End'Access);
+               Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & "'s body walked by group" & Carrier'Image
+                                & " (" & (if Speed then "speeds" else "joints") & "), seen by eye" & Body_Eye'Image
+                                & ":" & Stills'Image & " stills in" & Integer'Image (Ended_At - Began_At) & " beats");
+            end;
+         end Walk_Body;
       begin
          Driver.Beats.Within_A_Beat (Read_Size'Access);
          if Gone then
@@ -814,6 +914,7 @@ package body Driver.Robot.Boot is
          begin
             Go_To (G, Holds_Of (G, Size), Report, Land => True);
          end;
+         Walk_Body;
          Driver.Beats.Within_A_Beat (Begin_Anew'Access);
          Driver.Robot.Motion.Hold_For_Twin (M, A);
          declare

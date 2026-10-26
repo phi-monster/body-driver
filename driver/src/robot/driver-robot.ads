@@ -41,6 +41,7 @@ with Driver.Numerics;
 with Driver.Observations;
 private with Driver.Alignment.Keyframes;
 private with Driver.Pixels;
+private with Driver.Rig;
 with Driver.Uncertain;
 
 with Driver.Bytes;
@@ -793,9 +794,32 @@ private
       Image    : Driver.Images.Image;    --  what its eye saw, still
       Asked    : Flag_Vectors.Vector;    --  per channel: the sweep asked the joint to turn for this frame
                                          --  (Kinematics.Asking); none for a frame no push of the sweep's asked for
+      Body_Image : Driver.Images.Image;  --  what the body's eye under the arm saw then (Arm_Evidence.Body_Eye); none
+                                         --  without one, or once aligned (Kinematics.Base)
    end record;
 
    package Keyframe_Vectors is new Ada.Containers.Vectors (Positive, Keyframe);
+
+   --  A still of the body's walk under an arm (Driver.Robot.Kinematics.Base): the arm held, the body moved by what
+   --  carries it and come to rest, what the arm's eye and the body's eye saw.
+   type Body_Still is record
+      Beat       : Natural := 0;
+      Image      : Driver.Images.Image;
+      Body_Image : Driver.Images.Image;
+   end record;
+
+   package Body_Still_Vectors is new Ada.Containers.Vectors (Positive, Body_Still);
+
+   --  How the body under an arm moved at one of its keyframes since the reference keyframe, as its eye saw it, and
+   --  where each of the keyframe's points would have been seen had it not (Driver.Robot.Kinematics.Base): per query
+   --  point, what is added to the aligner's answer before the fit.
+   type Base_Shift is record
+      Known            : Boolean := False;
+      Turn, Step       : Real := 0.0;   --  how far the base turned (radians) and moved (the walk's scale), for the log
+      Shift_U, Shift_V : Real_Vectors.Vector;
+   end record;
+
+   package Base_Shift_Vectors is new Ada.Containers.Vectors (Positive, Base_Shift);
 
    --  Where the reference keyframe's query points went in one keyframe of the arm's own eye.
    type Match_Set is record
@@ -1006,6 +1030,32 @@ private
       Point_Gu, Point_Gv : Real_Vectors.Vector;
       Point_G_Told       : Flag_Vectors.Vector;
       Result   : Arm_Fit;
+      --  The body under the arm (Driver.Robot.Kinematics.Base): an eye the carrier carries and no arm (Body_Eye, 0
+      --  without one), which moves with the arm's base; the stills of the walk the boot took with the arm held, before
+      --  the reference keyframe (Walking while it walks, Still_Due for the next beat's pictures); the body eye's points
+      --  of its picture at the reference keyframe; the chains that align both eyes' stills and the body eye's
+      --  pictures at the keyframes, and what they found; the calibration the stills gave (Driver.Rig); and per
+      --  keyframe the base's motion and the sightings' shift that takes it out (Base, one a keyframe from the
+      --  reference).
+      Body_Eye     : Eye_Id'Base := 0;
+      Walking      : Boolean := False;
+      Still_Due    : Boolean := False;
+      Stills       : Body_Still_Vectors.Vector;
+      Stills_Aligned : Boolean := False;
+      Body_Query_U, Body_Query_V : Real_Vectors.Vector;
+      Walk_Chain, Body_Walk_Chain, Body_Chain : Driver.Alignment.Keyframes.Chain;
+      Still_Matches, Body_Still_Matches : Match_Set_Vectors.Vector;   --  one per still
+      Body_Matches : Match_Set_Vectors.Vector;   --  one per keyframe after the reference, as Matches
+      Body_Aligned : Natural := 0;   --  the keyframes whose body picture is aligned, the reference counted
+      Calibrated   : Boolean := False;   --  the walk's stills were adjusted (Driver.Rig.Calibrate), Ok or not
+      Rig_With_Fit : Boolean := False;   --  from the arm's fit's lens (else from none: the stills' own search)
+      Rig_Ok       : Boolean := False;   --  and they told the body's eye on the arm's (Driver.Rig's Ok)
+      Rig_Stills   : Natural := 0;   --  the stills the calibration rests on
+      Rig_X        : Driver.Numerics.Rigid := Driver.Numerics.Identity;   --  the body's eye's frame in the arm's eye's
+      Rig_Arm_Lens, Rig_Body_Lens : Driver.Rig.Lens;
+      Rig_Arm_Inverse, Rig_Body_Inverse : Real_Vectors.Vector;   --  per query point, its inverse depth; 0: not placed
+      Rig_Turn_Sigma, Rig_Misfit : Real := 0.0;
+      Base         : Base_Shift_Vectors.Vector;
    end record;
 
    package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);

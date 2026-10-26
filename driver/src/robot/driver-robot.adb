@@ -13,6 +13,7 @@ with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Graph;
 with Driver.Robot.Kinematics;
+with Driver.Robot.Kinematics.Base;
 with Driver.Robot.Lag;
 with Driver.Robot.Lockin;
 with Driver.Robot.Motion;
@@ -342,6 +343,10 @@ package body Driver.Robot is
          M.Stepping := Word (2) = "1";
       elsif Count >= 2 and then Word (1) = "across" then
          Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));
+      elsif Count >= 2 and then Word (1) = "walk" then
+         Kinematics.Base.Begin_Walk (M, Arm_Id'Value (Word (2)));
+      elsif Count >= 2 and then Word (1) = "still" then
+         Kinematics.Base.Take_Still (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "alone" then
          Note_Channels_Alone (M, Group_Id'Value (Word (2)));
       elsif Count >= 3 and then Word (1) = "back" then

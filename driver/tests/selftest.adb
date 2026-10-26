@@ -21,6 +21,7 @@ with Driver.Services;
 with Driver.Tests;
 with Driver.Twins.Tests;
 with Driver.Replies.Tests;
+with Driver.Rig.Tests;
 with Driver.Round_Trips.Tests;
 with Driver.World.Tests;
 
@@ -36,6 +37,7 @@ begin
    Driver.Round_Trips.Tests.Register;
    Driver.Alignment.Tests.Register;
    Driver.Geometry.Tests.Register;
+   Driver.Rig.Tests.Register;
    Driver.Twins.Tests.Register;
    Driver.Observations.Tests.Register;
    Driver.Replies.Tests.Register;

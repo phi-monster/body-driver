@@ -9337,8 +9337,9 @@ package body Driver.Robot.Kinematics.Fit is
 
    function Plane_Tilt_Sigma (P : Sight_Plane) return Real is
       Length : constant Real := Sqrt (P.A * P.A);
+      function Finite (X : Real) return Boolean is (abs X <= Real'Last);
    begin
-      if not P.Found then
+      if not P.Found or else not (Length > 0.0) or else not Finite (Length) then
          return Real'Last;
       end if;
       declare
@@ -9348,6 +9349,12 @@ package body Driver.Robot.Kinematics.Fit is
          Values  : Vec3;
          Vectors : Mat3;
       begin
+         --  A covariance that is no number (a plane's normal equations singular where the points barely tell its
+         --  tilt) leaves the tilt undetermined: the standard eigensystem refuses such a matrix as not symmetric, and
+         --  the hall's G1 (n14s2 seed 1b, 10-26) lost its estimates at beat 11984 to it.
+         if (for some I in 1 .. 3 => (for some J in 1 .. 3 => not Finite (C (I, J)))) then
+            return Real'Last;
+         end if;
          Symmetric_Eigensystem (C, Values, Vectors);
          return Sqrt (Real'Max (0.0, Real'Max (Values (1), Real'Max (Values (2), Values (3)))));
       end;
