@@ -476,12 +476,16 @@ package body Driver.Robot.Kinematics is
    function Is_Fixed (M : Model; E : Eye_Id) return Boolean is
      (E <= M.Graph.Mounts.Last_Index and then M.Graph.Mounts (E).Kind = World_Fixed);
 
-   --  Eye E's view shows group G move, as the lock-in measured it.
+   --  Eye E's view shows group G move, as the lock-in measured it: some of its cells respond to the group's pushes,
+   --  however many. Whether they are the whole view is the graph's to say where it mounts the eye; a fixed eye that
+   --  an arm swept across most of its view is undecided about it, and sees it (round n15s2, 10-27: the hall's fixed
+   --  eyes were a patch of 50 to 97 cells after step 1 and undecided at 100 to 148 once the sweeps were in the
+   --  lock-in, and step 3 placed none of them).
    function Sees (M : Model; E : Eye_Id; G : Group_Id) return Boolean is
       K : constant Natural := (Natural (G) - 1) * Natural (M.Eyes.Length) + Natural (E);
    begin
       return K in M.Graph.Effects.First_Index .. M.Graph.Effects.Last_Index
-        and then M.Graph.Effects (K).Verdict in Patch | Whole;
+        and then M.Graph.Effects (K).Verdict in Patch | Undecided | Whole;
    end Sees;
 
    procedure Observe (M : in out Model; O : Observation) is

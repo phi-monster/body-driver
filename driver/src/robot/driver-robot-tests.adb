@@ -635,6 +635,31 @@ package body Driver.Robot.Tests is
       Check (Role (M, 3) = Closer, "once the eye decided nothing moved, the group is " & Role (M, 3)'Image);
    end Undecided_Eye_Leaves_Group_Unclassified;
 
+   --  A fixed eye sees an arm wherever the arm's pushes move cells of its view, whatever the lock-in made of how many:
+   --  an arm swept across most of the view leaves more than half its cells responding, neither a patch nor the whole
+   --  (the hall's fixed eyes of round n15s2, 10-27: a patch of 50 to 97 cells after step 1, undecided at 100 to 148
+   --  once the sweeps were in the lock-in, and step 3 placed none of them).
+   procedure Fixed_Eye_Sees_An_Undecided_Arm is
+      M : Model;
+      function Effect (V : Eye_Response; Responding : Natural) return Eye_Effect is
+        (Verdict => V, Responding => Responding, Textured => 48,
+         Fraction => (Value => Real (Responding) / 48.0, Sigma => 0.07, Degrees_Of_Freedom => 0), Resting => 0.0,
+         Rest_Pull => 0.0, Could_Be_Whole => True, Far_Chance => 1.0);
+      Index : Positive;
+   begin
+      Exercise_Rig (M);
+      Check (Eye_Mount (M, 3).Kind = World_Fixed, "eye 3 is fixed");
+      Index := (1 - 1) * Eye_Count (M) + 3;
+      M.Graph.Effects.Replace_Element (Index, Effect (Undecided, 30));
+      Check (Driver.Robot.Kinematics.Sees (M, 3, 1), "a fixed eye undecided about an arm does not see it");
+      M.Graph.Effects.Replace_Element (Index, Effect (Patch, 12));
+      Check (Driver.Robot.Kinematics.Sees (M, 3, 1), "a fixed eye the arm moves a patch of does not see it");
+      M.Graph.Effects.Replace_Element (Index, Effect (Nothing, 0));
+      Check (not Driver.Robot.Kinematics.Sees (M, 3, 1), "a fixed eye the arm moves nothing of sees it");
+      M.Graph.Effects.Replace_Element (Index, (Verdict => Unmeasured, others => <>));
+      Check (not Driver.Robot.Kinematics.Sees (M, 3, 1), "a fixed eye not yet measured with the arm sees it");
+   end Fixed_Eye_Sees_An_Undecided_Arm;
+
    --  A group whose channels move different eyes (a humanoid's neck moves the head's eye and its arm a wrist's, one
    --  group of every joint) has an arm for each such eye, each carrying its eye; a channel an eye is undecided about
    --  is no evidence that it does not move it, and the group stays one arm.
@@ -9772,6 +9797,8 @@ package body Driver.Robot.Tests is
                              & "own eye is called an arm after enough presses", Presses_Leave_A_Closer_A_Closer'Access);
       Driver.Tests.Register ("robot.roles.undecided", "a group some eye is still undecided about is called a closer or a "
                              & "part, though that eye may ride on it", Undecided_Eye_Leaves_Group_Unclassified'Access);
+      Driver.Tests.Register ("robot.kinematics.sees", "a fixed eye an arm's pushes move cells of does not see the arm, "
+                             & "or one they move none of does", Fixed_Eye_Sees_An_Undecided_Arm'Access);
       Driver.Tests.Register ("robot.roles.split", "a group whose channels move two eyes apart is not one arm, and a "
                              & "channel an eye is undecided about does not split it",
                              Group_Of_Different_Eyes_Has_An_Arm_Each'Access);

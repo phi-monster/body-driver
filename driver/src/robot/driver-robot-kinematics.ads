@@ -114,7 +114,7 @@ private package Driver.Robot.Kinematics is
    --  of them undetermined: "at most 2.7e-4 rad by that scale").
 
    function Sees (M : Model; E : Eye_Id; G : Group_Id) return Boolean;
-   --  Eye E's view shows group G move, as the lock-in measured it (a patch of the picture or the whole).
+   --  Eye E's view shows group G move, as the lock-in measured it (a patch of the picture, the whole, or either).
 
    function Twin_Answered (M : Model; A : Arm_Id) return Boolean;
    --  The arm's still twin of its reference was taken.
