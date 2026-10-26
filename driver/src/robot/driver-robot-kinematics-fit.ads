@@ -314,6 +314,7 @@ package Driver.Robot.Kinematics.Fit is
       --  one after another, each as many joints long as the fit has: where the arm may be at a keyframe still to
       --  be aligned, as far as the order goes (Kinematics.Offer_Of); empty when told, or when no stage 4 was run.
       Determined : Boolean := False;   --  the sightings determine every parameter that has a value of its own
+      Beyond_Search : Boolean := False;   --  its focal length lies beyond the range its search tried
       Focal_Sigma : Real := Real'Last; --  the uncertainty of the focal length across
       Covariance : Real_Lists.Vector;  --  of the parameters above, row by row, from the errors the residuals
                                        --  show (Errors); empty when not determined

@@ -323,6 +323,31 @@ package body Driver.Robot.Kinematics is
 
    --  Each fitted joint's half slack and where its slack stood at the reference (Fit_Report.Slacks, Slack_Places), in
    --  reading units, for the log; none when not fitted.
+   --  The second focal length's own deviation, for the log: its logarithm's variance in the covariance (the lens's
+   --  second term, the first's logarithm the first), and as much again as the first focal length's stated one
+   --  (Fit_Report.Focal_Sigma) was widened beyond its own there by the profile and the jackknife, which walk the
+   --  focal lengths' common scale. A camera of pixels not square (ALOHA's, 158.5 by 216.4 px) was fitted at
+   --  158.17 x 224.04 +- 1.51 px, the second focal length's error unstated (n5s2, seed 2a, 10-26).
+   function Aspect_Image (Report : Fit.Fit_Report; Lens : Fit.Lens) return String is
+      use Ada.Numerics.Long_Elementary_Functions;
+      T : constant Natural := Natural (Real'Floor (Sqrt (Real (Natural (Report.Covariance.Length)))));
+   begin
+      if Report.Focal_Sigma >= Real'Last or else T < 2 or else T * T /= Natural (Report.Covariance.Length)
+        or else Lens.Fx <= 0.0 or else Lens.Fy <= 0.0
+      then
+         return "";
+      end if;
+      declare
+         First  : constant Natural := Report.Covariance.First_Index;
+         V11    : constant Real := Report.Covariance (First);
+         V22    : constant Real := Report.Covariance (First + T + 1);
+         Second : constant Real :=
+           Lens.Fy * Sqrt (Real'Max (0.0, V22) + Real'Max (0.0, (Report.Focal_Sigma / Lens.Fx) ** 2 - V11));
+      begin
+         return " (the second +- " & Driver.Log.Image (Second, 2) & " px)";
+      end;
+   end Aspect_Image;
+
    function Slacks_Image (Report : Fit.Fit_Report) return String is
       Text : Ada.Strings.Unbounded.Unbounded_String;
    begin
@@ -1390,6 +1415,16 @@ package body Driver.Robot.Kinematics is
          Slope  : Real_Access := new Real_Array (1 .. N * Queries);
          Spread : Real_Access := new Real_Array (1 .. N * Queries);
          Told   : Flag_Access := new Flag_Array (0 .. N * Queries - 1);
+         --  Per point and channel: its motion with the channel stays significant without any one keyframe that turned
+         --  the channel (the fit's leave-one-out, Sherman and Morrison's update of its normal equations at equal
+         --  weights): a mover two keyframes or more show, not one answer. An aligner's answer can be a mismatch in any
+         --  keyframe, independently of the others, and a channel turned in two of them makes one mismatch a mover:
+         --  Shadow seed 2a's fourth channel (10-26), turned 0.0004 units by two keyframes, the view by its keyframes'
+         --  own measure 788 px a unit and so 0.3 px: 5 of 124 points moved with it at 3 sigmas, a count no Gaussian
+         --  alarm makes (0.3 of them), their median 6466 px a unit, and 60 points that could have shown that and did
+         --  not made it a patch: the sweep took the joint for one behind the eye, never turned it again, and the arm
+         --  was never fitted.
+         Steady : Flag_Access := new Flag_Array (0 .. N * Queries - 1);
          --  Per point: it moves with some joint, significantly.
          Informative : Flag_Access := new Flag_Array (0 .. Queries - 1);
          --  Per channel, the informative points' sizes of their motion per unit and the standard deviations of those.
@@ -1409,6 +1444,7 @@ package body Driver.Robot.Kinematics is
          Res_N  : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);
       begin
          Told.all := [others => False];
+         Steady.all := [others => False];
          Informative.all := [others => False];
          for P in 0 .. Queries - 1 loop
             declare
@@ -1517,6 +1553,58 @@ package body Driver.Robot.Kinematics is
                                              R.Point_Gu.Replace_Element (Slot (C, P) - 1, Fu.Beta (J));
                                              R.Point_Gv.Replace_Element (Slot (C, P) - 1, Fv.Beta (J));
                                              R.Point_G_Told.Replace_Element (Slot (C, P) - 1, True);
+                                             --  Without each row that turned the channel in turn: the coefficients less
+                                             --  the row's pull, A inverse x e over 1 - h, and the channel's variance
+                                             --  grown by (A inverse x) squared over 1 - h, at the fits' own scales. A
+                                             --  row the column rests on alone (h of one) leaves it untold: no mover.
+                                             declare
+                                                Ok : Boolean := Pass_1.Support (J) >= 2;
+                                             begin
+                                                for Row in 1 .. Rows loop
+                                                   exit when not Ok;
+                                                   if X (Row, J) /= 0.0 then
+                                                      declare
+                                                         Q   : Real_Array (1 .. Kp) := [others => 0.0];
+                                                         H   : Real := 0.0;
+                                                         Eu  : Real := Yu (Row);
+                                                         Ev  : Real := Yv (Row);
+                                                      begin
+                                                         for A in 1 .. Kp loop
+                                                            for B in 1 .. Kp loop
+                                                               Q (A) := Q (A) + Pass_1.Inverse (A, B) * X (Row, B);
+                                                            end loop;
+                                                         end loop;
+                                                         for A in 1 .. Kp loop
+                                                            H := H + X (Row, A) * Q (A);
+                                                            Eu := Eu - X (Row, A) * Fu.Beta (A);
+                                                            Ev := Ev - X (Row, A) * Fv.Beta (A);
+                                                         end loop;
+                                                         if 1.0 - H <= 0.0 then
+                                                            Ok := False;
+                                                         else
+                                                            declare
+                                                               Bu : constant Real :=
+                                                                 Fu.Beta (J) - Q (J) * Eu / (1.0 - H);
+                                                               Bv : constant Real :=
+                                                                 Fv.Beta (J) - Q (J) * Ev / (1.0 - H);
+                                                               Vj : constant Real :=
+                                                                 Pass_1.Inverse (J, J) + Q (J) ** 2 / (1.0 - H);
+                                                               Gl : constant Real := Sqrt (Bu ** 2 + Bv ** 2);
+                                                               Vl : constant Real :=
+                                                                 (if Gl > 0.0
+                                                                  then (Bu ** 2 * Fu.Scale ** 2
+                                                                        + Bv ** 2 * Fv.Scale ** 2) * Vj / Gl ** 2
+                                                                  else Real'Max (Fu.Scale, Fv.Scale) ** 2 * Vj);
+                                                            begin
+                                                               Ok := Vl > 0.0
+                                                                 and then Driver.Uncertain.Significant (Gl, Sqrt (Vl));
+                                                            end;
+                                                         end if;
+                                                      end;
+                                                   end if;
+                                                end loop;
+                                                Steady (Slot (C, P) - 1) := Ok;
+                                             end;
                                           end if;
                                        end;
                                     end if;
@@ -1600,7 +1688,9 @@ package body Driver.Robot.Kinematics is
                   end if;
                   if Told (Slot (C, P) - 1) and then Verified (C, P) then
                      Told_Of (C) := Told_Of (C) + 1;
-                     if Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P))) then
+                     if Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                       and then Steady (Slot (C, P) - 1)
+                     then
                         Moving_Of (C) := Moving_Of (C) + 1;
                      end if;
                   end if;
@@ -1631,6 +1721,7 @@ package body Driver.Robot.Kinematics is
                      for P in 0 .. Queries - 1 loop
                         if Told (Slot (C, P) - 1) and then Verified (C, P)
                           and then Driver.Uncertain.Significant (Slope (Slot (C, P)), Spread (Slot (C, P)))
+                          and then Steady (Slot (C, P) - 1)
                         then
                            K := K + 1;
                            Movers (K) := Slope (Slot (C, P));
@@ -1638,6 +1729,20 @@ package body Driver.Robot.Kinematics is
                      end loop;
                      declare
                         Typical : constant Real := Driver.Stats.Median (Movers);
+                        Most_Turn : Real := 0.0;   --  the channel's widest turn in a keyframe, for the log
+                        --  The silent points' motion against its own deviation, each: still, a point's is the length
+                        --  of two unit normal draws (Rayleigh's), whose median is the root of twice the logarithm of
+                        --  two, and the median of n such has the deviation one over twice the density there over the
+                        --  root of n. Silent points whose median stands Z of that above it move together, only less
+                        --  than the movers: the view moves, nearer points of it farther (parallax), and they are no
+                        --  patch's still rest. Shadow seed 2a's first channel (10-26), turned 0.005 units: 4 movers at
+                        --  1790 px a unit, each shown by both keyframes, against the view's 500 by its keyframes, and
+                        --  31 points that could have shown 1790 and did not made it a patch.
+                        Ratios : Real_Array (1 .. Queries);
+                        Rayleigh_Median : constant Real :=
+                          Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0));
+                        Rayleigh_Density : constant Real := Rayleigh_Median * Exp (-Rayleigh_Median ** 2 / 2.0);
+                        Still_Rest : Boolean := True;
                      begin
                         for P in 0 .. Queries - 1 loop
                            if Of_World (P) and then Told (Slot (C, P) - 1) and then Verified (C, P)
@@ -1646,10 +1751,33 @@ package body Driver.Robot.Kinematics is
                                         (Typical - Driver.Conventions.Z * Spread (Slot (C, P)), Spread (Slot (C, P)))
                            then
                               Silent := Silent + 1;
+                              Ratios (Silent) := (if Spread (Slot (C, P)) > 0.0
+                                                  then Slope (Slot (C, P)) / Spread (Slot (C, P)) else 0.0);
                            end if;
                         end loop;
+                        if Silent > 0 then
+                           declare
+                              Above : constant Real := Driver.Stats.Median (Ratios (1 .. Silent)) - Rayleigh_Median;
+                           begin
+                              Still_Rest := Above <= 0.0
+                                or else not Driver.Uncertain.Significant
+                                              (Above, 1.0 / (2.0 * Rayleigh_Density * Sqrt (Real (Silent))));
+                           end;
+                        end if;
+                        Whole (C) := not Still_Rest
+                          or else not Lockin.Still_A_Patch (Moving_Of (C), Moving_Of (C) + Silent);
+                        for F in 1 .. Natural (R.Frames.Length) loop
+                           Most_Turn := Real'Max (Most_Turn, abs Change (F, C));
+                        end loop;
+                        Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " channel" & C'Image
+                                         & "'s view: told" & Told_Of (C)'Image & ", moving" & Moving_Of (C)'Image
+                                         & ", silent" & Silent'Image & ", the movers' typical "
+                                         & Driver.Log.Image (Typical, 2) & " px a unit, the widest turn "
+                                         & Driver.Log.Image (Most_Turn, 5) & " units, moving the view "
+                                         & Driver.Log.Image (Typical * Most_Turn, 2) & " px"
+                                         & (if Still_Rest then "" else ", the silent moving together") & ": "
+                                         & (if Whole (C) then "the view" else "a patch"));
                      end;
-                     Whole (C) := not Lockin.Still_A_Patch (Moving_Of (C), Moving_Of (C) + Silent);
                   end;
                   R.Shift_Seen.Replace_Element (C - 1, Whole (C));
                   R.Shift_Told.Replace_Element (C - 1, Told_Of (C));
@@ -1740,6 +1868,7 @@ package body Driver.Robot.Kinematics is
          Free (Slope);
          Free (Spread);
          Free (Told);
+         Free (Steady);
          Free (Informative);
          Free (Values);
          Free (Sigmas);
@@ -3274,6 +3403,7 @@ package body Driver.Robot.Kinematics is
                                 & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
                                 & (if Report.Focal_Sigma < Real'Last then " +- " & Driver.Log.Image (Report.Focal_Sigma, 2)
                                    & " px" else "")
+                                & Aspect_Image (Report, Lens)
                                 & "; its joints from the base, by their readings: " & Chain_Image (Chain)
                                 & Slacks_Image (Report)
                                 & (if Report.Errors.Measured

@@ -2126,6 +2126,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.I
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Err, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fx, 1) & "" & Driver.Log.Image (Sigma, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (L.Fy, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Le.Fy, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Least_Pivot, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Lp.Fx, 1) & ""	1	format	digits printed in a log line or a message
@@ -2138,6 +2139,8 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Report.Seconds.Last_Element,
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rp.All_Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rs.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Rt.Cost_Judged - Rep.Cost_Judged, 1)	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Searched_Least, 1) & "" & Driver.Log.Image (Searched_Most, 1) & "");	1	format	digits printed in a log line or a message
+driver-robot-kinematics-fit.adb	& Driver.Log.Image (Searched_Least, 1) & "" & Driver.Log.Image (Searched_Most, 1) & "");	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Sqrt (Sum (F) / Real (Cnt (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Total (Best), 4) & "" & Driver.Log.Image (Total_Error (Best), 4)	4	format	digits printed in a log line or a message
@@ -2145,6 +2148,7 @@ driver-robot-kinematics-fit.adb	& Driver.Log.Image (Walked (Way).Flat_To, 1) & "
 driver-robot-kinematics-fit.adb	& Driver.Log.Image (Was, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
 driver-robot-kinematics-fit.adb	& Real'Image (L.Fx) & "" & Real'Image (L.Fx * Sqrt (V (1, 1))) & "" & Real'Image (L.Fy)	1	structure	the first focal length's logarithm, the first reduced term
+driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (L.Fx, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	("" & Driver.Log.Image (Rise, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-fit.adb	((Fx => Exp (X (X'First)), Fy => Exp (X (X'First + (if Pinhole then 0 else 1))), Cx => X (X'First + 2),	1	structure	the lens's terms in the vector: the logarithms of the two focal lengths, the centre, the two distortion terms
@@ -2949,6 +2953,7 @@ driver-robot-kinematics-fit.adb	if Count >= 2 then	2	structure	a spread needs tw
 driver-robot-kinematics-fit.adb	if Count >= 3 and then Homographic (Frame) then	3	structure	the plane's homography: six unknowns, two equations a sighting
 driver-robot-kinematics-fit.adb	if Count >= 3 and then not Homographic (Frame) then	3	structure	the epipolar one: four unknowns less their scale, one equation a sighting
 driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
+driver-robot-kinematics-fit.adb	if Every (J)'Length > 4 then	4	structure	more sightings than the four unknowns of a joint's slide test
 driver-robot-kinematics-fit.adb	if F > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if F > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if K > 1 then	1	structure	after the first
@@ -3488,6 +3493,7 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Common.Turn * 180.0 / Ada.Numeri
 driver-robot-kinematics.adb	& Driver.Log.Image (G.To.V, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Image (Lens.Fy, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Lens.Fx, 2) & "" & Driver.Log.Image (Lens.Fy, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Most_Turn, 5) & ""	5	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Pixels_Per_Unit (M, R, C), 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R.Query_V (I - 1), 2) & "" & Driver.Log.Image (G.To.U, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (R.Query_V (I - 1), 2) & "" & Driver.Log.Image (G.To.U, 2) & ""	2	format	digits printed in a log line or a message
@@ -3511,12 +3517,16 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Scale, 4) & "" & Driver.Log.Imag
 driver-robot-kinematics.adb	& Driver.Log.Image (Slack (2 * C), 4));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	& Driver.Log.Image (Slack (2 * C), 4));	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (F))), 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Typical * Most_Turn, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (Typical, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	((Box (Txx, X, Y) + Box (Tyy, X, Y)) / 2.0	2.0	math	a symmetric 2 by 2 matrix's smaller eigenvalue: half its trace less the root
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
 driver-robot-kinematics.adb	(2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0)));	2.0	math	the median of a two-dimensional Gaussian's radius is its sigma times the root of 2 ln 2
+driver-robot-kinematics.adb	(Above, 1.0 / (2.0 * Rayleigh_Density * Sqrt (Real (Silent))));	1.0	statistics	the deviation of a sample median: one over twice the density at the median over the root of n
+driver-robot-kinematics.adb	(Above, 1.0 / (2.0 * Rayleigh_Density * Sqrt (Real (Silent))));	2.0	statistics	the deviation of a sample median: one over twice the density at the median over the root of n
 driver-robot-kinematics.adb	(File, I'Image & "" & Driver.Log.Image (R.Query_U (I - 1), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	(Off, Channels.Noise (M, R.Group, C) * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0))	2.0	statistics	the noise of a difference of two readings
 driver-robot-kinematics.adb	(Text, "" & C'Image & "" & Driver.Log.Image (Keyframe_Step (M, R.Arm, C), 6) & ""	6	format	digits printed in a log line or a message
@@ -3607,6 +3617,7 @@ driver-robot-kinematics.adb	Land ((1.0 + Step) * X, Zero3, Zero3, Up, F1);	1.0	m
 driver-robot-kinematics.adb	Land ((1.0 / Slope) * H, Zero3, Zero3, Where, Ok);	1.0	math	the line of sight meets a plane at depth one over its slope along the line
 driver-robot-kinematics.adb	Moved : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	a point's or a frame's three dimensions
 driver-robot-kinematics.adb	Moved : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	a point's or a frame's three dimensions
+driver-robot-kinematics.adb	Ok : Boolean := Pass_1.Support (J) >= 2;	2	structure	a coefficient left without one of its rows needs another to rest on
 driver-robot-kinematics.adb	Outputs : constant := 7;	7	structure	the placement's seven terms: its turn (three), its centre (three) and the log of its scale
 driver-robot-kinematics.adb	Period : constant Real := 2.0 * Ada.Numerics.Pi / abs F.C;	2.0	math	a turn of a joint's axis is two pi radians, which the fit's scale turns into a period of readings
 driver-robot-kinematics.adb	Place (P, Q) := C (Fit.Lens_Terms + 3 + P, Fit.Lens_Terms + 3 + Q);	3	structure	the turn's three terms follow the lens's
@@ -3635,6 +3646,7 @@ driver-robot-kinematics.adb	R.Scale := 1.0;	1.0	math	the identity's scale: the f
 driver-robot-kinematics.adb	R.Shifts.Append (0.0);	0.0	structure	not measured yet
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	1.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-kinematics.adb	R.Stand_Rate := (Real (Stood) + 1.0) / (Real (Had) + 2.0);	2.0	statistics	Laplace's rule of succession: one more than seen over two more than counted
+driver-robot-kinematics.adb	Rayleigh_Density : constant Real := Rayleigh_Median * Exp (-Rayleigh_Median ** 2 / 2.0);	2.0	statistics	Rayleigh's density at x, x times e to the minus x squared over two
 driver-robot-kinematics.adb	Regression.Test_Block (Fu, Cov_U, 1, Kp, Stat, Rank);	1	structure	the whole block of the point's columns, from the first: its numerical rank must equal their count for the point's coefficients to be determined
 driver-robot-kinematics.adb	Report.Depth_Gains.Append (0.0);	0.0	structure	a query no sighting names has no track in the fit: its depth moves with no term
 driver-robot-kinematics.adb	Res_N : Counts_Access := new Count_List'(1 .. Natural'Max (1, Frame_Count) => 0);	1	format	digits printed in a log line or a message
@@ -3649,6 +3661,8 @@ driver-robot-kinematics.adb	Rss_Before := Driver.Memory.Resident_Kilobytes / 102
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
 driver-robot-kinematics.adb	Scale := 1.0;	1.0	structure	the identity's scale until the arm is placed
 driver-robot-kinematics.adb	Sights_Of (U, V, F, Moved (L, K, (if E = 1 then -Sigma_K else Sigma_K)), S.all);	1	math	a central difference: one standard deviation either way
+driver-robot-kinematics.adb	Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0));	2.0	statistics	Rayleigh's median, the root of twice the logarithm of two
+driver-robot-kinematics.adb	Sqrt (2.0 * Ada.Numerics.Long_Elementary_Functions.Log (2.0));	2.0	statistics	Rayleigh's median, the root of twice the logarithm of two
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	1.0	numerics	the step of a central difference is the cube root of the machine epsilon: the one that balances its truncation against its rounding
 driver-robot-kinematics.adb	Step : constant Real := Ada.Numerics.Long_Elementary_Functions."" (Real'Model_Epsilon, 1.0 / 3.0);	3.0	numerics	the cube root
 driver-robot-kinematics.adb	T (T'First (1) + D - 1, T'First (2) + K - 1) + (Ends (2) (D) - Ends (1) (D)) / (2.0 * Sigma_K);	2.0	math	a central difference: one standard deviation either way spans two
@@ -3733,10 +3747,12 @@ driver-robot-kinematics.adb	if Natural (R.Frames.Length) = 1 then	1	structure	th
 driver-robot-kinematics.adb	if Natural (R.Result.Slide_Turns.Length) = 3 * N then	3	structure	a turn per reading unit is three numbers
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
 driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * Half then	2	structure	the patch's whole side: half of it either side of the point
+driver-robot-kinematics.adb	if Report.Focal_Sigma >= Real'Last or else T < 2 or else T * T /= Natural (Report.Covariance.Length)	2	structure	the lens's first two terms, the two focal lengths' logarithms
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
 driver-robot-kinematics.adb	if Slack'Length = 2 * N then	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
+driver-robot-kinematics.adb	return "" & Driver.Log.Image (Second, 2) & "";	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
 driver-robot-kinematics.adb	return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;	2.0	statistics	a difference of two pixels has twice one pixel's variance
 driver-robot-kinematics.adb	return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;	8.0	statistics	the square of a Gaussian of variance 2 v varies by twice its variance squared, 8 v squared
@@ -3748,7 +3764,7 @@ driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & D
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Log.Image (R.Shifts (C - 1), 4) & "" & Driver.Log.Image (R.Shift_Sigmas (C - 1), 4)	4	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	math	the difference of two readings has twice the variance of one
-driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	statistics	the difference of two readings: each one's noise, root two times over
+driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, C), Noise (C) * Sqrt (2.0))	2.0	statistics	the difference of two readings has twice the variance of one
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)	2.0	statistics	the noise of a difference of two readings

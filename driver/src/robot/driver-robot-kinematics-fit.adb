@@ -4785,6 +4785,23 @@ package body Driver.Robot.Kinematics.Fit is
                end;
             end loop;
          end;
+         --  A focal length beyond the range the search tried is none the sightings were weighed at: the fit walked
+         --  there from the search's best, and its profile, walked only within that range, tells nothing of it; nor
+         --  does a refit's from there, which walks no profile. RB-Y1 seed 3a's third arm (n5s2, 10-26): searched
+         --  from 15.2 to 1494 px, best 215.7 (the truth 172.4), its orders fitted in stage 4 down to 3.6 px, and the
+         --  arm "fitted" at 1.04 +- 0.23 px, its profile stopped by the range's end at its first step down.
+         if Report.Determined and then Searched_Least > 0.0
+           and then (Real'Min (L.Fx, L.Fy) < Searched_Least or else Real'Max (L.Fx, L.Fy) > Searched_Most)
+         then
+            Report.Determined := False;
+            Report.Beyond_Search := True;
+            Report.Why := Ada.Strings.Unbounded.To_Unbounded_String
+              ("the sightings leave the focal length undetermined: " & Driver.Log.Image (L.Fx, 1) & " x "
+               & Driver.Log.Image (L.Fy, 1) & " px lies beyond the range its search tried, "
+               & Driver.Log.Image (Searched_Least, 1) & " to " & Driver.Log.Image (Searched_Most, 1) & " px");
+            Driver.Log.Line
+              (Driver.Log.Robot, "kinematics: " & Ada.Strings.Unbounded.To_String (Report.Why));
+         end if;
          --  The pinhole taken in the extras' place takes the step between them in, its profile walked: taken in before,
          --  the step's sigma (some 40 px on the bench's mast head 2:1) set the profile's first step past the range
          --  searched, the fit was left undetermined and the next rounds wandered to 67 px for 173 (10-21).
@@ -6159,6 +6176,18 @@ package body Driver.Robot.Kinematics.Fit is
             F_Least, F_Most : Real := 0.0;           --  the least and the most of them, px
             Trace           : Ada.Strings.Unbounded.Unbounded_String;   --  every focal length tried and its score
             Tried_Ln, Tried_Total, Tried_Error : Real_Lists.Vector;   --  every focal length tried (its logarithm), its score and the score's error
+            --  Per joint: its keyframes' median residual as a slide (Slide_Of), at the search's first focal length, and
+            --  what it scores in the search where no turn explains its keyframes at a focal length: a joint that slides
+            --  is a turn of none, and a slide's sightings tell no focal length (the eye's travel along one direction is
+            --  the same picture at every focal length, the points' depths scaled with it). Stretch seed 3a's arm
+            --  (n3s2, replayed 10-26), its lift and its reach no turn at any focal length (1.8E+308 px), had every
+            --  focal length score infinite and the search's comparisons none (113 lengths, "nan"). Not the lesser of
+            --  the two where a turn does explain them: at focal lengths far too short every turn looks a slide, and
+            --  the same arm's search, every joint so capped, ended at 9.5 px.
+            Slide_Cap    : array (1 .. N) of Real := [others => Real'Last];
+            Slides_Known : Boolean := False;
+            function Scored (J : Positive; B : Best_Record) return Real is
+              (if B.Score < Real'Last then B.Score else Slide_Cap (J));
 
             procedure Search (F : Real; Best : out Best_Array) is
                --  The axis of every joint: the direction about which the widest keyframes are each most nearly a turn
@@ -6244,6 +6273,20 @@ package body Driver.Robot.Kinematics.Fit is
                Every_Piece (1, N * Pieces);
                Every_Joint (1, N);
                Free (Of_Piece);
+               if not Slides_Known then
+                  for J in 1 .. N loop
+                     if Every (J)'Length > 4 then
+                        declare
+                           D  : Vec3;
+                           Sd : Real;
+                        begin
+                           Slide_Of (J, F, D, Sd);
+                           Slide_Cap (J) := Sd;
+                        end;
+                     end if;
+                  end loop;
+                  Slides_Known := True;
+               end if;
                --  The curve the search walked, for the log: every focal length tried and its score (the joints' medians
                --  summed), so a wrong basin can be read against the true lens where that is known (the synthetic arms:
                --  115 px of 400 without the sign of the translation chosen, 20.7 with it, 10-14).
@@ -6251,11 +6294,9 @@ package body Driver.Robot.Kinematics.Fit is
                   Sum : Real := 0.0;
                   Var : Real := 0.0;
                begin
-                  for X of Best loop
-                     Sum := Sum + X.Score;
-                  end loop;
                   for J in 1 .. N loop
-                     Var := Var + Median_Error (Best (J).Score, Counts (J)) ** 2;
+                     Sum := Sum + Scored (J, Best (J));
+                     Var := Var + Median_Error (Scored (J, Best (J)), Counts (J)) ** 2;
                   end loop;
                   Ada.Strings.Unbounded.Append (Trace, " " & Driver.Log.Image (F, 1) & ":" & Driver.Log.Image (Sum, 3));
                   Tried_Ln.Append (Ln (F));
@@ -6267,8 +6308,8 @@ package body Driver.Robot.Kinematics.Fit is
             function Total (B : Best_Array) return Real is
                Sum : Real := 0.0;
             begin
-               for X of B loop
-                  Sum := Sum + X.Score;
+               for J in 1 .. N loop
+                  Sum := Sum + Scored (J, B (J));
                end loop;
                return Sum;
             end Total;
@@ -6278,7 +6319,7 @@ package body Driver.Robot.Kinematics.Fit is
                Sum : Real := 0.0;
             begin
                for J in 1 .. N loop
-                  Sum := Sum + Median_Error (B (J).Score, Counts (J)) ** 2;
+                  Sum := Sum + Median_Error (Scored (J, B (J)), Counts (J)) ** 2;
                end loop;
                return Sqrt (Sum);
             end Total_Error;
@@ -8695,6 +8736,15 @@ package body Driver.Robot.Kinematics.Fit is
          Dump_Inputs (Changes, Asked, Visible, Sightings, Width, Height, Unit_Frames, Who, From, Play, Slack_Start);
       end if;
       Stages (Sightings, From, Who, Joints, Chain, L, Report);
+      --  Begun from a fit before it (From), whose search's range it carries, a fit whose focal length walked beyond
+      --  that range is made again from nothing, its own search ranging where the sightings now lead: every estimate
+      --  after an arm's first kept the first search's range, and Stretch seed 3a's arm (n3s2, 10-26), searched from
+      --  33.5 to 226.3 px at its first fit (best 85.5, the truth 216.5), was fitted at 1493 to 1548 px from there on.
+      if From.Valid and then Report.Beyond_Search then
+         Driver.Log.Line (Driver.Log.Robot, "kinematics: " & Who & " fitted again from nothing: its focal length "
+                          & "walked beyond the range the search of the fit it began from tried");
+         Stages (Sightings, No_Start, Who, Joints, Chain, L, Report);
+      end if;
 
       --  The terms' uncertainty across the joints (the jackknife over joints), where the caller asks for it
       --  (Across_Joints): the fit begun from itself again, its last stage alone, on the sightings less those of the
