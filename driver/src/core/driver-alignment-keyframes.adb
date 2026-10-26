@@ -1266,7 +1266,8 @@ package body Driver.Alignment.Keyframes is
       Marks   : in out Located_Array;
       Field   : in out Field_Fit;
       Agree   : in out Flag_Array;
-      Placed  : Flag_Array)
+      Placed  : Flag_Array;
+      Used    : in out Prediction_Array)
    is
       Count    : constant Natural := Marks'Length;
       Given    : Prediction_Array (1 .. Count);
@@ -1296,6 +1297,11 @@ package body Driver.Alignment.Keyframes is
          end loop;
          exit when Agreeing_Of (Todo) = 0;
          Align_Some (C, Second, Given, Todo, Answers, Marks, Widen => False);
+         for K in 1 .. Count loop
+            if Todo (K) then
+               Used (Used'First + K - 1) := Given (K);
+            end if;
+         end loop;
          declare
             Refit : Field_Fit;
             Again : Flag_Array (1 .. Count);
@@ -1311,6 +1317,82 @@ package body Driver.Alignment.Keyframes is
          end;
       end loop;
    end Settle;
+
+   --  Every point the keyframe's field agrees with, found from a window a patch carries at the full size, asked again
+   --  the question its answer came from (Used: the prediction it was last asked from) with the linear part told: the
+   --  field's gradient there, known as far as the field knows it (what the field leaves of its points carried through
+   --  the inverse of its normal matrix along the derivatives of its terms, the larger across or down). The aligner
+   --  fitting a patch's linear part itself from a patch of sparse texture (an edge or a line off its centre, which a
+   --  stretch moves as a shift does) put the place 0.17 to 0.51 px off the truth on clean points of the UR5e's,
+   --  Panda's, RB-Y1's and Shadow's wrist eyes, told the linear part 0.05 to 0.10; its stretch came out 3 to 13 % too
+   --  large on average, and the arm's focal length with it (against the renders of the recorded boots' true scenes,
+   --  10-26; the UR5e 3a boot replayed: its focal length +11.2 % fitting the linear part free, +0.7 % told). A point
+   --  the told question finds nothing for (a patch the field's linear part does not describe: another surface, a nearer
+   --  thing) keeps the answer it had.
+   procedure Tell_Linear
+     (C       : Chain;
+      Second  : Pyramid;
+      Field   : Field_Fit;
+      Agree   : Flag_Array;
+      Used    : Prediction_Array;
+      Answers : in out Answer_Array;
+      Marks   : in out Located_Array)
+   is
+      Count  : constant Natural := Marks'Length;
+      Given  : Prediction_Array (1 .. Count);
+      Todo   : Flag_Array (1 .. Count) := [others => False];
+      Half_U : constant Real := Real (C.Width) / 2.0;
+      Half_V : constant Real := Real (C.Height) / 2.0;
+
+      --  How far the field knows its gradient at a place (the basis's derivatives as Gradient takes them).
+      function Gradient_Sigma (P : Driver.Images.Pixel) return Real is
+         X  : constant Real := (P.U - Half_U) / Half_U;
+         Y  : constant Real := (P.V - Half_V) / Half_V;
+         Du : constant Real_Array (1 .. Terms) := [0.0, 1.0 / Half_U, 0.0, 2.0 * X / Half_U, Y / Half_U, 0.0];
+         Dv : constant Real_Array (1 .. Terms) := [0.0, 0.0, 1.0 / Half_V, 0.0, X / Half_V, 2.0 * Y / Half_V];
+         Qu, Qv : Real := 0.0;
+      begin
+         for I in 1 .. Field.Order loop
+            for J in 1 .. Field.Order loop
+               Qu := Qu + Du (I) * Field.Inverse ((I - 1) * Terms + J) * Du (J);
+               Qv := Qv + Dv (I) * Field.Inverse ((I - 1) * Terms + J) * Dv (J);
+            end loop;
+         end loop;
+         return Field.Sigma * Sqrt (Real'Max (Real'Max (Qu, Qv), 0.0));
+      end Gradient_Sigma;
+   begin
+      if not Field.Valid then
+         return;
+      end if;
+      for K in 1 .. Count loop
+         declare
+            Seen    : Answer renames Answers (Answers'First + K - 1);
+            P       : constant Driver.Images.Pixel := C.Points (K);
+            Knowing : constant Real := Gradient_Sigma (P);
+         begin
+            if Agree (Agree'First + K - 1) and then Seen.Verdict = Found and then Seen.Narrow and then Knowing > 0.0
+            then
+               Todo (K) := True;
+               Given (K) := (Used (Used'First + K - 1) with delta Linear => Gradient (C, Field, P),
+                                                                Linear_Sigma => Knowing);
+            end if;
+         end;
+      end loop;
+      if Agreeing_Of (Todo) > 0 then
+         declare
+            Told       : Answer_Array := Answers;
+            Told_Marks : Located_Array := Marks;
+         begin
+            Align_Some (C, Second, Given, Todo, Told, Told_Marks, Widen => False);
+            for K in 1 .. Count loop
+               if Todo (K) and then Told (Told'First + K - 1).Verdict = Found then
+                  Answers (Answers'First + K - 1) := Told (Told'First + K - 1);
+                  Marks (K) := Told_Marks (K);
+               end if;
+            end loop;
+         end;
+      end if;
+   end Tell_Linear;
 
    procedure Agreement (C : Chain; Answers : Answer_Array; Agree : out Flag_Array) is
       Marks : Located_Array (1 .. Answers'Length);
@@ -1341,6 +1423,7 @@ package body Driver.Alignment.Keyframes is
       Marks  : Located_Array (1 .. Given'Length);
       Field  : Field_Fit;
       Mine   : Flag_Array (1 .. Given'Length);
+      Used   : Prediction_Array (1 .. Given'Length) := Given;   --  per point, the prediction it was last asked from
    begin
       Align_Some (C, Second, Given, [1 .. Given'Length => True], Answers, Marks);
       if C.Own_Points then
@@ -1350,7 +1433,8 @@ package body Driver.Alignment.Keyframes is
       Fit_Field (C, Marks, Field, Mine);
       --  Every point is the caller's (Add's Supplied_At): one found from a narrow window where the caller put it stands
       --  whether or not the field of the others puts it there.
-      Settle (C, Second, Answers, Marks, Field, Mine, Placed => [1 .. Given'Length => True]);
+      Settle (C, Second, Answers, Marks, Field, Mine, Placed => [1 .. Given'Length => True], Used => Used);
+      Tell_Linear (C, Second, Field, Mine, Used, Answers, Marks);
       Agree := Mine;
    end Realign;
 
@@ -2475,6 +2559,7 @@ package body Driver.Alignment.Keyframes is
       Supplied_At : constant Flag_Array (1 .. Count) :=
         [for K in 1 .. Count => K <= Natural (C.Supplied_At.Length) and then C.Supplied_At (K)];
       Next   : Frame;
+      Used   : Prediction_Array (1 .. Count) := Given;   --  per point, the prediction it was last asked from
 
       --  Whether a place lies inside the window a prediction states for the point.
       function Within (Place, Predicted : Prediction) return Boolean is
@@ -2749,6 +2834,11 @@ package body Driver.Alignment.Keyframes is
                   --  A wider patch only while the keyframe has no field to stand on: with one, the next round
                   --  asks more points instead, at the usual cost.
                   Align_Some (C, Second, Asked, Round, Answers, Marks, Widen => not Next.Field.Valid);
+                  for K in 1 .. Count loop
+                     if Round (K) then
+                        Used (K) := Asked (K);
+                     end if;
+                  end loop;
                   declare
                      Refit   : Field_Fit;
                      Again   : Flag_Array (1 .. Count);
@@ -2769,7 +2859,8 @@ package body Driver.Alignment.Keyframes is
          end loop;
       end;
       Settle (C, Second, Answers, Marks, Next.Field, Mine,
-              Placed => [for K in 1 .. Count => Own_Place (K) or else Supplied_At (K)]);
+              Placed => [for K in 1 .. Count => Own_Place (K) or else Supplied_At (K)], Used => Used);
+      Tell_Linear (C, Second, Next.Field, Mine, Used, Answers, Marks);
       Agree := Mine;
       --  How far the extrapolation of each order that was tried was off, beyond what the fields it rested on carry:
       --  what the keyframe says of the curvature of the move (Frame). It is judged against the keyframe's field at

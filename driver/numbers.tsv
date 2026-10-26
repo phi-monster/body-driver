@@ -195,12 +195,18 @@ driver-alignment-keyframes.adb	Cap := Needed (0.5 * Real (Drawable) / Real (Tota
 driver-alignment-keyframes.adb	Count_All (1, Asked);	1	structure	the batch's draws from its first
 driver-alignment-keyframes.adb	Cu : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre
 driver-alignment-keyframes.adb	Cv : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre
+driver-alignment-keyframes.adb	Du : constant Real_Array (1 .. Terms) := [0.0, 1.0 / Half_U, 0.0, 2.0 * X / Half_U, Y / Half_U, 0.0];	1.0	math	the derivative of the basis's linear term by its own coordinate, over the half picture it is a fraction of
+driver-alignment-keyframes.adb	Du : constant Real_Array (1 .. Terms) := [0.0, 1.0 / Half_U, 0.0, 2.0 * X / Half_U, Y / Half_U, 0.0];	2.0	math	the derivative of a square: twice the coordinate
+driver-alignment-keyframes.adb	Dv : constant Real_Array (1 .. Terms) := [0.0, 0.0, 1.0 / Half_V, 0.0, X / Half_V, 2.0 * Y / Half_V];	1.0	math	the derivative of the basis's linear term by its own coordinate, over the half picture it is a fraction of
+driver-alignment-keyframes.adb	Dv : constant Real_Array (1 .. Terms) := [0.0, 0.0, 1.0 / Half_V, 0.0, X / Half_V, 2.0 * Y / Half_V];	2.0	math	the derivative of a square: twice the coordinate
 driver-alignment-keyframes.adb	G => (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,	1.0	math	the displacement is the place moved less the place: the identity taken off
 driver-alignment-keyframes.adb	G => (M11 => A - 1.0, M12 => -B, M21 => B, M22 => A - 1.0,	1.0	math	the displacement is the place moved less the place: the identity taken off
 driver-alignment-keyframes.adb	H : constant Real_Matrix (1 .. 3, 1 .. 3) := Ti * Hn * T;	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	H : constant Real_Matrix (1 .. 3, 1 .. 3) := Ti * Hn * T;	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Half_U : constant Real := Real (C.Width) / 2.0;	2.0	math	the half picture: the field's coordinates are fractions of the half from the picture's centre (Tell_Linear, as Gradient)
 driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the picture's centre lies half its width or height from its edge: the coordinate is a fraction of the half picture
+driver-alignment-keyframes.adb	Half_V : constant Real := Real (C.Height) / 2.0;	2.0	math	the half picture: the field's coordinates are fractions of the half from the picture's centre (Tell_Linear, as Gradient)
 driver-alignment-keyframes.adb	Hn : constant Real_Matrix (1 .. 3, 1 .. 3) :=	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	Hn : constant Real_Matrix (1 .. 3, 1 .. 3) :=	3	structure	a projective map of the plane, a 3 x 3 matrix
 driver-alignment-keyframes.adb	I = K or else Shift (I) > 0.0 or else not Driver.Uncertain.Significant (Change (I), Noise (I) * Sqrt (2.0)));	2.0	statistics	the noise of a difference of two readings
