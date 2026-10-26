@@ -94,7 +94,8 @@ package Driver.Robot is
    procedure Replay_Note (M : in out Model; Data : Driver.Bytes.Byte_Array);
    --  Makes a decider's note into the model as the run made it (a recording's kind N): "keeps G C" and a 0 or 1 an eye
    --  (Note_Keeps_Going), "back G C" (Note_Comes_Back), "origins" (Motion.Mark_Origins), "stayed G W" with W 1 or -1
-   --  (Motion.Note_Stayed), "alone G" (Note_Channels_Alone); anything else is ignored. A replay of the estimators alone
+   --  (Motion.Note_Stayed), "alone G" (Note_Channels_Alone), "across A" (Kinematics.Weigh_Across_Joints), "fit A"
+   --  (Kinematics.Ask_Fit), "walk A" and "still A" (Kinematics.Base); anything else is ignored. A replay of the estimators alone
    --  derives the graph from the notes as the run did.
    --  Recomputes the heavier estimates from everything observed so far.
    --  Deciders call it between Driver.Beats.Next and Send; it can take
@@ -815,11 +816,19 @@ private
    --  point, what is added to the aligner's answer before the fit.
    type Base_Shift is record
       Known            : Boolean := False;
+      Moved            : Boolean := False;   --  the body's eye moved significantly since the reference keyframe
+      Told             : Real := 0.0;   --  how far, its six terms' length in their sigmas over the gate's threshold
       Turn, Step       : Real := 0.0;   --  how far the base turned (radians) and moved (the walk's scale), for the log
       Shift_U, Shift_V : Real_Vectors.Vector;
+      Variance         : Real_Vectors.Vector;
+      --  per query point, what the shift adds to its sighting's variance, per axis (px squared): how far the walk's
+      --  frame, both lenses, both eyes' places at the keyframe and the point's depth are known, carried through it
    end record;
 
    package Base_Shift_Vectors is new Ada.Containers.Vectors (Positive, Base_Shift);
+
+   type Base_Judgement is (Unjudged, Kept, Dropped);
+   --  The base's shifts of an arm's sightings, as its fit judged them (Arm_Evidence.Base_Verdict).
 
    --  Where the reference keyframe's query points went in one keyframe of the arm's own eye.
    type Match_Set is record
@@ -970,7 +979,11 @@ private
       Twin_Taken : Boolean := False;   --  a keyframe at the reference's readings was taken after it: its still twin
       Revision : Natural := 0;
       --  How many keyframes were aligned again from the fitted arm (Kinematics.Realign), and fits asked for again
-      --  (Kinematics.Weigh_Across_Joints): a count above its matches', so that the next estimate fits it again.
+      --  (Kinematics.Weigh_Across_Joints, Kinematics.Ask_Fit): a count above its matches', so that the next estimate
+      --  fits it again.
+      Fitted_Keyframes, Fitted_Revision : Natural := 0;
+      --  The keyframes aligned (Matches) and the Revision when the arm was last fitted: a fitted arm is fitted again
+      --  once its keyframes have doubled since, or a fit is asked for (Kinematics.Refit).
       Across_Due : Boolean := False;
       --  The arm's next fit takes the jackknife over its joints into its covariance (Fit's Across_Joints): asked once
       --  its sweep has ended (Kinematics.Weigh_Across_Joints).
@@ -1055,7 +1068,14 @@ private
       Rig_Arm_Lens, Rig_Body_Lens : Driver.Rig.Lens;
       Rig_Arm_Inverse, Rig_Body_Inverse : Real_Vectors.Vector;   --  per query point, its inverse depth; 0: not placed
       Rig_Turn_Sigma, Rig_Misfit : Real := 0.0;
+      Rig_Cov      : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];
+      --  Driver.Rig.Calibration's Covariance: of the body eye's frame on the arm's eye and both focal lengths
       Base         : Base_Shift_Vectors.Vector;
+      Base_Verdict : Base_Judgement := Unjudged;
+      --  Whether the arm's fit left its sightings nearer its model with the base's shifts than without them, at its
+      --  first fit after the walk was calibrated (Kinematics.Refit); Dropped, no shift is taken until the walk is
+      --  calibrated anew.
+      Base_Off     : Boolean := False;   --  the fit under way takes no shift (the judgement's fit without them)
    end record;
 
    package Arm_Evidence_Vectors is new Ada.Containers.Vectors (Positive, Arm_Evidence);

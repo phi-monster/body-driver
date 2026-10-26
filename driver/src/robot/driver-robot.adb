@@ -343,6 +343,8 @@ package body Driver.Robot is
          M.Stepping := Word (2) = "1";
       elsif Count >= 2 and then Word (1) = "across" then
          Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));
+      elsif Count >= 2 and then Word (1) = "fit" then
+         Kinematics.Ask_Fit (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "walk" then
          Kinematics.Base.Begin_Walk (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "still" then

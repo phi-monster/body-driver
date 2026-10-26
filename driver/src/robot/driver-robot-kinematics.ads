@@ -156,9 +156,19 @@ private package Driver.Robot.Kinematics is
    --  Across_Joints): each joint's own keyframes left out in turn, the fit begun from itself, its last stage alone.
    --  Asked once the arm's sweep has ended: it costs a last stage a joint.
 
+   procedure Ask_Fit (M : in out Model; A : Arm_Id);
+   --  Arm A's next estimate fits it again, whatever its keyframes since its last fit (Refit): the boot's word where
+   --  its next move rests on a fit of every keyframe taken (the pairs an untold order's rounds turn next, Contested).
+   --  Recorded as a note ("fit A"), which a replay applies where the run made it.
+
    procedure Refit (M : in out Model; Again : Boolean := False);
    --  Fits every arm whose answers changed since its last fit
-   --  (Driver.Robot.Kinematics.Fit). Its sightings are the answers of
+   --  (Driver.Robot.Kinematics.Fit): an arm not fitted yet at every change, a fitted arm once its keyframes have
+   --  doubled since its last fit or a fit is asked for again (Revision: keyframes aligned again from it, Ask_Fit,
+   --  Weigh_Across_Joints). Fitted at every new keyframe, a sweep spent two thirds of its beats waiting on its fits
+   --  (round n15s2, 10-27: the Panda's 10654 beats, 755 s of its 1105 in 14 estimates of 32 fits), each fit of a
+   --  few keyframes more telling little the one before had not; a fit of twice the keyframes halves the variance
+   --  of what the last one told. Its sightings are the answers of
    --  keyframes the points moved in by more than the aligner errs, whose
    --  uncertainty is not more than Z times the keyframe's typical one.
    --  Again: the keyframes were just aligned again from the fits of this

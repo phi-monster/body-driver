@@ -7,7 +7,6 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Unchecked_Deallocation;
 with Driver.Alignment;
-with Driver.Alignment.Keyframes;
 with Driver.Clock;
 with Driver.Memory;
 with Driver.Conventions;
@@ -2674,6 +2673,16 @@ package body Driver.Robot.Kinematics is
       end;
    end Table_Estimate;
 
+   procedure Ask_Fit (M : in out Model; A : Arm_Id) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("fit" & A'Image));
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            R.Revision := R.Revision + 1;
+         end if;
+      end loop;
+   end Ask_Fit;
+
    procedure Weigh_Across_Joints (M : in out Model; A : Arm_Id) is
    begin
       --  A decider's call: noted in the recording, so a replay ends the sweep where the boot did (Replay_Note).
@@ -2696,13 +2705,15 @@ package body Driver.Robot.Kinematics is
 
       --  Each arm's fit reads the model and writes nothing but its own evidence's result: the arms are fitted
       --  at once, and the world is placed from them afterwards.
-      procedure Fit_Arm (Index : Positive) is
+      procedure Fit_Arm_Once (Index : Positive) is
          R : Arm_Evidence renames M.Kinematics (Index);
       begin
          if not Current (M, R) then
             R.Result := (others => <>);
          elsif not R.Matches.Is_Empty and then Natural (R.Matches.Length) + R.Revision /= R.Result.Matches
            and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index
+           and then (not R.Result.Fitted or else R.Revision /= R.Fitted_Revision
+                     or else Natural (R.Matches.Length) >= 2 * R.Fitted_Keyframes)
          then
             declare
                N       : constant Natural := M.Groups (R.Group).Size;
@@ -2853,10 +2864,22 @@ package body Driver.Robot.Kinematics is
 
                   Moving : Flag_Access := new Flag_Array (R.Matches.First_Index .. R.Matches.Last_Index);
 
+                  --  A sighting whose shift for its base's motion is not known (Base.Shift_Variance) is in no fit.
                   function Returns (S : Match_Set; I : Natural) return Boolean is
-                    (Round_Trip (S, I) and then (for some K in Moving'Range => Moving (K) and then R.Matches (K).Frame = S.Frame));
+                    (Round_Trip (S, I) and then (for some K in Moving'Range => Moving (K) and then R.Matches (K).Frame = S.Frame)
+                     and then Base.Shift_Variance (R, S.Frame, I) < Real'Last);
+                  --  The standard deviation the matcher states of the sighting, and what its shift adds to it.
+                  function Shifted_Sigma (S : Match_Set; I : Natural) return Real is
+                    (declare
+                        Own : constant Real := (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0);
+                        Var : constant Real := Base.Shift_Variance (R, S.Frame, I);
+                     begin
+                       (if Var > 0.0 then Ada.Numerics.Long_Elementary_Functions.Sqrt (Own ** 2 + Var) else Own));
                   Kept : Natural := 0;
                begin
+                  --  Every keyframe's sightings where a base that held still would have put them, where its body's eye
+                  --  saw it move (Kinematics.Base), before they are counted: a shift not known leaves its sighting out.
+                  Base.Shift_Sightings (M, R);
                   for K in Moving'Range loop
                      Moving (K) := Moved (R.Matches (K));
                   end loop;
@@ -2925,9 +2948,6 @@ package body Driver.Robot.Kinematics is
                      --  The joints' slack measured from the keyframes' sightings alone (Fit.Measure_Slack), before the
                      --  sightings are taken less the motion of the joints their keyframes did not ask: that motion is
                      --  of the joints' turns, the readings' changes less the slack's (Linked), and so is the fit's.
-                     --  Every keyframe's sightings where a base that held still would have put them, where its
-                     --  body's eye saw it move (Kinematics.Base).
-                     Base.Shift_Sightings (M, R);
                      for S of R.Matches loop
                         for I in 0 .. Queries - 1 loop
                            if Returns (S, I) then
@@ -2936,7 +2956,7 @@ package body Driver.Robot.Kinematics is
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
                                            U => S.To_U (I) + Base.Shift_U (R, S.Frame, I),
                                            V => S.To_V (I) + Base.Shift_V (R, S.Frame, I),
-                                           Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
+                                           Own => Shifted_Sigma (S, I),
                                            others => <>);
                            end if;
                         end loop;
@@ -2988,7 +3008,7 @@ package body Driver.Robot.Kinematics is
                                            U0 => R.Query_U (I), V0 => R.Query_V (I),
                                            U => S.To_U (I) + Base.Shift_U (R, S.Frame, I),
                                            V => S.To_V (I) + Base.Shift_V (R, S.Frame, I),
-                                           Own => (if I < Natural (S.Sigma.Length) then S.Sigma (I) else 0.0),
+                                           Own => Shifted_Sigma (S, I),
                                            Own_Freedom => (if I < Natural (S.Freedom.Length) then S.Freedom (I) else 0),
                                            others => <>);
                               --  How far the joints the keyframe did not ask moved the point (Fit.Sighting's Off_U,
@@ -3420,6 +3440,8 @@ package body Driver.Robot.Kinematics is
                      for X of Report.Covariance loop
                         Result.Covariance.Append (X);
                      end loop;
+                     R.Fitted_Keyframes := Natural (R.Matches.Length);
+                     R.Fitted_Revision := R.Revision;
                      --  A fit that failed keeps the last one that held.
                      if Report.Fitted or else not R.Result.Fitted then
                         R.Result := Result;
@@ -3459,6 +3481,44 @@ package body Driver.Robot.Kinematics is
                Free (Changes);
                Free (Asked);
                Free (Play);
+            end;
+         end if;
+      end Fit_Arm_Once;
+
+      --  The arm fitted; and at its first fit after its walk was calibrated, where the base's shifts moved some
+      --  keyframe's sightings, fitted again without them, and the fit whose sightings lie nearer its model in the
+      --  median kept, its shifts with it or dropped until the walk is calibrated anew. Taken on its calibration's
+      --  word alone, a walk the stills could not tell put the G1's head eye 156 degrees from where it is, stating
+      --  0.3 (walkdump.py, 10-27), and its shifts would have moved a swaying arm's sightings by more than the sway.
+      procedure Fit_Arm (Index : Positive) is
+         R : Arm_Evidence renames M.Kinematics (Index);
+      begin
+         Fit_Arm_Once (Index);
+         if R.Base_Verdict = Unjudged and then R.Result.Fitted and then (for some B of R.Base => B.Moved) then
+            declare
+               With_Shifts : constant Arm_Fit := R.Result;
+            begin
+               R.Base_Off := True;
+               R.Revision := R.Revision + 1;
+               Fit_Arm_Once (Index);
+               R.Base_Off := False;
+               declare
+                  Without_Fitted : constant Boolean := R.Result.Fitted;
+                  Without_Median : constant Real := R.Result.Median_Px;
+               begin
+                  if Without_Fitted and then Without_Median <= With_Shifts.Median_Px then
+                     R.Base_Verdict := Dropped;
+                  else
+                     R.Base_Verdict := Kept;
+                     R.Result := With_Shifts;
+                     R.Result.Matches := Natural (R.Matches.Length) + R.Revision;
+                  end if;
+                  Driver.Log.Line (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & "'s base shifts "
+                                   & (if R.Base_Verdict = Kept then "kept" else "dropped") & ": its fit leaves a median "
+                                   & Driver.Log.Image (With_Shifts.Median_Px, 3) & " px with them, "
+                                   & (if Without_Fitted then Driver.Log.Image (Without_Median, 3) & " px"
+                                      else "no fit") & " without");
+               end;
             end;
          end if;
       end Fit_Arm;

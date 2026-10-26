@@ -65,6 +65,10 @@ package Driver.Rig is
       Turn_Sigma      : Real := Real'Last;
       --  How far the second eye's turn on the first is known: the root of the largest eigenvalue of its covariance,
       --  radians, the residuals' scale taken in.
+      Covariance      : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];
+      --  Of the second eye's frame on the first (its turn as Exp takes it, then its place, in the scale above) and
+      --  both focal lengths' logarithms, the first eye's then the second's: the residuals' scale taken in, every
+      --  still's pose and every inverse depth left free, and nothing along the scale (no residual moves it).
       Misfit          : Real := 0.0;   --  the median over the sightings of the larger residual over its sigma
       Scale           : Real := 1.0;
       --  the residuals' own scale in those sigmas, no less than one (Huber's cut is at Z of it)
@@ -123,11 +127,12 @@ package Driver.Rig is
 
    procedure Triangulate
      (L : Lens; R : Vec3; Poses : Rigid_Array; Seen_At : Place_Array; Sigmas : Real_Array; Start : Real;
-      Inverse_Depth : out Real; Ok : out Boolean)
+      Inverse_Depth : out Real; Variance : out Real; Ok : out Boolean)
      with Pre => Poses'Length = Seen_At'Length and then Sigmas'Length = Seen_At'Length and then Start >= 0.0;
    --  A point's inverse depth along ray R of the reference picture, from where eyes at Poses (in its reference frame)
    --  saw it: Gauss and Newton on the one number from Start, Huber at Z of the residuals' own scale, no less than
    --  nought (no finite depth). Ok when its normal equation is positive: a sighting's two residuals tell the one
    --  number with one left over (the reference's own sighting tells nothing: the point lies on its ray at any depth).
+   --  Variance: of the inverse depth, the residuals' own scale taken in; Real'Last where not Ok.
 
 end Driver.Rig;

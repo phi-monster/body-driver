@@ -111,7 +111,8 @@ package body Driver.Robot.Motion is
       Kept_Eyes    : out Channel_Flags;
       Came_Back    : out Boolean;
       Noted        : Group_Id'Base;
-      Way          : Real)
+      Way          : Real;
+      Until_Reach  : Boolean)
    is
       B : Driver.Clock.Beat;
       --  What the wait was for, for the log: per group the beats its readings still moved, per eye the beats its
@@ -258,6 +259,7 @@ package body Driver.Robot.Motion is
       --  (Nowhere); the last, so that a picture this body settles in time is waited for as before: a push that began
       --  from one not yet settled is no row of the lock-in. The G1 held an arm out, its balance swaying that arm's eye,
       --  and waited here 505 beats for it to settle, its longest wait before 75 (seed 1, paced round p75a, 10-23).
+      Short         : Boolean := False;   --  the push is let run on: its drift is short of the flow's reach yet
       Eye_Far       : array (1 .. Eyes) of Real := [others => 0.0];
       Eye_Far_At    : array (1 .. Eyes) of Natural := [others => 0];
       Ended_Nowhere : Boolean := False;   --  some eye ended the wait going no farther, unstilled (Eye_Nowhere)
@@ -384,7 +386,9 @@ package body Driver.Robot.Motion is
             end if;
             Drifting := Use_Back and then Standing and then Beats_Waited - Stood_Since > Lag
               and then (for some E in 1 .. Eyes => Drifted (Eye_Id (E)));
-            if Drifting and then not Done and then not Sent_Back then
+            --  Let run until some eye's view is as far from where the push began as the flow reaches (Until_Reach).
+            Short := Until_Reach and then Drifting and then not Sent_Back and then not View_At_Reach (M);
+            if Drifting and then not Short and then (not Done or else Until_Reach) and then not Sent_Back then
                --  The push as it stood, noted before it is sent back (Note_Stayed): what it did while held, whatever its
                --  drift does after. Noted only where the body settled with the push held, a push sent back on a drift
                --  told nothing: the G1's arms, the body swaying on after each of their pushes, were sent back at every
@@ -420,7 +424,7 @@ package body Driver.Robot.Motion is
             else
                Driver.Beats.Send (Driver.Commands.Hold);
             end if;
-            exit when Done;
+            exit when Done and then not Short and then not (Until_Reach and then Sent_Back and then Stood_Since < 0);
          end;
          Beats_Waited := Beats_Waited + 1;
          if Beats_Waited >= Tell_At then
@@ -524,14 +528,19 @@ package body Driver.Robot.Motion is
       end loop;
    end Mark_Origins;
 
-   function Reach_Ratio (M : Model) return Real is
+   --  How far the push held now has moved the eyes' views from where it began (Reach_Ratio, View_At_Reach).
+   procedure Measure_Reach
+     (M      : Model;
+      Most   : out Real;      --  the median displacement of the moved cells of the eye with the largest share moved
+      Reach  : out Real;      --  half a cell of that eye, in pixels
+      Beyond : out Boolean)   --  some eye has more of its moved cells beyond reach than within it
+   is
       Gate  : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
-      Ratio : Real := 1.0;
-      Most  : Real := 0.0;       --  the median displacement of the moved cells of the eye with the largest share moved
       Share : Real := 0.0;       --  that share, of the eye's textured cells
-      Reach : Real := 0.0;       --  half a cell of that eye, in pixels
-      Beyond : Boolean := False;  --  some eye has more of its moved cells beyond reach than within it
    begin
+      Most := 0.0;
+      Reach := 0.0;
+      Beyond := False;
       for E in 1 .. Eye_Count (M) loop
          declare
             S : Eye_Stream renames M.Eyes (Eye_Id (E));
@@ -598,11 +607,23 @@ package body Driver.Robot.Motion is
             end if;
          end;
       end loop;
-      if not Beyond and then Most > 0.0 and then Reach > Most then
-         Ratio := Reach / Most;
-      end if;
-      return Ratio;
+   end Measure_Reach;
+
+   function Reach_Ratio (M : Model) return Real is
+      Most, Reach : Real;
+      Beyond      : Boolean;
+   begin
+      Measure_Reach (M, Most, Reach, Beyond);
+      return (if not Beyond and then Most > 0.0 and then Reach > Most then Reach / Most else 1.0);
    end Reach_Ratio;
+
+   function View_At_Reach (M : Model) return Boolean is
+      Most, Reach : Real;
+      Beyond      : Boolean;
+   begin
+      Measure_Reach (M, Most, Reach, Beyond);
+      return Beyond or else (Most > 0.0 and then Most >= Reach);
+   end View_At_Reach;
 
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real) is
       Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
@@ -746,7 +767,7 @@ package body Driver.Robot.Motion is
       Kept, Back : Boolean;
       Eyes       : Channel_Flags (1 .. Eye_Count (M));
    begin
-      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes, Back, Noted, Way);
+      Settle_Body (M, Driver.Commands.Hold, False, Beats_Waited, Kept, Eyes, Back, Noted, Way, False);
    end Settle;
 
    procedure Settle
@@ -757,9 +778,10 @@ package body Driver.Robot.Motion is
       Kept_Eyes    : out Channel_Flags;
       Came_Back    : out Boolean;
       Noted        : Group_Id'Base := 0;
-      Way          : Real := 0.0) is
+      Way          : Real := 0.0;
+      Until_Reach  : Boolean := False) is
    begin
-      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes, Came_Back, Noted, Way);
+      Settle_Body (M, Back, True, Beats_Waited, Kept_Going, Kept_Eyes, Came_Back, Noted, Way, Until_Reach);
    end Settle;
 
    procedure Judge

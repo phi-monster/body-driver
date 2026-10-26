@@ -1845,7 +1845,16 @@ package body Driver.Alignment is
       Radius   : constant Real := Real'Max (Radius_U, Radius_V);
       Largest_Scale, Smallest_Scale : Real;
       Det : constant Real := Query.Linear.UU * Query.Linear.VV - Query.Linear.UV * Query.Linear.VU;
+      function Finite (X : Real) return Boolean is (abs X <= Real'Last);
    begin
+      --  A prediction that is no number somewhere says nothing of where to look: a fit whose focal length no sighting
+      --  determined (65 thousand px) predicted G1 3b's points past the float's end, and the estimates ended in the
+      --  conversion of such a window's edge to a pixel (round n15s2, 10-27).
+      if not (Finite (Query.To.U) and then Finite (Query.To.V) and then Finite (Query.From.U)
+              and then Finite (Query.From.V) and then Finite (Radius) and then Finite (Det))
+      then
+         return Fail (Window_Too_Large);
+      end if;
       --  The warp must be one the levels compare: no mirror, and no direction made smaller by more than a halving
       --  (the pictures' pixels would be skipped over there; made larger, they are read between).
       Singular_Values (Query.Linear, Largest_Scale, Smallest_Scale);

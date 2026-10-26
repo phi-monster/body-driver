@@ -673,6 +673,10 @@ driver-http.adb	R.Status := Natural'Value (Status (Sp + 1 .. Natural'Min (Status
 driver-http.adb	Remaining : Integer := -1;	1	structure	sentinel: the body length is unknown until the server closes
 driver-http.adb	elsif R.Status not in 200 .. 299 then	200	format	HTTP 2xx means success
 driver-http.adb	elsif R.Status not in 200 .. 299 then	299	format	HTTP 2xx means success
+driver-images-files.adb	& Ada.Strings.Fixed.Trim (Natural'Image (Height (I)), Ada.Strings.Left) & ASCII.LF & "" & ASCII.LF;	"255	format	a PPM of eight-bit channels: its largest value 255
+driver-images-files.adb	At_Byte : Ada.Streams.Stream_Element_Offset := 1;	1	structure	indexes start at one
+driver-images-files.adb	Count : constant Ada.Streams.Stream_Element_Offset := Ada.Streams.Stream_Element_Offset (3 * W * H);	3	format	three bytes a pixel: red, green and blue
+driver-images-files.adb	if Depth /= 255 or else First + Count - 1 > Last then	255	format	a PPM of eight-bit channels: its largest value 255
 driver-images.adb	+ Blue_Weight * Real (RGB (B + 2));	2	format	ITU-R BT.601 luma weight
 driver-images.adb	B : constant Offset := RGB'First + Offset (3 * K);	3	format	RGB bytes: three per pixel
 driver-images.adb	Blue_Weight : constant := 0.114;	0.114	format	ITU-R BT.601 luma weight
@@ -1054,6 +1058,8 @@ driver-recording.adb	Size : constant Offset := Offset (Little_Endian (Head (10 .
 driver-recording.adb	V := Shift_Left (V, 8) or Unsigned_64 (Data (I));	8	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 3 loop	3	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
 driver-recording.adb	for I in 0 .. 7 loop	7	format	record header layout: kind byte, u64 nanoseconds, u32 length, little-endian
+driver-rig.adb	(if First_Start.Focal > 0.0 then First_Start.Focal else Focal_Of (1, First_Start.Cx, First_Start.Cy));	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
+driver-rig.adb	(if Have (P) then Inv (P) else 1.0), Inv (P), Var, Ok);	1.0	math	the scale: the median inverse depth of the eye's points is one
 driver-rig.adb	(if P <= 6 * S	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	(if P <= 6 * S then Sg (K).Still = (P - 1) / 6 + 1	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	(if P <= 6 * S then Sg (K).Still = (P - 1) / 6 + 1	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
@@ -1061,6 +1067,12 @@ driver-rig.adb	(if Sg (K).Eye = 1 then First_Point (Sg (K).Point) else Second_Po
 driver-rig.adb	(if Sg (K).Eye = 1 then First_Point (Sg (K).Point) else Second_Point (Sg (K).Point));	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	(if abs Z_Value <= Driver.Conventions.Z then 1.0 else Driver.Conventions.Z / abs Z_Value);	1.0	math	Huber's loss: a square's half within Z, linear beyond
 driver-rig.adb	(if abs Z_Value <= Driver.Conventions.Z then Z_Value * Z_Value / 2.0	2.0	math	Huber's loss: a square's half within Z, linear beyond
+driver-rig.adb	+ Vectors (6 * S + A, P) * Vectors (6 * S + B, P) / Values (P);	6	structure	the second eye's frame follows every still's six numbers (Driver.Rig's state)
+driver-rig.adb	+ Vectors (6 * S + A, P) * Vectors (6 * S + B, P) / Values (P);	6	structure	the second eye's frame follows every still's six numbers (Driver.Rig's state)
+driver-rig.adb	A (J + 1) := R (R'First + 2 * K - 2);	2	structure	two residuals a sighting, across and down
+driver-rig.adb	A (J + 1) := R (R'First + 2 * K - 2);	2	structure	two residuals a sighting, across and down
+driver-rig.adb	A (J + 2) := R (R'First + 2 * K - 1);	2	structure	two residuals a sighting, across and down
+driver-rig.adb	A (J + 2) := R (R'First + 2 * K - 1);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	A : Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	A : Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	A := Log (Start) - Log (2.0) / 2.0;	2.0	numerics	an octave about the start, as the arm's fit brackets its focal length (stage 1)
@@ -1079,8 +1091,8 @@ driver-rig.adb	Base : constant Natural := 12 * (Q - 1);	12	structure	the linear 
 driver-rig.adb	Bd : Real_Access := new Real_Array (1 .. Natural'Max (1, Nd));	1	structure	an array of at least one element
 driver-rig.adb	Best_Residuals : Real_Access := new Real_Array (1 .. 2 * Ns);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Bv (Base + 9 + I) := -Step1 (Q) (I);	9	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
-driver-rig.adb	Cov (A, B) := Cov (A, B) + Vectors (6 * S + A, P) * Vectors (6 * S + B, P) / Values (P);	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
-driver-rig.adb	Cov (A, B) := Cov (A, B) + Vectors (6 * S + A, P) * Vectors (6 * S + B, P) / Values (P);	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
+driver-rig.adb	By_Point, By_Still : Driver.Natural_Array (1 .. Natural'Max (1, Mine_Count));	1	structure	an array of at least one element
+driver-rig.adb	Count := Count + 2;	2	structure	two residuals a sighting, across and down
 driver-rig.adb	D (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-rig.adb	D (P, P) := A (P, P) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-rig.adb	D : Real_Matrix (1 .. 3, 1 .. 3);	3	structure	three dimensions
@@ -1093,9 +1105,11 @@ driver-rig.adb	Depth_Of : array (1 .. Natural'Max (1, Ns)) of Positive := [other
 driver-rig.adb	Depth_Of : array (1 .. Natural'Max (1, Ns)) of Positive := [others => 1];	1	structure	an array of at least one element
 driver-rig.adb	Direction (L1, 1, Q, Turn1 (Q), Step1 (Q), Count);	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	Direction (L2, 2, Q, Turn2 (Q), Step2 (Q), Count);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
-driver-rig.adb	Dof : constant Integer := 2 * Ns - Np - Nd;	2	structure	two residuals a sighting, across and down
+driver-rig.adb	Dof : constant Integer := 2 * Used - Np - Nd;	2	structure	two residuals a sighting, across and down
+driver-rig.adb	Dropped : array (1 .. Natural'Max (1, Ns)) of Boolean := [others => False];	1	structure	an array of at least one element
 driver-rig.adb	E (P) := 1.0;	1.0	math	a column of the identity: the inverse's columns one at a time
 driver-rig.adb	E : Real_Vector (1 .. 6) := [others => 0.0];	6	structure	a pose's six numbers: a turn's three and a place's three
+driver-rig.adb	F2 : constant Real := (if Focal_1 > 0.0 then Focal_Of (2, Second_Centre.U, Second_Centre.V) else 0.0);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	G : Real_Vector (1 .. 6);	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	Golden : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	1.0	math	the golden section
 driver-rig.adb	Golden : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	2.0	math	the golden section
@@ -1107,13 +1121,17 @@ driver-rig.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, a
 driver-rig.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs Rho);	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
 driver-rig.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs W0 (P));	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
 driver-rig.adb	H : constant Real := Sqrt (Real'Model_Epsilon) * Real'Max (1.0, abs X (P));	1.0	numerics	forward differences at the square root of the float's resolution relative to each parameter's size
+driver-rig.adb	Have : array (1 .. Natural'Max (1, Npts)) of Boolean := [others => False];	1	structure	an array of at least one element
 driver-rig.adb	Hd : constant Real := Hdd (D) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-rig.adb	Hd : constant Real := Hdd (D) * (1.0 + Lambda) + Lambda * Real'Model_Small;	1.0	math	Marquardt's damping of the diagonal
 driver-rig.adb	Hdd : Real_Access := new Real_Array (1 .. Natural'Max (1, Nd));	1	structure	an array of at least one element
 driver-rig.adb	Hpd : Matrix_Access := new Real_Matrix (1 .. Np, 1 .. Natural'Max (1, Nd));	1	structure	an array of at least one element
 driver-rig.adb	Inv (Placed) := 1.0 / Zd;	1.0	math	an inverse depth
+driver-rig.adb	Inv : Real_Access := new Real_Array (1 .. Natural'Max (1, Npts));	1	structure	an array of at least one element
+driver-rig.adb	Inv.all := [others => 1.0];	1.0	math	the scale: the median inverse depth of the eye's points is one
 driver-rig.adb	J : Matrix_Access := new Real_Matrix (1 .. 2 * N, 1 .. 6);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	J : Matrix_Access := new Real_Matrix (1 .. 2 * N, 1 .. 6);	6	structure	a pose's six numbers: a turn's three and a place's three
+driver-rig.adb	J := J + 2;	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Jd (2 * K - 1) := (Du - R0 (2 * K - 1)) / H (Depth_Of (K));	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Jd (2 * K - 1) := (Du - R0 (2 * K - 1)) / H (Depth_Of (K));	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Jd (2 * K) := (Dv - R0 (2 * K)) / H (Depth_Of (K));	2	structure	two residuals a sighting, across and down
@@ -1150,15 +1168,21 @@ driver-rig.adb	Miss (L, T, [Rays (Row, C), Rays (Row, C + 1), Rays (Row, C + 2)]
 driver-rig.adb	Miss (L, T, [Rays (Row, C), Rays (Row, C + 1), Rays (Row, C + 2)], Rays (Row, C + 3),	3	structure	a ray's three coordinates, then its inverse depth
 driver-rig.adb	Np : constant Positive := 6 * S + 8;	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	Np : constant Positive := 6 * S + 8;	8	structure	every still's six numbers, the second eye's six and the two focal lengths (Driver.Rig's state)
+driver-rig.adb	Npts : constant Natural := (if Eye = 1 then N1 else N2);	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
+driver-rig.adb	Point_From (1) := 1;	1	structure	a counting sort: the first list starts at the first place
 driver-rig.adb	R0 : Real_Access := new Real_Array (1 .. 2 * Ns);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	R0, Rn : Real_Access := new Real_Array (1 .. 2 * N);	2	structure	two residuals a sighting, across and down
+driver-rig.adb	Rays : Real_Matrix (1 .. Fill, 1 .. 4);	4	structure	a point's row: its ray's three and its inverse depth
+driver-rig.adb	Refine_Eye (1, L1, Turn1, Step1, Live1, Apply => True, Cost => Cost1);	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
+driver-rig.adb	Refine_Eye (2, L2, Turn2, Step2, Live2, Apply => True, Cost => Cost2);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
+driver-rig.adb	Res : Real_Access := new Real_Array (1 .. 2 * Ns);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Res : Real_Array (1 .. 2 * Natural'Max (1, N));	1	structure	an array of at least one element
 driver-rig.adb	Res : Real_Array (1 .. 2 * Natural'Max (1, N));	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Residual (St, First, Second, K, R (2 * K - 1), R (2 * K));	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Residual (St, First, Second, K, R (2 * K - 1), R (2 * K));	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Result.Covariance (Q, P) := E (Q) * Squares / Real (2 * N - 6);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Result.Covariance (Q, P) := E (Q) * Squares / Real (2 * N - 6);	6	statistics	the degrees of freedom: two residuals a point less a pose's six numbers
-driver-rig.adb	Result.Ok := Pd and then Within >= 6;	6	structure	six points: three are the fewest that place an eye (its six numbers), three more leave as many residuals over to judge it by
+driver-rig.adb	Result.Ok := Pd and then Within >= 6 and then (for all V of X => Finite (V));	6	structure	six points: three are the fewest that place an eye (its six numbers), three more leave as many residuals over to judge it by
 driver-rig.adb	Rho : Real := 1.0;	1.0	math	the scale: the median inverse depth of the first eye's points is one
 driver-rig.adb	Rn : Real_Access := new Real_Array (1 .. 2 * Ns);	2	structure	two residuals a sighting, across and down
 driver-rig.adb	Rows : constant Natural := 12 * S;	12	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
@@ -1181,23 +1205,25 @@ driver-rig.adb	St.Turn ((P - 1) / 6 + 1) ((P - 1) mod 6 + 1) := Value;	6	structu
 driver-rig.adb	St.X_Place (P - 6 * S - 3) := Value;	3	structure	a still's turn: its first three numbers (Driver.Rig's state)
 driver-rig.adb	St.X_Place (P - 6 * S - 3) := Value;	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	St.X_Turn (P - 6 * S) := Value;	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
+driver-rig.adb	Still_From (1) := 1;	1	structure	a counting sort: the first list starts at the first place
+driver-rig.adb	T := (if Ok then [Xv (10), Xv (11), Xv (12)] else Zero3);	10	structure	the linear start's unknowns: Y's nine entries, then the second eye's place's three
+driver-rig.adb	T := (if Ok then [Xv (10), Xv (11), Xv (12)] else Zero3);	11	structure	the linear start's unknowns: Y's nine entries, then the second eye's place's three
+driver-rig.adb	T := (if Ok then [Xv (10), Xv (11), Xv (12)] else Zero3);	12	structure	the linear start's unknowns: Y's nine entries, then the second eye's place's three
 driver-rig.adb	Them : Real_Access := new Real_Array (1 .. Natural'Max (1, N1));	1	structure	an array of at least one element
-driver-rig.adb	Turn_Alone ((Focal => Exp (Ln_F), Cx => First_Start.Cx, Cy => First_Start.Cy), 1, Which, T, A_Sig, Cnt,	1	structure	the first eye (Driver.Rig.Sighting.Eye)
-driver-rig.adb	Turn_Alone ((Focal => Start, Cx => First_Start.Cx, Cy => First_Start.Cy), 1, Q, T, A_Sig, Cnt, Spent);	1	structure	the first eye (Driver.Rig.Sighting.Eye)
+driver-rig.adb	Them : Real_Access := new Real_Array (1 .. Natural'Max (1, Npts));	1	structure	an array of at least one element
 driver-rig.adb	Turn_Alone (L1, 1, Q, Turn1 (Q), Sig1 (Q), Count, Spent);	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	Turn_Alone (L2, 2, Q, Turn2 (Q), Sig2 (Q), Count, Spent);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
-driver-rig.adb	Turn_Alone (L2, 2, Q, Turn2 (Q), Sig2 (Q), Count, Spent);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
-driver-rig.adb	Tx := [Xv (10), Xv (11), Xv (12)];	10	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
-driver-rig.adb	Tx := [Xv (10), Xv (11), Xv (12)];	11	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
-driver-rig.adb	Tx := [Xv (10), Xv (11), Xv (12)];	12	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
 driver-rig.adb	Up : Real_Array (1 .. 2 * N);	2	structure	two residuals a sighting, across and down
+driver-rig.adb	Use_Still := [for Q in 1 .. S => Both (Q) and then Miss_Of (Q, Best_Y, Best_T) <= 1.0];	1.0	structure	a still agrees with a frame where its equations miss by no more than their own sizes: off by more, its motion is not the frame's at all
 driver-rig.adb	X (1 .. 3) := Real_Array (Log (Start.Rotation));	3	structure	three dimensions
 driver-rig.adb	X (4 .. 6) := Real_Array (Start.Translation);	4	structure	a pose's place after its turn's three numbers
 driver-rig.adb	X (4 .. 6) := Real_Array (Start.Translation);	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	X : Real_Array (1 .. 6);	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	Xv : Real_Vector (1 .. 12);	12	structure	the linear hand-eye's unknowns: Y's nine entries, then the place's three (twelve rows a still: nine of the turns, three of the steps)
-driver-rig.adb	Y : constant Mat3 := [for I in 1 .. 3 => [for J in 1 .. 3 => Xv (At_Y (I, J))]];	3	structure	three dimensions
-driver-rig.adb	Y : constant Mat3 := [for I in 1 .. 3 => [for J in 1 .. 3 => Xv (At_Y (I, J))]];	3	structure	three dimensions
+driver-rig.adb	Y := [for I in 1 .. 3 => [for J in 1 .. 3 => (if Ok then Xv (At_Y (I, J)) else 0.0)]];	3	structure	three dimensions
+driver-rig.adb	Y := [for I in 1 .. 3 => [for J in 1 .. 3 => (if Ok then Xv (At_Y (I, J)) else 0.0)]];	3	structure	three dimensions
+driver-rig.adb	and then (for all I in 1 .. 3 => Finite (Best.X_Turn (I)) and then Finite (Best.X_Place (I)));	3	structure	three dimensions
+driver-rig.adb	and then not (Ambiguous_Cost <= Driver.Conventions.Z ** 2 / 2.0	2.0	statistics	a likelihood ratio: the cost is half a chi square, and a gate at Z is half of Z squared
 driver-rig.adb	else Driver.Conventions.Z * abs Z_Value - Driver.Conventions.Z ** 2 / 2.0);	2.0	math	Huber's loss: a square's half within Z, linear beyond
 driver-rig.adb	else Sg (K).Eye = 2);	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	else St.Place_At ((P - 1) / 6 + 1) ((P - 1) mod 6 - 2))	2	structure	a still's place: its last three numbers, from the fourth (Driver.Rig's state)
@@ -1224,11 +1250,16 @@ driver-rig.adb	elsif P = 6 * S + 7 then Sg (K).Eye = 1	6	structure	a still's six
 driver-rig.adb	elsif P = 6 * S + 7 then Sg (K).Eye = 1	7	structure	the first focal length's term, after every still's six and the second eye's six (Driver.Rig's state)
 driver-rig.adb	elsif P = 6 * S + 7 then St.Log_F1	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	elsif P = 6 * S + 7 then St.Log_F1	7	structure	the first focal length's term, after every still's six and the second eye's six (Driver.Rig's state)
+driver-rig.adb	elsif Z.Eye = 1 then	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	exit when Lowered or else not Moved or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-rig.adb	exit when Lowered or else not Moved or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-rig.adb	exit when Lowered or else not Moves or else Lambda >= Real'Last / 2.0;	2.0	numerics	the damping stops short of a float's end: twice it would overflow to infinity (as Fixed.Refine)
 driver-rig.adb	for A in 1 .. 3 loop	3	structure	three dimensions
+driver-rig.adb	for A in 1 .. 8 loop	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
+driver-rig.adb	for A in 1 .. 8 loop	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
 driver-rig.adb	for B in 1 .. 3 loop	3	structure	three dimensions
+driver-rig.adb	for B in 1 .. 8 loop	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
+driver-rig.adb	for B in 1 .. 8 loop	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
 driver-rig.adb	for C in 1 .. 3 loop	3	structure	three dimensions
 driver-rig.adb	for I in 1 .. 2 * N loop	2	structure	two residuals a sighting, across and down
 driver-rig.adb	for I in 1 .. 2 * N loop	2	structure	two residuals a sighting, across and down
@@ -1250,6 +1281,7 @@ driver-rig.adb	for P in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's t
 driver-rig.adb	for P in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	for P in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	for P in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
+driver-rig.adb	for P in 2 .. Npts + 1 loop	2	structure	a counting sort: each list starts where the one before it ends
 driver-rig.adb	for Pass in 1 .. 2 loop	2	structure	a direction and its opposite
 driver-rig.adb	for Q in 1 .. 3 loop	3	structure	three dimensions
 driver-rig.adb	for Q in 1 .. 3 loop	3	structure	three dimensions
@@ -1257,19 +1289,27 @@ driver-rig.adb	for Q in 1 .. 3 loop	3	structure	three dimensions
 driver-rig.adb	for Q in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	for Q in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.adb	for Q in 1 .. 6 loop	6	structure	a pose's six numbers: a turn's three and a place's three
+driver-rig.adb	for Q in 2 .. S + 1 loop	2	structure	a counting sort: each list starts where the one before it ends
 driver-rig.adb	function At_Y (I, J : Positive) return Positive is ((J - 1) * 3 + I);	3	structure	Y's columns stacked: three entries a column
 driver-rig.adb	function Far (L : Lens) return Real is (2.0 * Sqrt (L.Cx ** 2 + L.Cy ** 2));	2.0	math	the picture's diagonal: twice the centre's distance from a corner
+driver-rig.adb	function Point_Of (P : Positive) return Place is (if Eye = 1 then First_Point (P) else Second_Point (P));	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-rig.adb	function Ray (L : Lens; P : Place) return Vec3 is ([(P.U - L.Cx) / L.Focal, (P.V - L.Cy) / L.Focal, 1.0]);	1.0	math	a ray with its depth one
 driver-rig.adb	if (P - 1) mod 6 < 3 then	3	structure	a still's turn: its first three numbers (Driver.Rig's state)
 driver-rig.adb	if (P - 1) mod 6 < 3 then	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
+driver-rig.adb	if (for all I in 1 .. 3 => (for all J in 1 .. 3 => Finite (Cov (I, J)))) then	3	structure	three dimensions
+driver-rig.adb	if (for all I in 1 .. 3 => (for all J in 1 .. 3 => Finite (Cov (I, J)))) then	3	structure	three dimensions
 driver-rig.adb	if B - A >= Log (Real'Last) / 2.0 then	2.0	numerics	the bracket stops short of a float's end: twice its width would overflow
-driver-rig.adb	if Count < 3 then	3	structure	three points: the fewest whose six residuals tell a turn's three numbers with as many left over
+driver-rig.adb	if Best_Count >= 2 then	2	structure	two stills at least: one still's two motions tell a frame only about its own turn's axis
+driver-rig.adb	if Both (Q) and then Miss_Of (Q, Y, T) <= 1.0 then	1.0	structure	a still agrees with a frame where its equations miss by no more than their own sizes: off by more, its motion is not the frame's at all
+driver-rig.adb	if Count < 3 or else (for some I in 1 .. 3 => (for some J in 1 .. 3 => not Finite (M (I, J)))) then	3	structure	three dimensions
+driver-rig.adb	if Count < 3 or else (for some I in 1 .. 3 => (for some J in 1 .. 3 => not Finite (M (I, J)))) then	3	structure	three dimensions
+driver-rig.adb	if Count < 3 or else (for some I in 1 .. 3 => (for some J in 1 .. 3 => not Finite (M (I, J)))) then	3	structure	three dimensions
 driver-rig.adb	if Count < 3 then	3	structure	three points: the fewest whose six residuals tell a turn's three numbers with as many left over
 driver-rig.adb	if P <= 6 * S then	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.adb	if Pd and then 2 * N > 6 then	2	structure	two residuals a sighting, across and down
 driver-rig.adb	if Pd and then 2 * N > 6 then	6	statistics	more residuals than a pose's six numbers: a covariance to scale
 driver-rig.adb	if Sg (K).Eye = 1 then	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
-driver-rig.adb	if Z.Eye = 1 then	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
+driver-rig.adb	new Real_Array (1 .. Natural'Max (1, Still_From (Q + 1) - Still_From (Q)));	1	structure	an array of at least one element
 driver-rig.adb	return 1.0;	1.0	statistics	the residuals' scale in the sigmas the answers state: no less than one, the answers' own
 driver-rig.adb	return Real'Max (1.0, Driver.Stats.Sigma_Of_Deviation (Driver.Stats.Median (A)));	1.0	statistics	the residuals' scale in the sigmas the answers state: no less than one, the answers' own
 driver-rig.adb	then (if (P - 1) mod 6 < 3 then St.Turn ((P - 1) / 6 + 1) ((P - 1) mod 6 + 1)	3	structure	a still's turn: its first three numbers (Driver.Rig's state)
@@ -1278,6 +1318,8 @@ driver-rig.adb	then (if (P - 1) mod 6 < 3 then St.Turn ((P - 1) / 6 + 1) ((P - 1
 driver-rig.adb	then (if (P - 1) mod 6 < 3 then St.Turn ((P - 1) / 6 + 1) ((P - 1) mod 6 + 1)	6	structure	a still's six numbers: the first eye's turn and place (Driver.Rig's state)
 driver-rig.ads	Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6) := [others => [others => 0.0]];	6	structure	a pose's six numbers: a turn's three and a place's three
 driver-rig.ads	Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6) := [others => [others => 0.0]];	6	structure	a pose's six numbers: a turn's three and a place's three
+driver-rig.ads	Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
+driver-rig.ads	Covariance : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
 driver-rig.ads	Eye : Positive := 1;	1	structure	indexes start at one
 driver-rig.ads	Point : Positive := 1;	1	structure	indexes start at one
 driver-rig.ads	S.Eye in 1 .. 2 and then S.Still <= Stills	2	structure	the two eyes (Driver.Rig.Sighting.Eye)
@@ -2225,6 +2267,7 @@ driver-robot-kinematics-base.adb	& "" & Driver.Log.Image (C.Scale, 2) & "" & C.K
 driver-robot-kinematics-base.adb	& (if Counted > 0 then Degrees (Driver.Stats.Median (Turns (1 .. Counted)), 3) else "")	3	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& (if Counted > 0 then Driver.Log.Image (Driver.Stats.Median (Steps (1 .. Counted)), 4) else "")	4	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& (if Moved_Pixels > 0 then Driver.Log.Image (Driver.Stats.Median (Pixels (1 .. Moved_Pixels)), 3) else "")	3	format	digits printed in a log line or a message
+driver-robot-kinematics-base.adb	& (if Moved_Pixels > 0 then Driver.Log.Image (Driver.Stats.Median (Sigmas_Px (1 .. Moved_Pixels)), 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& Degrees (Angle (C.Second_On_First.Rotation), 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& Degrees (C.Turn_Sigma, 3) & "" & Driver.Log.Image (C.Second_On_First.Translation (1), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& Degrees (C.Turn_Sigma, 3) & "" & Driver.Log.Image (C.Second_On_First.Translation (1), 3) & ""	3	format	digits printed in a log line or a message
@@ -2233,32 +2276,76 @@ driver-robot-kinematics-base.adb	& Driver.Log.Image (C.Second_Lens.Focal, 1) & "
 driver-robot-kinematics-base.adb	& Driver.Log.Image (C.Second_Lens.Focal, 1) & "" & Driver.Log.Image (C.Misfit, 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& Driver.Log.Image (C.Second_On_First.Translation (2), 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics-base.adb	& Driver.Log.Image (C.Second_On_First.Translation (3), 3)	3	format	digits printed in a log line or a message
+driver-robot-kinematics-base.adb	(((Var_U - Var_V) / 2.0) ** 2 + Cov_UV ** 2));	2.0	math	the larger eigenvalue of a two-by-two covariance
+driver-robot-kinematics-base.adb	((Real (M.Eyes (R.Body_Eye).Grid.Width) / 2.0, Real (M.Eyes (R.Body_Eye).Grid.Height) / 2.0));	2.0	math	the picture's middle: its principal point taken there
+driver-robot-kinematics-base.adb	((Real (M.Eyes (R.Body_Eye).Grid.Width) / 2.0, Real (M.Eyes (R.Body_Eye).Grid.Height) / 2.0));	2.0	math	the picture's middle: its principal point taken there
+driver-robot-kinematics-base.adb	((Rotation => Times (Exp ([D (D'First), D (D'First + 1), D (D'First + 2)]), P.Rotation),	2	structure	a pose's six terms: its turn's three, then its place's three
+driver-robot-kinematics-base.adb	((Var_U + Var_V) / 2.0	2.0	math	the larger eigenvalue of a two-by-two covariance
 driver-robot-kinematics-base.adb	(Driver.Log.Image (Radians * 180.0 / Ada.Numerics.Pi, Digits_After));	180.0	format	radians printed as degrees
+driver-robot-kinematics-base.adb	([for T in 1 .. 6 => (if T = Term then By else 0.0)]);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	(if T <= 3 then (Tu (T) - Td (T)) / 2.0	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	(if T <= 3 then (Tu (T) - Td (T)) / 2.0	3	structure	a pose's six terms: its turn's three, then its place's three
+driver-robot-kinematics-base.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
+driver-robot-kinematics-base.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
+driver-robot-kinematics-base.adb	Ada.Long_Float_Text_IO.Put (File, X, Fore => 1, Aft => Real'Digits + 1, Exp => 1);	1	format	a real printed to its last bit: one digit before the point and an exponent
+driver-robot-kinematics-base.adb	Bases, Eyes : array (1 .. 2 * Pose_Pairs) of Driver.Numerics.Rigid := [others => Identity];	2	structure	each term a sigma up and a sigma down: two poses a term
+driver-robot-kinematics-base.adb	Body_First : constant := 1;	1	structure	the shift's terms laid out one after another, from one
 driver-robot-kinematics-base.adb	Change (Index) := 1.0;	1.0	structure	each still its own unit change: none is a multiple of another, and every one is asked from the view's common motion
-driver-robot-kinematics-base.adb	Driver.Rig.Calibrate (Arm_Points, Body_Points, List (1 .. K), Count, Start, (Real (Wb) / 2.0, Real (Hb) / 2.0),	2.0	math	the picture's centre lies half its width or height from its edge
-driver-robot-kinematics-base.adb	Driver.Rig.Calibrate (Arm_Points, Body_Points, List (1 .. K), Count, Start, (Real (Wb) / 2.0, Real (Hb) / 2.0),	2.0	math	the picture's centre lies half its width or height from its edge
+driver-robot-kinematics-base.adb	Cu (Arm_Focal) := (Uu - Ud) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	Cu (Depth_Term) := (Uu - Ud) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	Cu (P) := (Uu - Ud) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	Cv (Arm_Focal) := (Vu - Vd) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	Cv (Depth_Term) := (Vu - Vd) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	Cv (P) := (Vu - Vd) / 2.0;	2.0	math	a central difference over two sigmas: the change per sigma
 driver-robot-kinematics-base.adb	Frames : constant Natural := Natural'Max (1, R.Aligned);	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);	2	statistics	a place's two coordinates, tested together
+driver-robot-kinematics-base.adb	Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (6);	6	statistics	a pose's six terms, tested together
+driver-robot-kinematics-base.adb	Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	Lf : Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
 driver-robot-kinematics-base.adb	List (K) := (Eye => 1, Point => I + 1, Still => Still, U => S.To_U (I), V => S.To_V (I),	1	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
 driver-robot-kinematics-base.adb	List (K) := (Eye => 2, Point => J + 1, Still => Still, U => Sb.To_U (J), V => Sb.To_V (J),	2	structure	the first eye or the second (Driver.Rig.Sighting.Eye)
-driver-robot-kinematics-base.adb	List : Driver.Rig.Sighting_Array (1 .. Natural'Max (1, Sightings));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	List : Driver.Rig.Sighting_Array (1 .. Natural'Max (1, Total));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Moved_Still : array (1 .. Natural'Max (1, Natural (Matches.Length))) of Boolean := [others => False];	1	structure	an array of at least one element
 driver-robot-kinematics-base.adb	Nearest : Positive := 1;	1	structure	the reference is the first keyframe; indexes start at one
 driver-robot-kinematics-base.adb	Pixels : Real_Access := new Real_Array (1 .. Natural'Max (1, R.Aligned * Natural'Max (1, Arm_N)));	1	structure	an array of at least one element
 driver-robot-kinematics-base.adb	Pixels : Real_Access := new Real_Array (1 .. Natural'Max (1, R.Aligned * Natural'Max (1, Arm_N)));	1	structure	an array of at least one element
 driver-robot-kinematics-base.adb	Placed : Real_Access := new Real_Array (1 .. Natural'Max (1, Arm_N));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Pose_Terms : constant := 6;	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
 driver-robot-kinematics-base.adb	R.Body_Aligned := 1;	1	structure	the reference is the first keyframe; indexes start at one
 driver-robot-kinematics-base.adb	R.Rig_Arm_Inverse.Append (if C.First_Placed (I) > 0 then C.First_Inverse (I) else -1.0);	1.0	structure	a point no still saw: no inverse depth, marked below nought
 driver-robot-kinematics-base.adb	R.Rig_Body_Inverse.Append (if C.Second_Placed (J) > 0 then C.Second_Inverse (J) else -1.0);	1.0	structure	a point no still saw: no inverse depth, marked below nought
 driver-robot-kinematics-base.adb	Rays : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. 4);	4	structure	the unknowns: the second eye's place's three and the scale between the eyes' steps
+driver-robot-kinematics-base.adb	Rhs : constant Driver.Numerics.Arrays.Real_Vector (1 .. 6) := [for T in 1 .. 6 => D (D'First + T - 1)];	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	Rhs : constant Driver.Numerics.Arrays.Real_Vector (1 .. 6) := [for T in 1 .. 6 => D (D'First + T - 1)];	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	Shift.Moved := (if Length < Real'Last then Shift.Told > 1.0	1.0	statistics	the body eye's motion over the six-dimensional gate's threshold at Z: beyond it, significant
+driver-robot-kinematics-base.adb	Shift.Shift_U.Append (0.0);	0.0	math	no shift, nothing added to the sighting's variance: the base held still
 driver-robot-kinematics-base.adb	Shift.Shift_U.Append (0.0);	0.0	structure	no shift where the point is not seen ahead by both poses
+driver-robot-kinematics-base.adb	Shift.Shift_V.Append (0.0);	0.0	math	no shift, nothing added to the sighting's variance: the base held still
 driver-robot-kinematics-base.adb	Shift.Shift_V.Append (0.0);	0.0	structure	no shift where the point is not seen ahead by both poses
+driver-robot-kinematics-base.adb	Shift.Variance.Append (0.0);	0.0	math	no shift, nothing added to the sighting's variance: the base held still
+driver-robot-kinematics-base.adb	Shifts, Sigmas : Real_Access := new Real_Array (1 .. Natural'Max (1, N));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Sigmas_Px : Real_Access := new Real_Array (1 .. Natural'Max (1, R.Aligned * Natural'Max (1, Arm_N)));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Sigmas_Px : Real_Access := new Real_Array (1 .. Natural'Max (1, R.Aligned * Natural'Max (1, Arm_N)));	1	structure	an array of at least one element
+driver-robot-kinematics-base.adb	Translation => [for A in 1 .. 3 => P.Translation (A) + D (D'First + 2 + A)]));	2	structure	a pose's six terms: its turn's three, then its place's three
+driver-robot-kinematics-base.adb	Translation => [for A in 1 .. 3 => P.Translation (A) + D (D'First + 2 + A)]));	3	structure	three dimensions
+driver-robot-kinematics-base.adb	[for T in 1 .. 6 =>	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
 driver-robot-kinematics-base.adb	else (Focal => 0.0, Cx => Real (W) / 2.0, Cy => Real (H) / 2.0));	2.0	math	the picture's centre lies half its width or height from its edge
 driver-robot-kinematics-base.adb	else (Focal => 0.0, Cx => Real (W) / 2.0, Cy => Real (H) / 2.0));	2.0	math	the picture's centre lies half its width or height from its edge
+driver-robot-kinematics-base.adb	else (Up.Pose.Translation (T - 3) - Down.Pose.Translation (T - 3)) / 2.0)];	2.0	math	a central difference over two sigmas: the change per sigma
+driver-robot-kinematics-base.adb	else (Up.Pose.Translation (T - 3) - Down.Pose.Translation (T - 3)) / 2.0)];	3	structure	a pose's six terms: its turn's three, then its place's three
+driver-robot-kinematics-base.adb	else (Up.Pose.Translation (T - 3) - Down.Pose.Translation (T - 3)) / 2.0)];	3	structure	a pose's six terms: its turn's three, then its place's three
 driver-robot-kinematics-base.adb	for F in 2 .. R.Aligned loop	2	structure	the keyframes after the reference
 driver-robot-kinematics-base.adb	for F in 2 .. R.Aligned loop	2	structure	the keyframes after the reference
 driver-robot-kinematics-base.adb	for F in 2 .. R.Aligned loop	2	structure	the keyframes after the reference
 driver-robot-kinematics-base.adb	for F in 2 .. R.Aligned loop	2	structure	the keyframes after the reference
+driver-robot-kinematics-base.adb	for T in 1 .. 6 loop	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	function Down (T : Positive) return Positive is (2 * T);	2	structure	each term a sigma up and a sigma down: two poses a term
+driver-robot-kinematics-base.adb	function Up (T : Positive) return Positive is (2 * T - 1);	2	structure	each term a sigma up and a sigma down: two poses a term
 driver-robot-kinematics-base.adb	if Count >= 6 then	6	structure	six points: three are the fewest that place an eye (its six numbers), three more leave as many residuals over to judge it by
-driver-robot-kinematics-base.adb	if not R.Rig_Ok or else R.Aligned < 2 or else Natural (R.Rig_Arm_Inverse.Length) /= Arm_N then	2	structure	the keyframes after the reference
+driver-robot-kinematics-base.adb	if not R.Rig_Ok or else R.Aligned < 2 or else Natural (R.Rig_Arm_Inverse.Length) /= Arm_N	2	structure	a keyframe after the reference: two aligned at least
+driver-robot-kinematics-base.adb	subtype Six_By_Six is Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	subtype Six_By_Six is Driver.Numerics.Arrays.Real_Matrix (1 .. 6, 1 .. 6);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
+driver-robot-kinematics-base.adb	type Six_List is array (1 .. Frames) of Real_Array (1 .. 6);	6	structure	a pose's six terms: its turn's three and its place's three (Driver.Rig.Locate's covariance)
 driver-robot-kinematics-errors.adb	(if Picture'Length = 0 then 1 else Picture (I));	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-errors.adb	+ C (Across_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-errors.adb	+ C (Both_Down) * Held (2 * S, Q);	2	structure	two residuals per sighting, across and down
@@ -3774,6 +3861,7 @@ driver-robot-kinematics.adb	& (if Channels.Noise (M, G, C) < Real'Last then Driv
 driver-robot-kinematics.adb	& (if Known (Seen) then Driver.Log.Image (Seen.Value, 6) else "") & ""	6	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Known (V) then Driver.Log.Image (V.Value, 2) else "") & "");	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& (if Report.Focal_Sigma < Real'Last then "" & Driver.Log.Image (Report.Focal_Sigma, 2)	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& (if Without_Fitted then Driver.Log.Image (Without_Median, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Ada.Numerics.Long_Elementary_Functions.Sqrt (Real'Max (G.Cov.UU, G.Cov.VV)), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Common.Shift_U, 1) & "" & Driver.Log.Image (Common.Shift_V, 1) & ""	1	format	digits printed in a log line or a message
@@ -3809,6 +3897,7 @@ driver-robot-kinematics.adb	& Driver.Log.Image (Slack (2 * C), 4));	4	format	dig
 driver-robot-kinematics.adb	& Driver.Log.Image (Sqrt (Res_Sq (F) / Real (Res_N (F))), 2)	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Typical * Most_Turn, 2) & ""	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Driver.Log.Image (Typical, 2) & ""	2	format	digits printed in a log line or a message
+driver-robot-kinematics.adb	& Driver.Log.Image (With_Shifts.Median_Px, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Natural'Image (Driver.Memory.Resident_Kilobytes / 1024) & "");	1024	format	kilobytes in a megabyte, for the log
 driver-robot-kinematics.adb	& Report.Used'Image & "" & Driver.Log.Image (Report.Median_Px, 3)	3	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	& Rss_After'Image & "" & Natural'Image (Driver.Memory.Resident_Kilobytes / 1024)	1024	format	kilobytes in a megabyte, for the log
@@ -4042,6 +4131,7 @@ driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in on
 driver-robot-kinematics.adb	if Slack'Length = 2 * N then	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
+driver-robot-kinematics.adb	or else Natural (R.Matches.Length) >= 2 * R.Fitted_Keyframes)	2	statistics	a fit of twice the keyframes halves the variance of what the last one told
 driver-robot-kinematics.adb	return "" & Driver.Log.Image (Second, 2) & "";	2	format	digits printed in a log line or a message
 driver-robot-kinematics.adb	return (if Band < Real'Last then Real'Max (Step, 2.0 * Band) else Step);	2.0	math	two landings of one asked pose, each within the dead band of it
 driver-robot-kinematics.adb	return Smaller > 2.0 * Count * Pixel + Driver.Conventions.Z * Sqrt (8.0 * Count) * Pixel;	2.0	statistics	a difference of two pixels has twice one pixel's variance
@@ -4106,6 +4196,7 @@ driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image 
 driver-robot-lockin.adb	& Driver.Log.Image (Typical, 4) & "" & Driver.Log.Image (Sum_Energy, 4)	4	format	digits printed in a log line or a message
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	2.0	math	the variance of a chi-square statistic is twice its degrees of freedom
 driver-robot-lockin.adb	(2.0 * Real (C.Freedom) * C.Variance ** 2 + 4.0 * C.Variance * Typical);	4.0	math	the variance of a non-central chi-square statistic adds four times its non-centrality
+driver-robot-lockin.adb	(Alone_Far, Alone_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))	2	statistics	Laplace's rule of succession: one more than seen over two more than counted
 driver-robot-lockin.adb	(B - Lag >= 1 and then B - Lag < M.Beats and then B < Natural (S.Measured.Length) and then S.Measured (B));	1	structure	the first beat has none before it
 driver-robot-lockin.adb	(Pu ** 2 / Wu + Pv ** 2 / Wv, 2));	2	statistics	two degrees of freedom: one pooled gain per picture direction
 driver-robot-lockin.adb	(Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))	2	statistics	Laplace's rule of succession: one more than seen over two more than counted
@@ -4250,7 +4341,6 @@ driver-robot-motion.adb	Prior : Real := 1.0;	1.0	math	no evidence of the lock-in
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	0.0	structure	from zero: the first step is the smallest the reading can tell
 driver-robot-motion.adb	Probe_Together (M, [1 => (Group => G, Channel => Channel)], Direction, 0.0, Report);	1	structure	one channel
 driver-robot-motion.adb	Rarest : Real := 1.0;	1.0	math	the largest a verdict's share of the rest can be: before any verdict, none rarer than certain
-driver-robot-motion.adb	Ratio : Real := 1.0;	1.0	math	no reach measured: the push as it is
 driver-robot-motion.adb	Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);	2.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
 driver-robot-motion.adb	Reach ((A_Of + B_Of) / 2.0, B_Of, Q, Depth + 1);	2.0	structure	the path halved again where the joints' straight line bows from it
 driver-robot-motion.adb	Reach (0.0, 1.0, Q, 0);	0.0	structure	the path from its start (0) to its goal (1), halved where it cannot be closed
@@ -4305,6 +4395,7 @@ driver-robot-motion.adb	if Known (D) and then D.Value > 0.0 and then D.Value < 1
 driver-robot-motion.adb	if N >= 2 and then N - 1 > H then	2	structure	a slope needs two points
 driver-robot-motion.adb	or else (Anchored and then Driver.Robot.Stillness.Eye_Away_Run (M, E) >= 2));	2	statistics	a drift away from the anchor lasts when two beats in a row agree on it, as a level does in the stillness watch (the agreed settling rule)
 driver-robot-motion.adb	return (if Executed < Real'Last then Counted + 2.0 * Executed else Counted);	2.0	math	the landing and the reference it is counted from, each within the dead band of where it was sent
+driver-robot-motion.adb	return (if not Beyond and then Most > 0.0 and then Reach > Most then Reach / Most else 1.0);	1.0	math	no scale: the push already reaches, or nothing moved to scale by
 driver-robot-motion.adb	then "" & Driver.Log.Image (E.Delivered.Value, 3) & ""	3	format	digits printed in a log line or a message
 driver-robot-motion.adb	then Real'Max (Driver.Conventions.Z * Sqrt (2.0) * Channels.Noise (M, G, I + 1),	2.0	statistics	the difference of two readings of a channel has the root of two of its noise
 driver-robot-motion.ads	Channel : Positive := 1;	1	structure	channels are numbered from one
@@ -4467,6 +4558,7 @@ driver-robot.adb	Eyes : Channel_Flags (1 .. Count - 3);	3	format	the words of a 
 driver-robot.adb	Flags (K) := Word (K + 3) = "";	"1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Flags (K) := Word (K + 3) = "";	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	Flags : Channel_Flags (1 .. Natural'Max (0, Count - 3));	3	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
+driver-robot.adb	Kinematics.Ask_Fit (M, Arm_Id'Value (Word (2)));	2	format	a note's words: its name, then its arm
 driver-robot.adb	Kinematics.Base.Begin_Walk (M, Arm_Id'Value (Word (2)));	2	structure	the note's second word: the arm
 driver-robot.adb	Kinematics.Base.Take_Still (M, Arm_Id'Value (Word (2)));	2	structure	the note's second word: the arm
 driver-robot.adb	Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
@@ -4496,11 +4588,13 @@ driver-robot.adb	and then (Past >= 0.0 or else not Driver.Uncertain.Significant 
 driver-robot.adb	else "" & Driver.Log.Image (Largest (M.Eyes (E).Rest_Factors), 1) & "")	1	format	digits printed in a log line or a message
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	format	digits printed in a log line or a message
 driver-robot.adb	else Driver.Log.Image (Sqrt (S.Luma_Variance.Element (Natural (S.Luma_Variance.Length) / 2)), 2)	2	structure	the middle cell of the grid, for the log line
+driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	a note's words: its name, then its arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	structure	the note's words: what, then the arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	structure	the note's words: what, then the arm
+driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	a note's words: its name, then its arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
@@ -4527,6 +4621,8 @@ driver-robot.ads	Channel : Positive := 1;	1	structure	a stop record is a channel
 driver-robot.ads	Far_Chance : Real := 1.0;	1.0	math	no evidence yet: a chance of one
 driver-robot.ads	Frame : Positive := 1;	1	structure	keyframes are numbered from one
 driver-robot.ads	Rest_Factor : Real := 1.0;	1.0	math	before it is measured, a cell rests at its floor
+driver-robot.ads	Rig_Cov : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
+driver-robot.ads	Rig_Cov : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];	8	structure	the walk's terms: the second eye's frame's six and the two focal lengths (Driver.Rig.Calibration.Covariance)
 driver-robot.ads	Scale : Real := 1.0;	1.0	math	the identity's scale: the first arm is the world as it is
 driver-round_trips.adb	A : constant Real := (D - K * P.S2) / (2.0 * P.S2 ** 2);	2.0	math	the derivative of the log of a Gaussian density by its variance
 driver-round_trips.adb	All_Right : Point := (S2 => 0.0, Pi => 1.0);	1.0	math	every error taken right: a share of the whole

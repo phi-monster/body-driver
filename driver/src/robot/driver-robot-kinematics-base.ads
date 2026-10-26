@@ -17,6 +17,8 @@
 --  seen at the keyframe (Locate on its points) less that motion is where a still base would have put it, and each
 --  sighting is shifted by the difference of where the two poses see its point.
 
+with Driver.Rig;
+
 package Driver.Robot.Kinematics.Base is
 
    function Body_Eye_Of (M : Model; A : Arm_Id) return Eye_Id'Base;
@@ -42,12 +44,47 @@ package Driver.Robot.Kinematics.Base is
    --  keyframe is taken (again once the arm is fitted, where they told nothing before it), and the body eye's picture
    --  at every keyframe aligned so far.
 
+   procedure Align_Stills
+     (Who            : String;
+      Arm_Reference  : Driver.Images.Image;
+      Body_Reference : Driver.Images.Image;
+      Arm_U, Arm_V   : Real_Vectors.Vector;
+      Body_U, Body_V : Real_Vectors.Vector;
+      Arm_Still      : Flag_Vectors.Vector;
+      Arm_Riding     : Flag_Vectors.Vector;
+      Stills         : Body_Still_Vectors.Vector;
+      Matches, Body_Matches : out Match_Set_Vectors.Vector);
+   --  The walk's stills aligned to both eyes' reference pictures, a match set per still and eye (the view's common
+   --  motion asks every still: Keyframes' new direction), the points that stood with an eye as its view moved left out
+   --  (Stood_And_Moved), a line logged per still under Who. Arm_Still: per arm point, one that stands in the arm's eye
+   --  whatever moves (Arm_Evidence.Still); Arm_Riding: one that rides with it (its hand), left out of the view's
+   --  common motion.
+
+   procedure Calibrate_Stills
+     (Arm_U, Arm_V, Body_U, Body_V : Real_Vectors.Vector;
+      Matches, Body_Matches : Match_Set_Vectors.Vector;
+      Start         : Driver.Rig.Lens;
+      Body_Centre   : Driver.Rig.Place;
+      Result        : out Driver.Rig.Calibration;
+      Sightings     : out Natural);
+   --  The aligned stills adjusted together (Driver.Rig.Calibrate, Result's discriminants the stills and both eyes'
+   --  points): Start the arm eye's lens to begin from (its focal length nought: none), Body_Centre the body eye's
+   --  principal point. Sightings: how many of the stills' points were found; with none Result is not Ok, unadjusted.
+
    procedure Shift_Sightings (M : Model; R : in out Arm_Evidence);
    --  Every aligned keyframe's base motion and the shift of its sightings (Arm_Evidence.Base), where the walk was
-   --  calibrated; none where it was not.
+   --  calibrated; none where it was not, and none at a keyframe where the body eye's place differs from the
+   --  reference's by no more than the six-dimensional gate at Z tells from none in its own covariance (the base held
+   --  still there). Each shift carries its variance (Shift_Variance).
 
    function Shift_U (R : Arm_Evidence; Frame : Positive; Point : Natural) return Real;
    function Shift_V (R : Arm_Evidence; Frame : Positive; Point : Natural) return Real;
    --  What is added to keyframe Frame's answer of the query point Point (from 0) before the fit; nought where unknown.
+
+   function Shift_Variance (R : Arm_Evidence; Frame : Positive; Point : Natural) return Real;
+   --  What the shift adds to that answer's variance, per axis (px squared): how far the walk's frame and lenses, both
+   --  eyes' places at the keyframe and the point's depth are known, carried through it (first order, each term a sigma
+   --  either way); nought where nothing is shifted, Real'Last where the shift is not known (some pose a sigma off sees
+   --  the point behind the eye): no fit takes that answer.
 
 end Driver.Robot.Kinematics.Base;

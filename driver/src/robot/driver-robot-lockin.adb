@@ -1355,6 +1355,9 @@ package body Driver.Robot.Lockin is
                   if M.Groups (G).Commandable then
                      declare
                         Push_Beats, Push_Far : Natural := 0;
+                        --  The pushed beats at which no other group was pushed or moved: a picture beyond reach at one
+                        --  of them is the group's alone.
+                        Alone_Beats, Alone_Far : Natural := 0;
                         Index : constant Positive := (Natural (G) - 1) * Eyes + Natural (E);
                         Effect : Eye_Effect := M.Graph.Effects (Index);
                      begin
@@ -1364,21 +1367,49 @@ package body Driver.Robot.Lockin is
                               if not Reached (B + 1) then
                                  Push_Far := Push_Far + 1;
                               end if;
+                              if (for all O in M.Groups.First_Index .. M.Groups.Last_Index =>
+                                    O = G or else not M.Groups (O).Commandable
+                                    or else not (Channels.Pushed (M, O, B - Lag) or else Group_Moved (O, B - Lag)))
+                              then
+                                 Alone_Beats := Alone_Beats + 1;
+                                 if not Reached (B + 1) then
+                                    Alone_Far := Alone_Far + 1;
+                                 end if;
+                              end if;
                            end if;
                         end loop;
                         Effect.Far_Chance :=
                           (if Push_Beats > 0
                            then Regression.Count_Tail (Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))
                            else 1.0);
-                        M.Graph.Effects.Replace_Element (Index, Effect);
                         if Regression.Count_Significant
                              (Push_Far, Push_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))
                         then
                            Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
-                                            & " moved the picture beyond the flow's reach at" & Push_Far'Image & " of its"
-                                            & Push_Beats'Image & " pushed beats, rest at" & Rest_Far'Image & " of"
-                                            & Rest_Beats'Image);
+                                            & " moved the picture beyond the flow's reach at" & Push_Far'Image
+                                            & " of its" & Push_Beats'Image & " pushed beats," & Alone_Far'Image
+                                            & " of the" & Alone_Beats'Image & " no other group's push shared, rest at"
+                                            & Rest_Far'Image & " of" & Rest_Beats'Image);
                         end if;
+                        --  A picture the group's own pushes took beyond the flow's reach (a significant majority of
+                        --  its textured cells too far to resolve) at significantly more of its beats than rest does,
+                        --  beats no other group's push or motion shared, was moved whole by them, its cells too far to
+                        --  answer one by one: what moves a part of a view leaves the rest standing. Judged by its cells
+                        --  within reach alone, Stretch's base, its pushes taking its head's view beyond reach at 10 of
+                        --  10 beats, moved 10 and 12 cells of 255 in its two eyes, a patch, and was a closer (round
+                        --  n15s2, seeds 1a and 1b, 10-27); the G1's head eye, beyond reach at 39 of the walk's 49
+                        --  pushed beats, was moved by it not at all. Counted at every pushed beat, the synthetic body's
+                        --  arms, pushed together too, each moved the other's eye whole (robot.roles).
+                        if Effect.Verdict /= Whole
+                          and then Regression.Count_Significant
+                                     (Alone_Far, Alone_Beats, Real (Rest_Far + 1) / Real (Rest_Beats + 2))
+                        then
+                           Effect.Verdict := Whole;
+                           Effect.Could_Be_Whole := True;
+                           Driver.Log.Line (Driver.Log.Robot, "lock-in: eye" & E'Image & ": group" & G'Image
+                                            & " moved it whole, beyond the flow's reach by its own pushes");
+                        end if;
+                        M.Graph.Effects.Replace_Element (Index, Effect);
                      end;
                   end if;
                end loop;

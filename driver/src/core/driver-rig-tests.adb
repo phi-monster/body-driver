@@ -60,6 +60,12 @@ package body Driver.Rig.Tests is
       N1, N2 : Natural := 0;
       Sightings : Sighting_Array (1 .. 4000);
       Ns : Natural := 0;
+      --  The same, but the first eye's sightings of still Bad matched as if the body had stepped the other way: a
+      --  field one motion of that eye explains, the wrong one (the matcher locked onto another of the floor's squares,
+      --  as the G1's wrist eye did at its longest walk's first still, walkdump.py, 10-27).
+      Bad : constant := 3;
+      Corrupt : Sighting_Array (1 .. 4000);
+      Nc : Natural := 0;
       --  Where a point of an eye's reference picture lies on the floor (world).
       function On_Floor (E : Rigid; L : Lens; P : Place; X : out Vec3) return Boolean is
          D : constant Vec3 := Times (E.Rotation, Ray (L, P));
@@ -114,6 +120,26 @@ package body Driver.Rig.Tests is
                                     Sightings (Ns) := (Eye => Eye, Point => (if Eye = 1 then N1 else N2), Still => Q,
                                                        U => P.U + 0.1 * Gaussian, V => P.V + 0.1 * Gaussian,
                                                        Sigma => 0.1);
+                                    if Eye /= 1 or else Q /= Bad then
+                                       Nc := Nc + 1;
+                                       Corrupt (Nc) := Sightings (Ns);
+                                    end if;
+                                 end if;
+                                 if Eye = 1 and then Q = Bad then
+                                    declare
+                                       Wrong : constant Rigid :=
+                                         (Rotation => Bodies (Q).Rotation, Translation => -Bodies (Q).Translation) * E;
+                                       Pw : Place;
+                                       Aw : Boolean;
+                                    begin
+                                       Project (L, Transposed_Times (Wrong.Rotation, X - Wrong.Translation), Pw, Aw);
+                                       if Aw and then Pw.U in 0.0 .. Width and then Pw.V in 0.0 .. Height then
+                                          Nc := Nc + 1;
+                                          Corrupt (Nc) := (Eye => 1, Point => N1, Still => Q,
+                                                           U => Pw.U + 0.1 * Gaussian, V => Pw.V + 0.1 * Gaussian,
+                                                           Sigma => 0.1);
+                                       end if;
+                                    end;
                                  end if;
                               end;
                            end loop;
@@ -156,6 +182,22 @@ package body Driver.Rig.Tests is
                 "with no focal length to start from, the second eye's turn on the first is"
                 & Real'Image (Degrees (Angle (Times (Transposed (True_X.Rotation), C.Second_On_First.Rotation))))
                 & " degrees off, the lenses" & C.First_Lens.Focal'Image & C.Second_Lens.Focal'Image);
+      end;
+      --  And with one still's first-eye matches the wrong motion's: that still left out, the frame as before.
+      declare
+         C : Calibration (Stills, N1, N2);
+         True_X : constant Rigid := Inverse (Eye1) * Eye2;
+      begin
+         Calibrate (Points1 (1 .. N1), Points2 (1 .. N2), Corrupt (1 .. Nc), Stills,
+                    (Focal => 1.2 * L1.Focal, Cx => L1.Cx, Cy => L1.Cy), (L2.Cx, L2.Cy), C);
+         Check (C.Ok and then Degrees (Angle (Times (Transposed (True_X.Rotation), C.Second_On_First.Rotation))) < 0.5
+                and then abs (C.First_Lens.Focal / L1.Focal - 1.0) < 0.02
+                and then abs (C.Second_Lens.Focal / L2.Focal - 1.0) < 0.02,
+                "with still" & Bad'Image & "'s first-eye matches the body stepped the other way, the second eye's turn"
+                & " on the first is"
+                & Real'Image (Degrees (Angle (Times (Transposed (True_X.Rotation), C.Second_On_First.Rotation))))
+                & " degrees off, the lenses" & C.First_Lens.Focal'Image & C.Second_Lens.Focal'Image & ", Ok "
+                & C.Ok'Image);
       end;
    end Walk_Calibrates;
 
@@ -203,7 +245,8 @@ package body Driver.Rig.Tests is
    procedure Register is
    begin
       Driver.Tests.Register ("rig.calibrate", "a walk's stills of two eyes carried as one do not tell where the second "
-                             & "sits on the first within half a degree, or their lenses within 2 %",
+                             & "sits on the first within half a degree, or their lenses within 2 %, with a start or "
+                             & "none, or with one still's matches of the first eye those of a wrong motion",
                              Walk_Calibrates'Access);
       Driver.Tests.Register ("rig.locate", "an eye is not placed from points whose places it sees",
                              Locate_Places'Access);

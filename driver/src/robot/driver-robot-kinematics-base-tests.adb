@@ -40,14 +40,19 @@ package body Driver.Robot.Kinematics.Base.Tests is
    --  each, the walk's frame of the body's eye on the arm's turned by Turn_Error degrees: how far, at most (Worst) and
    --  in the median (Middle), each sighting's shift stands from the shift that takes a still base's place.
    procedure Shift_Errors
-     (Noise, Depth_Error, Turn_Error : Real; Worst, Middle, Lean_Size : out Real; Checked : out Natural);
-   --  Lean_Size: the median of how far the base's lean moved the sightings, the shift's own size.
+     (Noise, Depth_Error, Turn_Error : Real; Worst, Middle, Lean_Size : out Real; Checked : out Natural;
+      Within_Z : out Real; Moved : out Boolean; Lean_Factor : Real := 1.0);
+   --  Lean_Size: the median of how far the base's lean moved the sightings, the shift's own size. Within_Z: the share
+   --  of the sightings whose shift lies within Z of the sigma it states (Shift_Variance) from the shift that takes a
+   --  still base's place, the walk's frame's covariance its turn's error; Moved: the keyframe's base was judged to
+   --  have moved. Lean_Factor: the lean's size, nought for a base that held still.
 
    procedure Leaned_Base_Taken_Out is
-      Worst, Middle, Lean : Real;
+      Worst, Middle, Lean, Within : Real;
       Checked : Natural;
+      Moved   : Boolean;
    begin
-      Shift_Errors (0.0, 0.0, 0.0, Worst, Middle, Lean, Checked);
+      Shift_Errors (0.0, 0.0, 0.0, Worst, Middle, Lean, Checked, Within, Moved);
       Check (Checked > 20, "only" & Checked'Image & " sightings to judge");
       Check (Worst < 1.0e-3, "a shifted sighting stands" & Worst'Image & " px from where a still base puts it");
       --  As the walk and the aligner leave them: a fifth of a pixel of noise on every answer, the inverse depths 5 %
@@ -55,14 +60,24 @@ package body Driver.Robot.Kinematics.Base.Tests is
       --  The lean taken out to a twentieth of itself in the median, Z twentieths at most: the hall's G1's whole lean
       --  put its arms' focal lengths 16 to 18 % long (10-26), so what a twentieth of it leaves stays within a
       --  ninth of step 2's 2 %.
-      Shift_Errors (0.2, 0.05, 0.5, Worst, Middle, Lean, Checked);
+      Shift_Errors (0.2, 0.05, 0.5, Worst, Middle, Lean, Checked, Within, Moved);
       Check (Middle < Lean / 20.0 and then Worst < Driver.Conventions.Z * Lean / 20.0,
              "with the answers' noise, the walk's depths and turn off, a shift errs by" & Middle'Image
              & " px in the median and" & Worst'Image & " at most, of a lean of" & Lean'Image & " px");
+      --  And says how far: within Z of the sigma it states, as a Gaussian two-dimensional error is but at the
+      --  e ** (-Z ** 2 / 2) of them, here at the most a tenth.
+      Check (Within >= 0.9, "the shifts' errors lie within Z of the sigmas they state at" & Within'Image
+             & " of the sightings");
+      --  A walk that told nothing (its frame half a turn off, stated as known) under a base that held still: no
+      --  sighting moved (RB-Y1, round n15s2, 10-27: such a walk moved its arm's sightings a median 98 px).
+      Shift_Errors (0.2, 0.05, 90.0, Worst, Middle, Lean, Checked, Within, Moved, Lean_Factor => 0.0);
+      Check (not Moved and then Worst < Driver.Conventions.Z * 0.2,
+             "a still base under a walk 90 degrees off moved its sightings by" & Worst'Image & " px at most");
    end Leaned_Base_Taken_Out;
 
    procedure Shift_Errors
-     (Noise, Depth_Error, Turn_Error : Real; Worst, Middle, Lean_Size : out Real; Checked : out Natural) is
+     (Noise, Depth_Error, Turn_Error : Real; Worst, Middle, Lean_Size : out Real; Checked : out Natural;
+      Within_Z : out Real; Moved : out Boolean; Lean_Factor : Real := 1.0) is
       Width  : constant Real := 320.0;
       Height : constant Real := 240.0;
       L_Arm  : constant Driver.Rig.Lens := (Focal => 157.0, Cx => Width / 2.0, Cy => Height / 2.0);
@@ -86,7 +101,7 @@ package body Driver.Robot.Kinematics.Base.Tests is
       Arm_Move : constant Rigid := (Rotation => Exp ([Radians (4.0), Radians (12.0), 0.0]),
                                     Translation => [0.15, -0.02, 0.05]);
       Pivot    : constant Vec3 := Transposed_Times (World_Arm.Rotation, [0.0, 0.0, -0.9]);
-      Lean_R   : constant Mat3 := Exp ([Radians (1.5), 0.0, Radians (0.5)]);
+      Lean_R   : constant Mat3 := Exp ([Lean_Factor * Radians (1.5), 0.0, Lean_Factor * Radians (0.5)]);
       Lean     : constant Rigid := (Rotation => Lean_R, Translation => Minus (Pivot, Times (Lean_R, Pivot)));
       E_Still  : constant Rigid := Arm_Move;
       E_Seen   : constant Rigid := Lean * Arm_Move;
@@ -94,6 +109,7 @@ package body Driver.Robot.Kinematics.Base.Tests is
       R        : Arm_Evidence;
       G        : Generator;
       Errors, Leans : Real_Vectors.Vector;
+      Inside : Natural := 0;   --  the sightings whose shift lies within Z of its stated sigma from the truth's
       --  The world point a reference pixel of an eye (in the arm's eye's reference frame, Frame) looks at on the floor.
       function On_Floor (Frame : Rigid; L : Driver.Rig.Lens; P : Driver.Rig.Place; Inv : out Real) return Boolean is
          Ray   : constant Vec3 := Driver.Rig.Ray (L, P);
@@ -163,6 +179,8 @@ package body Driver.Robot.Kinematics.Base.Tests is
       Middle := 0.0;
       Lean_Size := 0.0;
       Checked := 0;
+      Within_Z := 0.0;
+      Moved := False;
       Add_Points (Arm => True);
       Add_Points (Arm => False);
       R.Rig_Ok := True;
@@ -194,11 +212,16 @@ package body Driver.Robot.Kinematics.Base.Tests is
             end loop;
             R.Rig_X := (Rotation => Times (Exp (Scaled (Radians (Turn_Error), Unit ([0.3, -0.8, 0.5]))), X.Rotation),
                         Translation => X.Translation);
+            --  The walk's frame's covariance its turn's error on each term of its turn.
+            for T in 1 .. 3 loop
+               R.Rig_Cov (T, T) := Radians (Turn_Error) ** 2;
+            end loop;
             Shift_Sightings (M, R);
             R.Rig_Arm_Inverse := True_Inverse;
          end;
          Check (Natural (R.Base.Length) = 2 and then R.Base (2).Known, "the keyframe's base motion is not known");
          if Natural (R.Base.Length) = 2 and then R.Base (2).Known then
+            Moved := R.Base (2).Moved;
             for I in 0 .. Natural (R.Query_U.Length) - 1 loop
                if Arm_Set.Found (I) then
                   declare
@@ -217,6 +240,9 @@ package body Driver.Robot.Kinematics.Base.Tests is
                         begin
                            Worst := Real'Max (Worst, E);
                            Errors.Append (E);
+                           if E <= Driver.Conventions.Z * Sqrt (Shift_Variance (R, 2, I)) then
+                              Inside := Inside + 1;
+                           end if;
                            Leans.Append (Sqrt ((P.U - Q.U) ** 2 + (P.V - Q.V) ** 2));
                            Checked := Checked + 1;
                         end;
@@ -236,6 +262,7 @@ package body Driver.Robot.Kinematics.Base.Tests is
             end loop;
             Middle := Driver.Stats.Median (A);
             Lean_Size := Driver.Stats.Median (B);
+            Within_Z := Real (Inside) / Real (A'Length);
          end;
       end if;
    end Shift_Errors;
@@ -243,7 +270,8 @@ package body Driver.Robot.Kinematics.Base.Tests is
    procedure Register is
    begin
       Driver.Tests.Register ("robot.base.shift", "a keyframe's sightings are not taken where a base that held still "
-                             & "would have put them, from its body's eye's view of the base's lean",
+                             & "would have put them, from its body's eye's view of the base's lean, nor say how far "
+                             & "off they may be; or a still base's are moved by a walk that told nothing",
                              Leaned_Base_Taken_Out'Access);
    end Register;
 

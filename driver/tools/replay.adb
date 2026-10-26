@@ -61,7 +61,6 @@ with Ada.Exceptions;
 with Ada.Containers.Indefinite_Ordered_Maps;
 with Ada.Containers.Vectors;
 with Ada.Strings.Fixed;
-with Ada.Streams.Stream_IO;
 with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 with Driver.Apart;
@@ -69,6 +68,7 @@ with Driver.Bytes;
 with Driver.Clock;
 with Driver.Commands;
 with Driver.Images;
+with Driver.Images.Files;
 with Driver.Json;
 with Driver.Log;
 with Driver.Msgpack;
@@ -319,26 +319,7 @@ procedure Replay is
    Graphs     : Boolean := False;   --  with --graphs, the groups as recognized after every estimate a decider asked for
    Until_Beat : Natural := 0;       --  with --until BEAT, the replay ends at that beat (0: at the recording's end)
 
-   procedure Write_Ppm (File : String; I : Driver.Images.Image) is
-      F    : Ada.Streams.Stream_IO.File_Type;
-      Head : constant String :=
-        "P6" & ASCII.LF & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Width (I)), Ada.Strings.Left) & " "
-        & Ada.Strings.Fixed.Trim (Natural'Image (Driver.Images.Height (I)), Ada.Strings.Left) & ASCII.LF & "255" & ASCII.LF;
-      Bytes : Driver.Bytes.Byte_Array (1 .. Ada.Streams.Stream_Element_Offset (Head'Length));
-
-      procedure Put (RGB : Driver.Bytes.Byte_Array) is
-      begin
-         Ada.Streams.Stream_IO.Write (F, RGB);
-      end Put;
-   begin
-      for K in Head'Range loop
-         Bytes (Ada.Streams.Stream_Element_Offset (K - Head'First + 1)) := Driver.Bytes.Byte (Character'Pos (Head (K)));
-      end loop;
-      Ada.Streams.Stream_IO.Create (F, Ada.Streams.Stream_IO.Out_File, File);
-      Ada.Streams.Stream_IO.Write (F, Bytes);
-      Driver.Images.Query (I, Put'Access);
-      Ada.Streams.Stream_IO.Close (F);
-   end Write_Ppm;
+   procedure Write_Ppm (File : String; I : Driver.Images.Image) renames Driver.Images.Files.Write_PPM;
 
    procedure Robot_Part (M : Input) is
       Start : Duration;

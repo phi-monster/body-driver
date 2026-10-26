@@ -7671,9 +7671,13 @@ package body Driver.Robot.Tests is
             Add_Keyframe (M.Kinematics (1), Q, Base, Truth, Rng, Base);
          end;
       end loop;
+      --  Six keyframes on a sweep's many double nothing: a fitted arm is fitted again once its keyframes have doubled,
+      --  or when a fit is asked (Kinematics.Refit).
+      Driver.Robot.Kinematics.Ask_Fit (M, 1);
       Driver.Robot.Kinematics.Refit (M);
       Check (Driver.Robot.Kinematics.Fitted (M, 1), "the arm is not fitted with the keyframes taken after its fit");
-      Check (M.Kinematics (1).Result.Matches = Natural (Ada.Containers.Count_Type'(M.Kinematics (1).Matches.Length))
+      Check (M.Kinematics (1).Result.Matches
+             = Natural (Ada.Containers.Count_Type'(M.Kinematics (1).Matches.Length)) + M.Kinematics (1).Revision
              and then M.Kinematics (1).Result.Used > First_Used,
              "the refit did not use the keyframes taken after the fit:" & M.Kinematics (1).Result.Used'Image
              & " sightings against" & First_Used'Image);

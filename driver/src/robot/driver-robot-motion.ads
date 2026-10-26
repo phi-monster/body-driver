@@ -26,7 +26,8 @@ package Driver.Robot.Motion is
       Kept_Eyes    : out Channel_Flags;
       Came_Back    : out Boolean;
       Noted        : Group_Id'Base := 0;
-      Way          : Real := 0.0)
+      Way          : Real := 0.0;
+      Until_Reach  : Boolean := False)
      with Pre => Kept_Eyes'Length = Eye_Count (M);
    --  Holds until Still (M), as Settle, the push before it held meanwhile; but when every commanded reading stands
    --  and some eye's picture goes on drifting (Stillness.Eye_Drift_Run: two beats running, the least that tells a
@@ -37,6 +38,11 @@ package Driver.Robot.Motion is
    --  Came_Back: Back was sent and every eye came back: a joint's push.
    --  Noted, Way: the push of group Noted (Way its sign) is noted as it stood (Note_Stayed), once: as its drift sends
    --  the body back, before the hold it goes back to, or where the body settled with it held; none for nought.
+   --  Until_Reach: the drift is let run until some eye's view has moved from where the push began as far as the flow
+   --  reaches (View_At_Reach), and Back is sent then; the wait does not end while the push is held and some eye drifts
+   --  on short of it. The body is taken as far as its pictures still tell where it went against where it was, where a
+   --  drift alone sends it back as soon as a beat shows it: Stretch's and RB-Y1's bases, walked under an arm so,
+   --  turned 0.01 to 0.1 degrees, too little for anything to be told of their eyes (n15s2, 10-27).
 
    function Eyes_From_Origin (M : Model) return Real_Array;
    --  Each eye's picture's change from where the push began (Mark_Origins) at the latest beat, from 1
@@ -58,6 +64,11 @@ package Driver.Robot.Motion is
 
    procedure Mark_Origins (M : in out Model);
    --  Every eye's latest frame is the one the push about to be sent begins from (Stillness.Set_Origin).
+
+   function View_At_Reach (M : Model) return Boolean;
+   --  Some eye's view has moved from where the push began (Mark_Origins) as far as the flow reaches, or beyond, as
+   --  Reach_Ratio measures it: more of some eye's moved cells beyond reach than within it, or the median displacement
+   --  of the moved cells of the eye that moved them most broadly half a cell or more. False where nothing moved.
 
    function Reach_Ratio (M : Model) return Real;
    --  How many times over the push held now (from where it began, Mark_Origins) would move some eye's view as far

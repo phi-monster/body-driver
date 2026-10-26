@@ -804,8 +804,11 @@ package body Driver.Robot.Boot is
          --  taken. The
          --  stills tell where that eye sits on the arm's eye and both lenses, and the base's motion under the arm at
          --  every keyframe is taken out of its sightings by them. Each push by the amount the recognition saw the
-         --  channel move an eye at (Group_Stream.Seen_At), held as the recognition held it: a speed until the pictures
-         --  drift, then sent back to the hold (Push_Group); a joint landed. The hall's G1 leaned with its arms' weight
+         --  channel move an eye at (Group_Stream.Seen_At): a speed held until its drift has moved some eye's view as
+         --  far as the flow reaches, then sent back to the hold; a joint landed. Sent back as soon as the pictures
+         --  drifted, as the recognition holds a speed, Stretch's and RB-Y1's bases turned their eyes 0.01 to 0.1
+         --  degrees and stepped them a millimetre or less: nothing to tell an eye's place on another by, and the stills
+         --  were adjusted to focal lengths of 3.6 and 35 px (n15s2, 10-27). The hall's G1 leaned with its arms' weight
          --  as their sweeps moved them, and its arms' focal lengths came out 16 to 18 % long on the truth's own
          --  sightings (n13s2, 10-26): its torso's motion, which its head camera sees.
          procedure Walk_Body is
@@ -880,8 +883,11 @@ package body Driver.Robot.Boot is
                            Driver.Robot.Motion.Settle (M, Waited);
                            Driver.Robot.Motion.Mark_Origins (M);
                            Go_To (Carrier, Away, Report);
+                           --  A speed is held until its drift has taken some eye's view as far as the flow reaches
+                           --  (Motion.Settle's Until_Reach), and sent back to the hold then, or once the body stops.
                            if Speed then
-                              Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came);
+                              Driver.Robot.Motion.Settle (M, Back, Waited, Kept, Kept_Eyes, Came, Until_Reach => True);
+                              Go_To (Carrier, Hold, Report);
                            end if;
                            Driver.Robot.Motion.Settle (M, Waited);
                            Still;
@@ -1038,6 +1044,14 @@ package body Driver.Robot.Boot is
             begin
                Driver.Robot.Motion.Hold_And_Estimate (M);
             end Measure_The_Round;
+
+            --  The next estimate fits the arm whatever its keyframes since its last fit (Kinematics.Ask_Fit), where
+            --  the next round's cells are the pairs a fit of every keyframe taken names (Contested): a fitted arm is
+            --  fitted again once its keyframes have doubled otherwise (Kinematics.Refit).
+            procedure Ask_For_Fit is
+            begin
+               Driver.Robot.Kinematics.Ask_Fit (M, A);
+            end Ask_For_Fit;
 
             --  Whether the arm is fitted now, read in a held beat (the levels' own verdicts: Read_Round).
             Fitted_Now   : Boolean := False;
@@ -1860,6 +1874,7 @@ package body Driver.Robot.Boot is
                            for K in Contested.First_Index .. Contested.Last_Index loop
                               Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
                            end loop;
+                           Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
                         else
                            Together (Shares, Climb => True);
                         end if;
@@ -1936,6 +1951,7 @@ package body Driver.Robot.Boot is
                               end loop;
                            end if;
                         end;
+                        Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Followed'Access);
                         exit when not Fitted_Now or else Told_Now;
