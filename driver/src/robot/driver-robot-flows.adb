@@ -71,6 +71,12 @@ package body Driver.Robot.Flows is
       Unit_Sigma : Real_Access;
       Steps  : Real_Access;
       Taken  : Natural := 0;
+      --  The turns the fits of the eyes that see the arm asked for at their last fits (Flow_Eye.Joint_Turns, the least
+      --  over the eyes; nought where none did), whether the turns are those (the first pose's search not run again),
+      --  and every set of turns the arm's poses were taken at, N a set.
+      Asked  : Real_Access;
+      Sized  : Boolean := False;
+      Tried  : Real_Vectors.Vector;
       --  How many of its poses (the first ones) the arm's own eye has a picture of: the scene's stills run ahead of
       --  the flow poses along the same poses, and a pose stilled is not pictured again when the flows reach it.
       Stilled : Natural := 0;
@@ -399,6 +405,7 @@ package body Driver.Robot.Flows is
                      end loop;
                      Info.Joints := new KFit.Joint_Array (1 .. Size);
                      Info.Steps := new Real_Array'(1 .. Size => 0.0);
+                     Info.Asked := new Real_Array'(1 .. Size => 0.0);
                      for J in 1 .. Size loop
                         declare
                            --  The chain names its joints by their readings' places from 1, as the fit keeps its
@@ -448,6 +455,7 @@ package body Driver.Robot.Flows is
             Free (A.Joints);
             Free (A.Unit_Sigma);
             Free (A.Steps);
+            Free (A.Asked);
             for W of A.Wrists loop
                Free (W.Luma);
                Free (W.World);
@@ -716,7 +724,7 @@ package body Driver.Robot.Flows is
                   return;
                end if;
                Take (Still);
-               if K = 1 then
+               if K = 1 and then not Info.Sized then
                   Find_Steps (Pose, Still);
                   Take (Still);
                end if;
@@ -915,6 +923,9 @@ package body Driver.Robot.Flows is
          procedure Fit_All (May_Grow : Boolean) is
             More : Boolean := False;
          begin
+            for A of Arms loop
+               A.Asked.all := [others => 0.0];
+            end loop;
             for E in 1 .. Count_E loop
                if not Told (E) then
                   declare
@@ -1031,6 +1042,25 @@ package body Driver.Robot.Flows is
                                                then " (more than the stills before: more stills first)" else "")
                                             & (if Result.Determined then ""
                                                else ": " & Ada.Strings.Unbounded.To_String (Result.Why)));
+                           --  The turns this eye's fit asks for of every arm it saw, the least over the eyes.
+                           if Result.Used > 0 then
+                              for U in 1 .. Used loop
+                                 declare
+                                    Info  : Arm_Info renames Arms (Which (U));
+                                    Turns : constant Real_Array :=
+                                      Flow.Joint_Turns (Views (U).all, Info.Joints.all, Width, Height, Result.Poses (U),
+                                                        Result.Lens, Result.Additive, Result.Relative);
+                                 begin
+                                    for J in 1 .. Info.N loop
+                                       if Turns (Turns'First + J - 1) > 0.0 then
+                                          Info.Asked (J) :=
+                                            (if Info.Asked (J) = 0.0 then Turns (Turns'First + J - 1)
+                                             else Real'Min (Info.Asked (J), Turns (Turns'First + J - 1)));
+                                       end if;
+                                    end loop;
+                                 end;
+                              end loop;
+                           end if;
                            if May_Grow and then Result.Places_Told > Last_Places (E) then
                               Grown := True;
                               Last_Why (E) := Result.Why;
@@ -1058,6 +1088,114 @@ package body Driver.Robot.Flows is
             end loop;
             Settled := not More;
          end Fit_All;
+
+         --  After a pass of the fits: an arm some joint of which turns more than a doubling (the turn search's own
+         --  step) away from the turn its fits ask for (Arm_Info.Asked) is taken again from its first pose at the
+         --  turns asked for, each kept to no less than the least turn the arm's fit counts and to half the range seen,
+         --  unless every joint's is within a doubling of a set its poses were taken at before; its first pose's search
+         --  is not run again, and its eyes judge the next fit's spread afresh. Best_Turn's own estimate, from the
+         --  pixels that change, mixes the joint's links with what changes off them and with its fastest pixels (the
+         --  hall, 10-27: turns 2 to 12 times off, step 3's main error on SO-101 seed 3); a first fit's eye, even 87 px
+         --  off, sized them so that renders of the same poses placed the eye within 4 to 18 px (SO-101; Panda 3b 58
+         --  from 110), as near as turns sized from the truth (rig: resizeloop.sh).
+         procedure Resize (Any : out Boolean) is
+         begin
+            Any := False;
+            for A in 1 .. Count_A loop
+               declare
+                  Info   : Arm_Info renames Arms (A);
+                  N      : constant Positive := Info.N;
+                  Wanted_Steps : Real_Array (1 .. N) := Info.Steps.all;
+                  Far    : Boolean := False;
+                  function Channel (Place : Positive) return Positive is (Info.Chain (Place - 1));
+                  function Within (One, Other : Real_Array) return Boolean is
+                    (for all J in 1 .. N =>
+                       (One (J) = 0.0 and then Other (J) = 0.0)
+                       or else (One (J) > 0.0 and then Other (J) > 0.0
+                                and then One (J) <= 2.0 * Other (J) and then Other (J) <= 2.0 * One (J)));
+               begin
+                  if (for some E in 1 .. Count_E => Sees_It (E, A) and then not Told (E)) then
+                     for J in 1 .. N loop
+                        if Info.Asked (J) > 0.0 then
+                           declare
+                              C          : constant Positive := Channel (J);
+                              Least      : constant Real := Driver.Robot.Motion.Least_Turn (M, Info.Arm, C);
+                              Range_Seen : constant Real := Info.High (C - 1) - Info.Low (C - 1);
+                              T          : constant Real :=
+                                Real'Min (Real'Max (Info.Asked (J), Least), Range_Seen / 2.0);
+                           begin
+                              Wanted_Steps (J) := T;
+                              if not Within ([for K in 1 .. N => (if K = J then Info.Steps (J) else 0.0)],
+                                             [for K in 1 .. N => (if K = J then T else 0.0)])
+                              then
+                                 Far := True;
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+                     if Far then
+                        if Info.Tried.Is_Empty then
+                           for J in 1 .. N loop
+                              Info.Tried.Append (Info.Steps (J));
+                           end loop;
+                        end if;
+                        declare
+                           Before : Boolean := False;
+                        begin
+                           for K in 1 .. Natural (Info.Tried.Length) / N loop
+                              if Within (Wanted_Steps, [for J in 1 .. N => Info.Tried ((K - 1) * N + J - 1)]) then
+                                 Before := True;
+                              end if;
+                           end loop;
+                           if not Before then
+                              declare
+                                 Text : Ada.Strings.Unbounded.Unbounded_String;
+                              begin
+                                 for J in 1 .. N loop
+                                    Ada.Strings.Unbounded.Append
+                                      (Text, " " & Driver.Log.Image (Wanted_Steps (J)) & " ("
+                                             & Driver.Log.Image (Info.Steps (J)) & ")");
+                                 end loop;
+                                 Driver.Log.Line (Driver.Log.Robot, "flows: arm" & Info.Arm'Image
+                                                  & " taken again at the turns its fits ask for, reading units (were):"
+                                                  & Ada.Strings.Unbounded.To_String (Text));
+                              end;
+                              Info.Steps.all := Wanted_Steps;
+                              for J in 1 .. N loop
+                                 Info.Tried.Append (Wanted_Steps (J));
+                              end loop;
+                              for E in 1 .. Count_E loop
+                                 for V of Captures (E, A) loop
+                                    declare
+                                       P : Capture_Access := V;
+                                    begin
+                                       Free (P.Still);
+                                       for J in P.Minus'Range loop
+                                          if P.Minus (J) /= null then
+                                             Free (P.Minus (J));
+                                          end if;
+                                          if P.Plus (J) /= null then
+                                             Free (P.Plus (J));
+                                          end if;
+                                       end loop;
+                                       Free (P);
+                                    end;
+                                 end loop;
+                                 Captures (E, A).Clear;
+                                 if Sees_It (E, A) then
+                                    Last_Spread (E) := Real'Last;
+                                 end if;
+                              end loop;
+                              Info.Taken := 0;
+                              Info.Sized := True;
+                              Any := True;
+                           end if;
+                        end;
+                     end if;
+                  end if;
+               end;
+            end loop;
+         end Resize;
       begin
          for E in 1 .. Count_E loop
             for A in 1 .. Count_A loop
@@ -1069,8 +1207,9 @@ package body Driver.Robot.Flows is
          --  the stills would outnumber the flows' own pictures (a still and two a joint at every pose, of the arm with
          --  the fewest joints): the places check the flows with no more pictures than the flows take.
          declare
-            Wanted : Positive := 2;
-            Stills : Positive := 2;
+            Wanted  : Positive := 2;
+            Stills  : Positive := 2;
+            Resized : Boolean := False;
          begin
             loop
                for A in 1 .. Count_A loop
@@ -1091,9 +1230,12 @@ package body Driver.Robot.Flows is
                   Grown := False;
                   Fit_All (May_Grow => 2 * Stills <= Pictures);
                end;
-               exit when Settled and then not Grown;
+               Resize (Resized);
+               exit when Settled and then not Grown and then not Resized;
                if Grown then
                   Stills := 2 * Stills;
+               elsif Resized then
+                  null;   --  the same poses again, at the turns asked for
                else
                   Wanted := 2 * Wanted;
                   Stills := Positive'Max (Stills, Wanted);
@@ -1129,6 +1271,7 @@ package body Driver.Robot.Flows is
          Free (A.Joints);
          Free (A.Unit_Sigma);
          Free (A.Steps);
+         Free (A.Asked);
          for W of A.Wrists loop
             Free (W.Luma);
             Free (W.World);

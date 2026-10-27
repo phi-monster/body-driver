@@ -9608,10 +9608,114 @@ package body Driver.Robot.Tests is
       Free (Fixed);
    end Scene_Places_A_Fixed_Eye;
 
+   --  A synthetic arm (Flow_Eye_On_A_Synthetic_Arm's) with exact rates: at the true eye each joint's predicted motion
+   --  (Flow_Eye.Joint_Motions) is the median over the pixels on the links it moves of their projected motions a
+   --  reading unit, to a central difference's truncation.
+   procedure Flow_Motions_On_A_Synthetic_Arm is
+      package Flow renames Driver.Robot.Kinematics.Flow_Eye;
+      package KFit renames Driver.Robot.Kinematics.Fit;
+      Width  : constant := 320;
+      Height : constant := 240;
+      Focal  : constant Real := 150.0;
+      Joints : aliased constant KFit.Joint_Array :=
+        [(W => [0.0, 0.0, 1.0], P => [0.0, 0.0, 0.0], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.0, 0.1], C => 0.001, Slide => False),
+         (W => [1.0, 0.0, 0.0], P => [0.0, 0.25, 0.1], C => 0.001, Slide => False)];
+      Eye_At_Place : constant Vec3 := [0.15, -0.55, 0.75];
+      Target       : constant Vec3 := [0.0, 0.2, 0.08];
+      Forward      : constant Vec3 := Unit (Minus (Target, Eye_At_Place));
+      Right        : constant Vec3 := Unit (Cross (Forward, [0.0, 0.0, 1.0]));
+      Down         : constant Vec3 := Cross (Forward, Right);
+      Truth        : constant Rigid :=
+        (Rotation    => [[Right (1), Down (1), Forward (1)], [Right (2), Down (2), Forward (2)],
+                         [Right (3), Down (3), Forward (3)]],
+         Translation => Eye_At_Place);
+      Sigma  : constant Real := 0.04;
+      G      : Generator := (State => 11);
+      Points : constant := 60;
+      Step   : constant Real := 1.0E-3;
+      View   : constant Flow.Pose_Access := new Flow.Pose_View (3, Points);
+      Views  : constant Flow.Pose_Array := [1 => View];
+      Moves  : array (1 .. 3, 1 .. Points) of Real := [others => [others => 0.0]];
+      Counts : array (1 .. 3) of Natural := [others => 0];
+      procedure Project (Point : Vec3; K : Positive; Readings : Real_Array; U, V : out Real) is
+         Moved : constant Rigid := KFit.Eye_At (Joints (1 .. K), [for I in 1 .. K => I], Readings (1 .. K));
+         C     : constant Vec3 := Transposed_Times (Truth.Rotation, Minus (Moved * Point, Truth.Translation));
+      begin
+         U := Focal * C (1) / C (3) + Real (Width) / 2.0;
+         V := Focal * C (2) / C (3) + Real (Height) / 2.0;
+      end Project;
+   begin
+      View.Readings := [0.0, 0.0, 0.0];
+      View.Steps := [1.0, 1.0, 1.0];
+      View.Back := [others => 0.0];
+      for I in 1 .. Points loop
+         declare
+            K     : constant Positive := (if I mod 2 = 0 then 2 else 3);
+            Along : constant Real := Uniform (G);
+            Point : constant Vec3 :=
+              (if K = 2
+               then [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]
+               else [0.03 * (2.0 * Uniform (G) - 1.0), 0.25 + 0.2 * Along, 0.1 + 0.03 * (2.0 * Uniform (G) - 1.0)]);
+            Angle : constant Real := 2.0 * Ada.Numerics.Pi * Uniform (G);
+            U, V  : Real;
+         begin
+            Project (Point, K, View.Readings, U, V);
+            View.U (I) := U;
+            View.V (I) := V;
+            View.Gu (I) := 30.0 * Cos (Angle);
+            View.Gv (I) := 30.0 * Sin (Angle);
+            View.Link (I) := K;
+            for J in 1 .. 3 loop
+               View.Sigma (I, J) := Sigma;
+               View.Rate (I, J) := 0.0;
+               if J <= K then
+                  declare
+                     Up, Back : Real_Array := View.Readings;
+                     U1, V1, U2, V2 : Real;
+                  begin
+                     Up (J) := Step;
+                     Back (J) := -Step;
+                     Project (Point, K, Up, U1, V1);
+                     Project (Point, K, Back, U2, V2);
+                     View.Rate (I, J) := -(View.Gu (I) * (U1 - U2) + View.Gv (I) * (V1 - V2)) / (2.0 * Step);
+                     Counts (J) := Counts (J) + 1;
+                     Moves (J, Counts (J)) := Sqrt ((U1 - U2) ** 2 + (V1 - V2) ** 2) / (2.0 * Step);
+                  end;
+               end if;
+            end loop;
+         end;
+      end loop;
+      declare
+         Motions : constant Real_Array :=
+           Flow.Joint_Motions (Views, Joints, Width, Height, Truth, (Fx => Focal, Fy => Focal, Cx => Real (Width) / 2.0,
+                               Cy => Real (Height) / 2.0, K1 | K2 => 0.0), 1.0, 0.0);
+      begin
+         for J in 1 .. 3 loop
+            declare
+               Truths : Real_Array (1 .. Counts (J));
+            begin
+               for K in 1 .. Counts (J) loop
+                  Truths (K) := Moves (J, K);
+               end loop;
+               declare
+                  Median : constant Real := Driver.Stats.Median_In_Place (Truths);
+               begin
+                  Check (abs (Motions (Motions'First + J - 1) - Median) <= Sqrt (Real'Epsilon) * Median,
+                         "joint" & J'Image & "'s predicted motion" & Real'Image (Motions (Motions'First + J - 1))
+                         & " is not its links' pixels'" & Real'Image (Median));
+               end;
+            end;
+         end loop;
+      end;
+   end Flow_Motions_On_A_Synthetic_Arm;
+
    procedure Register is
    begin
       Driver.Tests.Register ("robot.flow.eye", "a fixed eye placed by a synthetic arm's edge flow is not told or comes "
                              & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
+      Driver.Tests.Register ("robot.flow.motions", "a joint's predicted motion at a synthetic arm's true eye is not its "
+                             & "links' pixels' projected motion", Flow_Motions_On_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.flow.scene", "a fixed eye placed again by the table two arms' own eyes see is "
                              & "not told, comes back off its own sigmas, or puts the table's points no nearer their "
                              & "places than the flows' eye; placed by the arms' joints off the truth and their sigmas, "

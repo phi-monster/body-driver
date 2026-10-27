@@ -26,6 +26,7 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  move it (the highest whose change stands out).
    type Pose_View (Joints, Pixels : Natural) is record
       Readings     : Real_Array (1 .. Joints);
+      Steps        : Real_Array (1 .. Joints);   --  each joint's turn either way, reading units
       U, V, Gu, Gv : Real_Array (1 .. Pixels);
       Rate, Sigma  : Driver.Numerics.Arrays.Real_Matrix (1 .. Pixels, 1 .. Joints);
       Link         : Fit.Count_Array (1 .. Pixels);
@@ -201,6 +202,29 @@ package Driver.Robot.Kinematics.Flow_Eye is
    --  off by more than the gate left out until none is, and the covariance widened by the eye's spread over the poses
    --  (the jackknife). Determined when the search found its optimum, the covariance is positive definite and Z times
    --  Spread is less than the half patch the aligner follows (Driver.Alignment.Half_Patch).
+
+   function Joint_Motions
+     (Poses              : Pose_Array;
+      Joints             : Fit.Joint_Array;
+      Width, Height      : Positive;
+      Pose               : Driver.Numerics.Rigid;
+      Lens               : Fit.Lens;
+      Additive, Relative : Real) return Real_Array;
+   --  Per joint, how far one reading unit of its turn moves the pixels on the links it moves at a given eye, the median
+   --  over the poses' pixels: each pixel's link the one the model explains its rates best by there (Best_Label), its
+   --  point at the depth its rates give, moved by the joint's turn and seen through the lens. Nought for a joint that
+   --  moves none. Pixels on the first link alone are left out: one rate leaves their depth free.
+
+   function Joint_Turns
+     (Poses              : Pose_Array;
+      Joints             : Fit.Joint_Array;
+      Width, Height      : Positive;
+      Pose               : Driver.Numerics.Rigid;
+      Lens               : Fit.Lens;
+      Additive, Relative : Real) return Real_Array;
+   --  Per joint, the turn (reading units) that moves the pixels on the links it moves (Joint_Motions) by the motion
+   --  Best_Turn takes as best: the central difference's bias against the noise, at the median gradient of those
+   --  pixels and the poses' noise of a smoothed change. Nought for a joint that moves none.
 
    function Residuals_At
      (Poses         : Pose_Array;

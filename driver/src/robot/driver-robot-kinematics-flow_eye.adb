@@ -304,6 +304,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          I      : Natural := 0;
       begin
          Result.Readings := Readings;
+         Result.Steps := Steps;
          for R in Smooth_Radius .. Height - 1 - Smooth_Radius loop
             for C in Smooth_Radius .. Width - 1 - Smooth_Radius loop
                declare
@@ -525,19 +526,17 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    function Pose_Of (Base : Mat3; X : Parameters) return Rigid is
      ((Rotation => Times (Base, Driver.Numerics.Exp ([X (2), X (3), X (4)])), Translation => [X (5), X (6), X (7)]));
 
-   --  One pixel's residuals at the terms, in units of their sigmas, the joints that move it in order (Count of them),
-   --  its depth's inverse eliminated (Inverse_Depth the one the rates give, nought or less behind the eye); Ok False
-   --  when the terms move no point on its line of sight.
-   procedure Pixel_Residuals
-     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; Count : out Natural;
-      Inverse_Depth : out Real; Ok : out Boolean)
+   --  One pixel's residuals as Pixel_Residuals has them, were the joints that move it the first Up_To.
+   procedure Pixel_Residuals_To
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; Up_To : Natural; R : out Real_Array;
+      Count : out Natural; Inverse_Depth : out Real; Ok : out Boolean)
    is
       View : Pose_View renames P.Poses (V).all;
       F    : constant Real := Exp (X (1));
       Pose : constant Rigid := Pose_Of (Base, X);
       Here : constant Sighting := Sight (F, F * Exp (X (10)), X (8), X (9), P.K1, P.K2, View, I);
       Ray  : constant Vec3 := Times (Pose.Rotation, Vec3'[Here.Xn, Here.Yn, 1.0]);
-      K    : constant Natural := View.Link (I);
+      K    : constant Natural := Up_To;
       A, B, E, S : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];
       Saa, Sab : Real := 0.0;
    begin
@@ -574,7 +573,73 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          R (R'First + J - 1) := (E (J) + Real'Max (0.0, Inverse_Depth) * A (J)) / S (J);
       end loop;
       Ok := True;
+   end Pixel_Residuals_To;
+
+   --  One pixel's residuals at the terms, in units of their sigmas, the joints that move it in order (Count of them),
+   --  its depth's inverse eliminated (Inverse_Depth the one the rates give, nought or less behind the eye); Ok False
+   --  when the terms move no point on its line of sight.
+   procedure Pixel_Residuals
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; Count : out Natural;
+      Inverse_Depth : out Real; Ok : out Boolean) is
+   begin
+      Pixel_Residuals_To (P, V, I, Base, X, P.Poses (V).Link (I), R, Count, Inverse_Depth, Ok);
    end Pixel_Residuals;
+
+   --  What a pixel costs at the terms X were it on the link after joint K of the chain, every joint's rate up to Up_To
+   --  (the joints whose changes stood out at it) in: the first K's as the arm moves the point on its line of sight (its
+   --  depth's inverse eliminated), the others' as nought. A change that a turned joint's load or its light made on a
+   --  link before it, or on the world, costs as nought there, not as that link's (the hall's arms, 10-27: chosen so
+   --  at the true eye, the fixed eyes' fits came from 56 to 9 px on the median of 19 dumps).
+   function Label_Cost
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; K, Up_To : Natural) return Real
+   is
+      View  : Pose_View renames P.Poses (V).all;
+      Part  : Real_Array (1 .. Natural'Max (1, K));
+      Count : Natural;
+      Rho   : Real;
+      Ok    : Boolean := True;
+      Sum   : Real := 0.0;
+   begin
+      if K >= 1 then
+         Pixel_Residuals_To (P, V, I, Base, X, K, Part, Count, Rho, Ok);
+         if not Ok then
+            return Real'Last;
+         end if;
+         for J in 1 .. K loop
+            Sum := Sum + Part (J) ** 2;
+         end loop;
+      end if;
+      for J in K + 1 .. Up_To loop
+         if View.Sigma (I, J) < Real'Last then
+            Sum := Sum + View.Rate (I, J) ** 2
+              / ((P.Additive * View.Sigma (I, J)) ** 2 + (P.Relative * View.Rate (I, J)) ** 2);
+         end if;
+      end loop;
+      return Sum;
+   end Label_Cost;
+
+   --  The link the model explains a pixel's rates best by at the terms X (the least Label_Cost, up to the one Evidence
+   --  gave it).
+   function Best_Label (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters) return Natural is
+      Up_To  : constant Natural := P.Poses (V).Link (I);
+      Best_K : Natural := Up_To;
+      Best_C : Real := Real'Last;
+   begin
+      if Up_To < 2 then
+         return Up_To;
+      end if;
+      for K in 1 .. Up_To loop
+         declare
+            C : constant Real := Label_Cost (P, V, I, Base, X, K, Up_To);
+         begin
+            if C < Best_C then
+               Best_C := C;
+               Best_K := K;
+            end if;
+         end;
+      end loop;
+      return Best_K;
+   end Best_Label;
 
    --  Every kept pixel's residuals in one vector, a pixel's in place even when it is not Ok (then zeros, and Seen
    --  False).
@@ -4369,6 +4434,184 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          Free (Flow_Kept (A));
       end loop;
    end Refine_By_Scene;
+
+   function Joint_Motions
+     (Poses              : Pose_Array;
+      Joints             : Fit.Joint_Array;
+      Width, Height      : Positive;
+      Pose               : Driver.Numerics.Rigid;
+      Lens               : Fit.Lens;
+      Additive, Relative : Real) return Real_Array
+   is
+      Held   : aliased constant Pose_Array := Poses;
+      P      : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
+                           Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy, Aspect => Lens.Fy / Lens.Fx,
+                           Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0);
+      X      : constant Parameters :=
+        [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
+         Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
+         Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fy / Lens.Fx)];
+      N      : constant Natural := Joints'Length;
+      Result : Real_Array (1 .. Natural'Max (1, N)) := [others => 0.0];
+      Counts : array (1 .. Natural'Max (1, N)) of Natural := [others => 0];
+      type Value_Arrays is array (1 .. Natural'Max (1, N)) of Real_Access;
+      Values : Value_Arrays := [others => null];
+      --  One pass counts each joint's pixels, the next one takes their motions.
+      procedure Pass (Taking : Boolean) is
+      begin
+         for V in Poses'Range loop
+            for I in 1 .. Poses (V).Pixels loop
+               if Poses (V).Link (I) >= 2 then
+                  declare
+                     K     : constant Natural := Best_Label (P, V, I, Pose.Rotation, X);
+                     Part  : Real_Array (1 .. Natural'Max (1, K));
+                     Count : Natural;
+                     Rho   : Real;
+                     Ok    : Boolean;
+                  begin
+                     Pixel_Residuals_To (P, V, I, Pose.Rotation, X, K, Part, Count, Rho, Ok);
+                     if Ok and then Rho > 0.0 then
+                        declare
+                           Here : constant Sighting := Sight (Lens.Fx, Lens.Fy, Lens.Cx, Lens.Cy, 0.0, 0.0,
+                                                              Poses (V).all, I);
+                           Xc   : constant Vec3 := Scaled (1.0 / Rho, Vec3'[Here.Xn, Here.Yn, 1.0]);
+                           Point : constant Vec3 := Plus (Pose.Translation, Times (Pose.Rotation, Xc));
+                        begin
+                           for J in 1 .. K loop
+                              declare
+                                 T  : Twist renames P.Twists (V, J);
+                                 Vw : constant Vec3 :=
+                                   (if T.Slide then Scaled (T.C, T.W)
+                                    else Scaled (T.C, Cross (T.W, Minus (Point, T.P))));
+                                 Vc : constant Vec3 := Transposed_Times (Pose.Rotation, Vw);
+                                 Du : constant Real := Lens.Fx * (Vc (1) * Xc (3) - Xc (1) * Vc (3)) / Xc (3) ** 2;
+                                 Dv : constant Real := Lens.Fy * (Vc (2) * Xc (3) - Xc (2) * Vc (3)) / Xc (3) ** 2;
+                              begin
+                                 Counts (J) := Counts (J) + 1;
+                                 if Taking then
+                                    Values (J) (Counts (J)) := Sqrt (Du * Du + Dv * Dv);
+                                 end if;
+                              end;
+                           end loop;
+                        end;
+                     end if;
+                  end;
+               end if;
+            end loop;
+         end loop;
+      end Pass;
+   begin
+      P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, N));
+      for V in Poses'Range loop
+         declare
+            T : constant Twist_Array := Twists_At (Joints, Poses (V).Readings);
+         begin
+            for J in T'Range loop
+               P.Twists (V, J) := T (J);
+            end loop;
+         end;
+      end loop;
+      Pass (Taking => False);
+      for J in 1 .. N loop
+         Values (J) := new Real_Array (1 .. Natural'Max (1, Counts (J)));
+         Counts (J) := 0;
+      end loop;
+      Pass (Taking => True);
+      for J in 1 .. N loop
+         if Counts (J) > 0 then
+            Result (J) := Driver.Stats.Median_In_Place (Values (J) (1 .. Counts (J)));
+         end if;
+         Free (Values (J));
+      end loop;
+      Free (P.Twists);
+      return Result (1 .. N);
+   end Joint_Motions;
+
+   function Joint_Turns
+     (Poses              : Pose_Array;
+      Joints             : Fit.Joint_Array;
+      Width, Height      : Positive;
+      Pose               : Driver.Numerics.Rigid;
+      Lens               : Fit.Lens;
+      Additive, Relative : Real) return Real_Array
+   is
+      Held    : aliased constant Pose_Array := Poses;
+      P       : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
+                            Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy, Aspect => Lens.Fy / Lens.Fx,
+                            Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0);
+      X       : constant Parameters :=
+        [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
+         Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
+         Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fy / Lens.Fx)];
+      N       : constant Natural := Joints'Length;
+      Motions : constant Real_Array := Joint_Motions (Poses, Joints, Width, Height, Pose, Lens, Additive, Relative);
+      Result  : Real_Array (1 .. Natural'Max (1, N)) := [others => 0.0];
+   begin
+      P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, N));
+      for V in Poses'Range loop
+         declare
+            T : constant Twist_Array := Twists_At (Joints, Poses (V).Readings);
+         begin
+            for J in T'Range loop
+               P.Twists (V, J) := T (J);
+            end loop;
+         end;
+      end loop;
+      for J in 1 .. N loop
+         if Motions (Motions'First + J - 1) > 0.0 then
+            declare
+               --  the gradients of the pixels on the links the joint moves, and the poses' noise of a smoothed change
+               --  (a rate's sigma is it over twice the turn)
+               Count_G, Count_N : Natural := 0;
+            begin
+               for V in Poses'Range loop
+                  for I in 1 .. Poses (V).Pixels loop
+                     if Poses (V).Link (I) >= J then
+                        Count_G := Count_G + 1;
+                     end if;
+                  end loop;
+                  if Poses (V).Steps (J) /= 0.0 then
+                     Count_N := Count_N + 1;
+                  end if;
+               end loop;
+               if Count_G > 0 and then Count_N > 0 then
+                  declare
+                     Slopes : Real_Access := new Real_Array (1 .. Count_G);
+                     Noises : Real_Access := new Real_Array (1 .. Count_N);
+                     G_At, N_At : Natural := 0;
+                  begin
+                     for V in Poses'Range loop
+                        for I in 1 .. Poses (V).Pixels loop
+                           if Poses (V).Link (I) >= J and then Best_Label (P, V, I, Pose.Rotation, X) >= J then
+                              G_At := G_At + 1;
+                              Slopes (G_At) := Sqrt (Poses (V).Gu (I) ** 2 + Poses (V).Gv (I) ** 2);
+                           end if;
+                        end loop;
+                        if Poses (V).Steps (J) /= 0.0 and then Poses (V).Pixels > 0 then
+                           N_At := N_At + 1;
+                           Noises (N_At) := Poses (V).Sigma (1, J) * 2.0 * abs Poses (V).Steps (J);
+                        end if;
+                     end loop;
+                     if G_At > 0 and then N_At > 0 then
+                        declare
+                           Slope_M : constant Real := Driver.Stats.Median_In_Place (Slopes (1 .. G_At));
+                           Sigma_C : constant Real := Driver.Stats.Median_In_Place (Noises (1 .. N_At));
+                           Best    : constant Real :=
+                             (3.0 * Smooth_Sigma ** 2 * Sigma_C / (Sqrt (2.0) * Slope_M)) ** (1.0 / 3.0);
+                        begin
+                           Result (J) := Best / Motions (Motions'First + J - 1);
+                        end;
+                     end if;
+                     Free (Slopes);
+                     Free (Noises);
+                  end;
+               end if;
+            end;
+         end if;
+      end loop;
+      Free (P.Twists);
+      return Result (1 .. N);
+   end Joint_Turns;
 
    procedure Judge_At
      (Poses         : Pose_Array;
