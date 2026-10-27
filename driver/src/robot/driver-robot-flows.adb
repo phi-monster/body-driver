@@ -1045,8 +1045,14 @@ package body Driver.Robot.Flows is
                                                then " (more than the stills before: more stills first)" else "")
                                             & (if Result.Determined then ""
                                                else ": " & Ada.Strings.Unbounded.To_String (Result.Why)));
-                           --  The turns this eye's fit asks for of every arm it saw, the least over the eyes.
-                           if Result.Used > 0 then
+                           --  The turns this eye's fit asks for of every arm it saw, the least over the eyes; none
+                           --  from a fit whose own spread leaves the arms' points anywhere in the picture (at the
+                           --  family's gate): an eye it cannot place tells nothing of how far a turn moves them (n23s2,
+                           --  10-27: Panda 2b's first fit, its focal length 92493 px and spread 2194 px, asked turns 2
+                           --  to 57 times those taken, and the arm swung its pictures past any use).
+                           if Result.Used > 0
+                             and then Flows_Spread * Driver.Conventions.Z < Real (Positive'Max (Width, Height))
+                           then
                               for U in 1 .. Used loop
                                  declare
                                     Info  : Arm_Info renames Arms (Which (U));
