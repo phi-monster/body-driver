@@ -601,10 +601,20 @@ package body Driver.Robot.Flows is
                               end if;
                            end loop;
                            if Shows then
-                              --  The best turn by the pixels this turn moved, taken and judged again until it no
-                              --  longer grows by more than what is no change: the pixels a turn shows moving are
-                              --  those of its own size (the fake, 10-21: 0.0040, 0.0048 and 0.0057 rad from trials
-                              --  of 0.001, 0.002 and 0.004), and the turn used is the one whose pixels chose it.
+                              --  The best turn by the pixels this turn moved, taken and judged again the way the first
+                              --  best pointed (up or down), until the best points back the other way or moves by no
+                              --  more than what is no change: the pixels a turn shows moving are those of its own size
+                              --  (the fake, 10-21: 0.0040, 0.0048 and 0.0057 rad from trials of 0.001, 0.002 and
+                              --  0.004), and the turn used is the one whose pixels chose it; one way only, the turns
+                              --  run one way and the search ends. A turn whose pixels did not move (Best_Turn gives it
+                              --  back) leaves the last that moved some. Only growing, a first turn the pictures showed
+                              --  past the rates' linear range stood (n20s2, 10-27: SO-101 seed 3a's fourth joint turned
+                              --  114.5 ticks, its median moved pixel 6 px, where 0.4 px measures the rates best). Every
+                              --  trial is in the log.
+                              declare
+                                 Moving : Real := Turn;   --  the last turn whose pixels moved
+                                 Way    : Real := 0.0;    --  the way the first best pointed: up 1, down -1
+                              begin
                               loop
                                  declare
                                     Best : Real := Real'Last;
@@ -626,15 +636,29 @@ package body Driver.Robot.Flows is
                                           end;
                                        end if;
                                     end loop;
-                                    exit when not (Best < Real'Last
-                                                   and then Best > (1.0 + Driver.Conventions.Unchanged_Fraction) * Turn
-                                                   and then 2.0 * Best <= Range_Seen);
+                                    Driver.Log.Line
+                                      (Driver.Log.Robot, "flows: arm" & Info.Arm'Image & " joint" & J'Image
+                                       & " turn " & Driver.Log.Image (Turn, 6) & " reading units: best "
+                                       & (if Best < Real'Last then Driver.Log.Image (Best, 6) else "none"));
+                                    if Best = Turn and then Way /= 0.0 then
+                                       Turn := Moving;
+                                       exit;
+                                    end if;
+                                    Moving := Turn;
+                                    exit when not (Best < Real'Last and then Best > 0.0
+                                                   and then 2.0 * Best <= Range_Seen)
+                                      or else abs (Best - Turn) <= Driver.Conventions.Unchanged_Fraction * Turn;
+                                    if Way = 0.0 then
+                                       Way := (if Best > Turn then 1.0 else -1.0);
+                                    end if;
+                                    exit when (Best - Turn) * Way < 0.0;
                                     Turn := Best;
                                     Target (C) := Pose (C) + Turn;
                                     Go_To (Target);
                                     Take (Views);
                                  end;
                               end loop;
+                              end;
                               exit;
                            end if;
                            Turn := 2.0 * Turn;

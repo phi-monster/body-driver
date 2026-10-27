@@ -84,6 +84,33 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       return Result;
    end Square_Sum;
 
+   --  The noise of a filtered picture of differences, measured over the pixels the filter reaches: the lower quarter
+   --  of the values' distances from nought over a Gaussian's own (the changed values a minority, left out as
+   --  Pixels.Started_Spread leaves them). Not derived from a pixel's noise through the filter's weights: a camera's
+   --  JPEG correlates its noise over its 8 x 8 blocks, which a filter then barely averages (SO-101's base camera on the
+   --  hall, 10-27: two still views' smoothed difference 0.43 levels where the white-noise formula gave 0.24, and every
+   --  gate of the flows let the codec's noise through as motion).
+   function Filtered_Spread (Values : Real_Array; Width, Height : Positive) return Real is
+      Inner   : Real_Access :=
+        new Real_Array (1 .. Natural'Max (1, (Width - 2 * Smooth_Radius) * (Height - 2 * Smooth_Radius)));
+      Count   : Natural := 0;
+      Quarter : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.75);
+      Result  : Real := 0.0;
+   begin
+      for R in Smooth_Radius .. Height - 1 - Smooth_Radius loop
+         for C in Smooth_Radius .. Width - 1 - Smooth_Radius loop
+            Count := Count + 1;
+            Inner (Count) := abs Values (Values'First + R * Width + C);
+         end loop;
+      end loop;
+      if Count > 0 then
+         --  the lower quarter: the least value a quarter of them reach, rounded up
+         Result := Driver.Stats.Ranked_In_Place (Inner (1 .. Count), (Count + 3) / 4) / Quarter;
+      end if;
+      Free (Inner);
+      return Result;
+   end Filtered_Spread;
+
    --  Picture convolved with Along across its rows and Across down its columns (correlation: the weight at X falls on
    --  the pixel X further on), into Into; the pixels within the radius of the border are left zero.
    procedure Filter
@@ -138,16 +165,22 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       --  Every pixel one test of a family of as many as the picture has.
       Gate   : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Tests => Pixels));
       --  A pixel of Still is a mean whose own noise is Noise over the root of two (Noise is that of a difference of two
-      --  such means); the filters' outputs carry it through their weights.
-      Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));
-      Sigma_C : constant Real := Noise * Square_Sum (Smoothing);
+      --  such means); the filters' outputs' noise is what the turns' differences show it to be, each a difference of
+      --  two such means (Filtered_Spread; the gradient's over the root of two, the still one mean), the median over the
+      --  joints turned, and never less than the pixel noise makes through the filters' weights: a codec's correlation
+      --  raises it, nothing lowers it.
+      Sigma_G : Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));
+      Sigma_C : Real := Noise * Square_Sum (Smoothing);
       Keep    : Flag_Access := new Flag_Array (1 .. Pixels);
       Count   : Natural := 0;
       Gu_All  : Real_Access := new Real_Array (1 .. Pixels);
       Gv_All  : Real_Access := new Real_Array (1 .. Pixels);
       Changes : Real_Access := new Real_Array (1 .. Natural'Max (1, N) * Pixels);
       Diff    : Real_Access := new Real_Array (1 .. Pixels);
+      Slopes_Of_Diff : Real_Access := new Real_Array (1 .. Pixels);
       Back_U, Back_V : Real_Access := new Real_Array (1 .. Pixels);
+      Spread_C, Spread_G : Real_Array (1 .. Natural'Max (1, N));
+      Turned  : Natural := 0;
       function Change (J : Positive; K : Natural) return Real is (Changes ((J - 1) * Pixels + K + 1));
    begin
       Filter (Still, Width, Height, Slope, Smoothing, Gu_All.all);
@@ -161,9 +194,20 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                Diff (K + 1) := P (P'First + K) - M (M'First + K);
             end loop;
             Filter (Diff.all, Width, Height, Smoothing, Smoothing, Changes ((J - 1) * Pixels + 1 .. J * Pixels));
+            if Steps (Steps'First + J - 1) /= 0.0 then
+               Turned := Turned + 1;
+               Spread_C (Turned) := Filtered_Spread (Changes ((J - 1) * Pixels + 1 .. J * Pixels), Width, Height);
+               Filter (Diff.all, Width, Height, Slope, Smoothing, Slopes_Of_Diff.all);
+               Spread_G (Turned) := Filtered_Spread (Slopes_Of_Diff.all, Width, Height) / Sqrt (2.0);
+            end if;
          end;
       end loop;
       Free (Diff);
+      Free (Slopes_Of_Diff);
+      if Turned > 0 then
+         Sigma_C := Real'Max (Driver.Stats.Median (Spread_C (1 .. Turned)), Sigma_C);
+         Sigma_G := Real'Max (Driver.Stats.Median (Spread_G (1 .. Turned)), Sigma_G);
+      end if;
       --  What the arm moves against: the picture with the arm elsewhere (Background, the poses' stills' per-pixel
       --  median), and where this pose's still shows it (agrees with it within the gate of the noise). Its own gradient
       --  moves with nothing, and where the smoothing takes it in with an edge of the arm the change there is the edge's
@@ -307,8 +351,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    is
       Pixels  : constant Positive := Width * Height;
       Gate    : constant Real := Driver.Uncertain.Threshold (Driver.Uncertain.Scalar_Gate (Tests => Pixels));
-      Sigma_G : constant Real := Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing));
-      Sigma_C : constant Real := Noise * Square_Sum (Smoothing);
+      --  The filters' noise as Evidence measures it, here on the one turn's difference.
+      Sigma_G, Sigma_C : Real;
       Gu      : Real_Access := new Real_Array (1 .. Pixels);
       Gv      : Real_Access := new Real_Array (1 .. Pixels);
       Change  : Real_Access := new Real_Array (1 .. Pixels);
@@ -322,6 +366,15 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          Diff (K + 1) := Turned (Turned'First + K) - Still (Still'First + K);
       end loop;
       Filter (Diff.all, Width, Height, Smoothing, Smoothing, Change.all);
+      Sigma_C := Real'Max (Filtered_Spread (Change.all, Width, Height), Noise * Square_Sum (Smoothing));
+      declare
+         Slopes_Of_Diff : Real_Access := new Real_Array (1 .. Pixels);
+      begin
+         Filter (Diff.all, Width, Height, Slope, Smoothing, Slopes_Of_Diff.all);
+         Sigma_G := Real'Max (Filtered_Spread (Slopes_Of_Diff.all, Width, Height) / Sqrt (2.0),
+                              Noise / Sqrt (2.0) * Sqrt (Square_Sum (Slope) * Square_Sum (Smoothing)));
+         Free (Slopes_Of_Diff);
+      end;
       for K in 1 .. Pixels loop
          if Sqrt (Gu (K) ** 2 + Gv (K) ** 2) > Gate * Sigma_G and then abs Change (K) > Gate * Sigma_C then
             Moved := Moved + 1;
