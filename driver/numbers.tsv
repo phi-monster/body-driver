@@ -2653,6 +2653,7 @@ driver-robot-kinematics-fit.adb	Anchor_Rows (F) (Taken (F) + 2) := 2 * At_K;	2	s
 driver-robot-kinematics-fit.adb	Ar (P, P) := 1.0;	1.0	math	a term with no information of its own made apart from every other: its own unit
 driver-robot-kinematics-fit.adb	Ar (P, P) := 1.0;	1.0	math	a term with no information of its own made apart from every other: its own unit
 driver-robot-kinematics-fit.adb	Ar (P, P) := 1.0;	1.0	math	a unit diagonal for a term without information, kept apart from every other
+driver-robot-kinematics-fit.adb	Aspect : constant Real := (if Lens0.Fx > 0.0 and then Lens0.Fy > 0.0 then Lens0.Fy / Lens0.Fx else 1.0);	1.0	math	square pixels, the second focal length the first, where the lens has no focal lengths yet
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B := Start + Ln (2.0) / 2.0;	2.0	math	half an octave above the start: the bracket of the focal search is a factor of root two
 driver-robot-kinematics-fit.adb	B1, B2 : Real_Vector (1 .. 3) := [others => 0.0];	3	structure	three-dimensional space

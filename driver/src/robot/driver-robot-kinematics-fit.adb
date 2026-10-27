@@ -5271,7 +5271,7 @@ package body Driver.Robot.Kinematics.Fit is
          --  sightings as ever, the order searched again (stage 4) and the focal length's profile walked (stage 5).
          --  Every estimate searched the focal length from nothing again: f16b's arm 1, 160 keyframes, 131 to 197 s a
          --  fit under the boot's load, and the sweep held still through 2700 of the 3000 beats of each pass.
-         Lens0 := (Fx | Fy => Sqrt (From.L.Fx * From.L.Fy), Cx => From.L.Cx, Cy => From.L.Cy, others => 0.0);
+         Lens0 := (Fx => From.L.Fx, Fy => From.L.Fy, Cx => From.L.Cx, Cy => From.L.Cy, others => 0.0);
          Focal_Within := From.Focal_Within;
          Searched_Least := From.Searched_Least;
          Searched_Most := From.Searched_Most;
@@ -6685,6 +6685,13 @@ package body Driver.Robot.Kinematics.Fit is
       declare
          Count : constant Positive := 4 * N + 1;
          Base  : constant Joint_Array := Joints;
+         --  The pixels' aspect, the second focal length over the first, as the stage begins: one from the search, the
+         --  fit's own where it was begun from a fit of an estimate before (its lens kept, its bend not). Squared there
+         --  to the two lengths' geometric mean, ALOHA's wrist eyes (aspect 1.365) began their warm fits 17 % above the
+         --  first and 14 % below the second (186 px for 159.5 by 217.1), and seed 2a's first arm (round n26s2, 10-27),
+         --  fitted at 159.5 by 217.1 px within 0.6 px and its order told, was fitted at 201.4 by 262.8 from its next
+         --  estimate on, its sightings' median 1.0 px over them.
+         Aspect : constant Real := (if Lens0.Fx > 0.0 and then Lens0.Fy > 0.0 then Lens0.Fy / Lens0.Fx else 1.0);
          Used  : Natural := 0;
       begin
          for X of Pairs.all loop
@@ -6724,7 +6731,7 @@ package body Driver.Robot.Kinematics.Fit is
             procedure Evaluate (X : Real_Array; R : out Real_Array) is
                Jx : constant Joint_Array := Joints_Of (X);
                F  : constant Real := Exp (X (X'Last));
-               Lx : constant Lens := (Fx | Fy => F, Cx => Lens0.Cx, Cy => Lens0.Cy, others => 0.0);
+               Lx : constant Lens := (Fx => F, Fy => Aspect * F, Cx => Lens0.Cx, Cy => Lens0.Cy, others => 0.0);
             begin
                for I in 1 .. Used loop
                   declare
@@ -6773,7 +6780,7 @@ package body Driver.Robot.Kinematics.Fit is
                end;
                Joints := Joints_Of (X);
                Lens0.Fx := Exp (X (Count));
-               Lens0.Fy := Lens0.Fx;
+               Lens0.Fy := Aspect * Lens0.Fx;
             end if;
             Free (Kept);
          end;
