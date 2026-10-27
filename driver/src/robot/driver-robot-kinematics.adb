@@ -2488,8 +2488,16 @@ package body Driver.Robot.Kinematics is
       return N;
    end Agreeing;
 
+   --  Within an estimate the arm is fitted again (Driver.Robot.Recompute's loop) only where a keyframe aligned again
+   --  gives the fit sightings from a keyframe it had none from: a whole keyframe's evidence, a joint's own or an untold
+   --  pair's. More answers in keyframes it already rested on stand in the evidence and the next estimate's fit takes
+   --  them in. Fitted again for them, Panda 1a's estimates late in its sweep (round n33s2, 10-27) each fitted its arm
+   --  three times: 19158, 19267 and 19275 sightings of 203 keyframes, focal 153.61, 153.64 and 153.63 px +- 0.43, the
+   --  last two 20 to 40 s each of the estimate's 132.
    function Realign_Arms (M : in out Model) return Boolean is
       Changed : Boolean := False;
+      --  Whether a keyframe's answers have one a fit rests on (Found).
+      function Any_Found (X : Match_Set) return Boolean is (for some F of X.Found => F);
    begin
       for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
          declare
@@ -2525,13 +2533,13 @@ package body Driver.Robot.Kinematics is
                               Set_Of ("arm" & R.Arm'Image, F, R.Query_U, R.Query_V, Unmoving (R), Offered.all, Answers.all, Agree.all,
                                       Set);
                               if Agreeing (Set, Offered.all) >= Agreeing (R.Matches (S), Offered.all) then
+                                 Changed := Changed or else (Any_Found (Set) and then not Any_Found (R.Matches (S)));
                                  R.Matches.Replace_Element (S, Set);
                                  if Set.Wide = 0 then
                                     R.Frames (F).Image := Driver.Images.No_Image;
                                  end if;
                                  R.Revision := R.Revision + 1;
                                  Done := Done + 1;
-                                 Changed := True;
                               else
                                  declare
                                     Was : Match_Set := R.Matches (S);

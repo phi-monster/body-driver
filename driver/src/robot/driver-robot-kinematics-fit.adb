@@ -8071,6 +8071,43 @@ package body Driver.Robot.Kinematics.Fit is
             --  went to an order its refinement told better than the one kept, the search to go on from it.
             Judged_From : Joint_Lists.Vector;
             Again       : Boolean := False;
+            --  The quick fits and the refinements with every term this search made, by order. Every quick fit is begun
+            --  from Unordered, and every refinement from an order's quick fit (the order kept is always one: Quick_Fit
+            --  at the start, Close_Fit (Best) after a pass, Quick_Fit (Gone_On) on going on), and no pass changes
+            --  either: the same order's fit made again is the same to the bit. A search that came back to an order made
+            --  them again: RB-Y1 2a's second arm (round n32s2, 10-27) went from 7 5 6 4 2 1 3 to 7 5 4 6 2 1 3 and
+            --  back, 236 quick fits and 26 refinements (2324 rounds) in 161 of its fit's 173 s.
+            type Remembered is record
+               Order : Chain_Order (1 .. N);
+               Fit   : Order_Fit;
+            end record;
+            package Remembered_Lists is new Ada.Containers.Vectors (Positive, Remembered);
+            Quick_Made, Refined_Made : Remembered_Lists.Vector;
+            Fits_Remembered : Natural := 0;   --  of the fits made, those taken from the ones made before
+            procedure Recall
+              (Made : Remembered_Lists.Vector; C : Chain_Order; Into : in out Order_Fit; Found : out Boolean) is
+            begin
+               Found := False;
+               for R of Made loop
+                  if R.Order = C then
+                     Into := R.Fit;
+                     Found := True;
+                     return;
+                  end if;
+               end loop;
+            end Recall;
+            --  Order C's quick fit into X: the one made before, or made now and remembered.
+            procedure Quick_Fit_Of (C : Chain_Order; X : in out Order_Fit) is
+               Found : Boolean;
+            begin
+               Recall (Quick_Made, C, X, Found);
+               if Found then
+                  Fits_Remembered := Fits_Remembered + 1;
+               else
+                  Quick_Fit (C, Unordered, X);
+                  Quick_Made.Append (Remembered'(Order => C, Fit => X));
+               end if;
+            end Quick_Fit_Of;
          begin
             --  The sightings by keyframe (a counting sort), and the keyframes of several joints.
             for X of Sight loop
@@ -8125,7 +8162,7 @@ package body Driver.Robot.Kinematics.Fit is
             Unordered.Joints := Joints;
             Unordered.L := Lens0;
             Unordered.Report.Depths := Alone_Depths;
-            Quick_Fit (Start, Unordered, Here);
+            Quick_Fit_Of (Start, Here);
             Fits_Made := Fits_Made + 1;
             --  A verdict that goes to an order its refinement tells better than the one kept goes on from it: the
             --  passes and the verdict again, the untold orders and pairs that order's own. Ended there instead, the
@@ -8245,17 +8282,29 @@ package body Driver.Robot.Kinematics.Fit is
                         declare
                            Last : constant Positive :=
                              (if First = 1 then Natural'Min (Closes, Driver.Workers.Size) else Closes);
+                           Known : array (First .. Last) of Boolean := [others => False];
                            procedure One (K : Positive) is
                            begin
                               if Skipped (K) then
                                  Close_Fit (K).Report.All_Count := 0;
-                              else
+                              elsif not Known (K) then
                                  Quick_Fit (Close (K), Unordered, Close_Fit (K));
                               end if;
                            end One;
                            procedure Every_One is new Driver.Parallel_For (One);
                         begin
+                           for K in First .. Last loop
+                              if not Skipped (K) then
+                                 Recall (Quick_Made, Close (K), Close_Fit (K), Known (K));
+                                 Fits_Remembered := Fits_Remembered + Boolean'Pos (Known (K));
+                              end if;
+                           end loop;
                            Every_One (First, Last);
+                           for K in First .. Last loop
+                              if not Skipped (K) and then not Known (K) then
+                                 Quick_Made.Append (Remembered'(Order => Close (K), Fit => Close_Fit (K)));
+                              end if;
+                           end loop;
                            Fits_Made := Fits_Made + (Last - First + 1);
                            for K in First .. Last loop
                               Fitted_Now := K;
@@ -8612,9 +8661,14 @@ package body Driver.Robot.Kinematics.Fit is
                        Untold_Here > 0
                        and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0);
                      Refined : Fit_Table_Access := new Fit_Table (1 .. Kept_At);
+                     Recalled : array (1 .. Kept_At) of Boolean := [others => False];
+                     function Wanted (K : Positive) return Boolean is
+                       (K = Kept_At or else (Resolvable and then Untold_Of (K)) or else K = Disputed);
+                     function Order_Of (K : Positive) return Chain_Order is
+                       (if K = Kept_At then Here.Order else Close (K));
                      procedure Refine_One (K : Positive) is
                      begin
-                        if K = Kept_At or else (Resolvable and then Untold_Of (K)) or else K = Disputed then
+                        if Wanted (K) and then not Recalled (K) then
                            declare
                               X   : constant Order_Fit := (if K = Kept_At then Here else Close_Fit (K));
                               Jx  : Joint_Array := X.Joints;
@@ -8633,7 +8687,18 @@ package body Driver.Robot.Kinematics.Fit is
                      --  from the joints of one joint's keyframes had not shown it).
                      Beaten_By  : Natural := 0;
                   begin
+                     for K in 1 .. Kept_At loop
+                        if Wanted (K) then
+                           Recall (Refined_Made, Order_Of (K), Refined (K), Recalled (K));
+                           Fits_Remembered := Fits_Remembered + Boolean'Pos (Recalled (K));
+                        end if;
+                     end loop;
                      Refine_All (1, Kept_At);
+                     for K in 1 .. Kept_At loop
+                        if Wanted (K) and then not Recalled (K) then
+                           Refined_Made.Append (Remembered'(Order => Order_Of (K), Fit => Refined (K)));
+                        end if;
+                     end loop;
                      for K in 1 .. Closes loop
                         Fits_Made := Fits_Made + Boolean'Pos ((Resolvable and then Untold_Of (K)) or else K = Disputed);
                      end loop;
@@ -8745,6 +8810,10 @@ package body Driver.Robot.Kinematics.Fit is
                                 & (if Beaten then "; an order refined beside it is the better, the search goes on from it"
                                    else "")
                                 & "; passes" & Passes'Image & "," & Fits_Made'Image & " fits"
+                                & (if Fits_Remembered > 0
+                                   then " (" & Ada.Strings.Fixed.Trim (Fits_Remembered'Image, Ada.Strings.Left)
+                                        & " of them remembered)"
+                                   else "")
                                 & Ada.Strings.Unbounded.To_String (Said));
                Free (Hu);
                Free (Hv);
@@ -8763,7 +8832,7 @@ package body Driver.Robot.Kinematics.Fit is
                   for P of Gone_On loop
                      Judged_From.Append (P);
                   end loop;
-                  Quick_Fit (Gone_On, Unordered, Here);
+                  Quick_Fit_Of (Gone_On, Here);
                end;
                Fits_Made := Fits_Made + 1;
                goto Search_Again;

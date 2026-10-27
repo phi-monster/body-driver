@@ -1487,6 +1487,7 @@ driver-robot-boot.adb	Sign => (if S = Driver.Robot.Motion.Increasing then 1.0 el
 driver-robot-boot.adb	State (Count + 2) := Climbing;	2	structure	the second of a channel's two pushes, the other way
 driver-robot-boot.adb	State : Long_Long_Integer := 1;	1	structure	any seed but zero starts the generator; the group number is used
 driver-robot-boot.adb	State : array (1 .. 2 * Size) of Stop := [others => Blocked];	2	structure	two pushes a channel, one each way
+driver-robot-boot.adb	Took_Widest : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	two pushes a channel, one each way
 driver-robot-boot.adb	Tried_Up : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	a channel has two ways, up and down, and a ladder state for each
 driver-robot-boot.adb	Up_From (I) := 2.0 * Offset (I);	2.0	structure	the ladder climbs by doubling the level (the sweep's levels double)
 driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0];	2	structure	a channel has two ways, up and down, and a ladder state for each

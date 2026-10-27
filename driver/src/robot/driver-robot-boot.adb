@@ -1130,6 +1130,14 @@ package body Driver.Robot.Boot is
                --  255 points, and the ladder went down to 27 and stopped, the joint with no keyframe of its own and the
                --  drone never fitted.
                Up_From    : array (1 .. 2 * Size) of Real := [others => 0.0];
+               --  Per push: its widest turn was taken (the one that moves the view by half of it). The widest is the
+               --  view's half, a target and not a level: measured again from the keyframes after it (the view's motion
+               --  per unit of the joint), it moves by that measure's error, a turn no farther in what it shows. Taken
+               --  again a step the fit counts beyond the one taken, RB-Y1 2a's second arm (round n33s2, 10-27) took
+               --  channel 2's widest at 5.363, 5.429, 5.497, 5.567 and 5.623 units, each way, a pass each with its
+               --  estimate, passes 5 to 10 of its sweep and about 2000 beats; 12 to 16 % of the single keyframes of
+               --  Panda, RB-Y1, Shadow and UR5e lay within a tenth beyond their push's widest before them.
+               Took_Widest : array (1 .. 2 * Size) of Boolean := [others => False];
                Tried_Up   : array (1 .. 2 * Size) of Boolean := [others => False];
                --  Per push: the widest level the aligner followed, and the least it could not after one it did. The
                --  ladder halves the gap between them, a level a pass (Take climbs no level as wide as the second).
@@ -1160,6 +1168,9 @@ package body Driver.Robot.Boot is
                Swept   : array (1 .. Size) of Positive;
                N       : Natural := 0;
                Rounds, Passes : Natural := 0;
+               --  The pairs the last pass's end cells turned (End_Cells) and how many orders were untold then.
+               Ended_Named  : Ada.Strings.Unbounded.Unbounded_String;
+               Ended_Untold : Natural := Natural'Last;
 
                --  What the round's estimate told, read in one held beat after it: how far the view moves per unit of
                --  each channel and the channels it does not see move it (Read_Shifts, Read_Unseen), of every level the
@@ -1343,6 +1354,7 @@ package body Driver.Robot.Boot is
                            then
                               Off := Half / Per_Unit (P.Channel);
                               Widest_Next := True;
+                              Took_Widest (I) := True;
                            end if;
                         end;
                      end if;
@@ -1668,11 +1680,19 @@ package body Driver.Robot.Boot is
                      --  keyframes after its third pass, its order untold, and took its
                      --  cells of every joint and its single turns for 12663 beats and
                      --  four estimates more before its order was told, at 75.
+                     --  The pairs a pass's end turned are not turned again at the next pass's end while the fit names
+                     --  the same pairs and no order was told since, as the order rounds after the passes do (Sweep's
+                     --  last loop): turned again at the share the fit names, which moves only with its lens and
+                     --  points, they give what they gave. RB-Y1 2a's second arm (round n33s2, 10-27) turned c7 with c5
+                     --  by 0.019 and 0.022 units at the ends of passes 5 to 10, each telling its one untold order apart
+                     --  by 0.05 px against 0.18 to 0.20, about 2000 beats with an estimate each.
                      procedure End_Cells is
                      begin
                         if not Told_Now and then not Contested.Is_Empty then
                            declare
-                              Said : Ada.Strings.Unbounded.Unbounded_String;
+                              use type Ada.Strings.Unbounded.Unbounded_String;
+                              Said  : Ada.Strings.Unbounded.Unbounded_String;
+                              Named : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs alone
                            begin
                               for K in Contested.First_Index .. Contested.Last_Index loop
                                  declare
@@ -1680,19 +1700,34 @@ package body Driver.Robot.Boot is
                                     Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
                                  begin
                                     Ada.Strings.Unbounded.Append
+                                      (Named, " c" & Driver.Log.Image (P.Earlier) & " with c"
+                                              & Driver.Log.Image (P.Later));
+                                    Ada.Strings.Unbounded.Append
                                       (Said, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later)
                                              & " by " & Driver.Log.Image (Share (P.Earlier), 3) & " and "
                                              & Driver.Log.Image (Share (P.Later), 3) & " units");
                                  end;
                               end loop;
-                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
-                                               & " ends with its joints' order not told (" & Untold_Now'Image
-                                               & " orders untold); its cells turn the pairs whose turns tell its untold"
-                                               & " orders apart, a pair at a time:" & Ada.Strings.Unbounded.To_String (Said));
+                              if Named = Ended_Named and then Untold_Now >= Ended_Untold then
+                                 Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
+                                                  & " ends with its joints' order not told (" & Untold_Now'Image
+                                                  & " orders untold); the fit names the pairs the last pass's end"
+                                                  & " turned,"
+                                                  & Ada.Strings.Unbounded.To_String (Named)
+                                                  & ", and no order was told since: not turned again");
+                              else
+                                 Ended_Named := Named;
+                                 Ended_Untold := Untold_Now;
+                                 Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
+                                                  & " ends with its joints' order not told (" & Untold_Now'Image
+                                                  & " orders untold); its cells turn the pairs whose turns tell its"
+                                                  & " untold orders apart, a pair at a time:"
+                                                  & Ada.Strings.Unbounded.To_String (Said));
+                                 for K in Contested.First_Index .. Contested.Last_Index loop
+                                    Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
+                                 end loop;
+                              end if;
                            end;
-                           for K in Contested.First_Index .. Contested.Last_Index loop
-                              Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
-                           end loop;
                            Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
                         else
                            Together (Shares, Climb => True);
@@ -1858,10 +1893,12 @@ package body Driver.Robot.Boot is
                                     --  that stopped before at its brake of two patches was left there (Stretch 2b's head,
                                     --  n9s2, 10-26: its tilt at 61 px of 120, the arm fitted within the pass).
                                     if Fitted_Now
+                                      and then not Took_Widest (I)
                                       and then Half / Per_Unit (P.Channel) - Last.Offset > Least (P.Channel)
                                       and then Half / Per_Unit (P.Channel) < Lost_Least (I)
                                     then
                                        Offset (I) := Half / Per_Unit (P.Channel);
+                                       Took_Widest (I) := True;
                                     else
                                        State (I) := Widest;
                                     end if;
