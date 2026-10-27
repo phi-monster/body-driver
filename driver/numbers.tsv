@@ -1604,9 +1604,8 @@ driver-robot-flows.adb	Terms : constant Natural := KFit.Lens_Terms + 6 * Slots;	
 driver-robot-flows.adb	Turn := 2.0 * Turn;	2.0	structure	the turn doubled until an eye sees a change
 driver-robot-flows.adb	Wanted : Positive := 2;	2	statistics	the fewest poses a pose can be left out of (the jackknife over the poses)
 driver-robot-flows.adb	Wanted := 2 * Wanted;	2	structure	the poses double until the eye is told or no surer
-driver-robot-flows.adb	and then 2.0 * Best <= Range_Seen)	2.0	math	a turn either way spans twice the turn, inside the range seen
-driver-robot-flows.adb	Way := (if Best > Turn then 1.0 else -1.0);	1.0	structure	the way the search goes: up
-driver-robot-flows.adb	Way := (if Best > Turn then 1.0 else -1.0);	1.0	structure	the way the search goes: down
+driver-robot-flows.adb	and then 2.0 * Best <= Range_Seen);	2.0	math	a turn either way spans twice the turn, inside the range seen
+driver-robot-flows.adb	and then Best > (1.0 + Driver.Conventions.Unchanged_Fraction) * Turn	1.0	math	grows by more than the fraction that is no change
 driver-robot-flows.adb	& "" & Driver.Log.Image (Turn, 6) & ""	6	format	digits printed in a log line or a message
 driver-robot-flows.adb	& (if Best < Real'Last then Driver.Log.Image (Best, 6) else ""));	6	format	digits printed in a log line or a message
 driver-robot-flows.adb	else (Column (P / 2) + Column (P / 2 + 1)) / 2.0);	2	statistics	the median of an even count: the mean of the middle two
