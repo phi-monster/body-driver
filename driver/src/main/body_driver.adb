@@ -77,6 +77,10 @@ procedure Body_Driver is
       return "";
    end Option;
 
+   --  Whether a flag is given (an option with no value).
+   function Flag (Name : String) return Boolean is
+     (for some I in 1 .. Ada.Command_Line.Argument_Count => Ada.Command_Line.Argument (I) = Name);
+
    procedure Configure (S : Driver.Services.Service; Address : String) is
       Colon : constant Natural := Ada.Strings.Fixed.Index (Address, ":", Ada.Strings.Backward);
    begin
@@ -395,7 +399,7 @@ procedure Body_Driver is
 begin
    if Option ("--listen") = "" then
       Line (Core, "usage: body_driver --listen PORT [--eye HOST:PORT] [--inst HOST:PORT] [--body FILE]"
-            & " [--record FILE]");
+            & " [--record FILE] [--in-beat] [--once]");
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
@@ -415,7 +419,17 @@ begin
       return;
    end if;
    Line (Core, "listening on port" & Natural'Image (Port));
-   Driver.Robot.Compute_Apart (Robot);
+   --  The estimates are made apart from the main loop, which holds the robot still while they are made: a real
+   --  robot's time goes on while the driver computes. A robot that waits for every answer and keeps no time of its own
+   --  (a simulator run as fast as the driver answers: --in-beat) has them made within the beat that asks for them, so
+   --  it holds still for no beats at all: there, a held beat is a picture rendered, sent and dropped, and the hall's
+   --  unpaced rounds (10-28) spent a third of their beats so, Panda seed 1a past 11800 of its 12000 in five minutes.
+   --  The driver's own time is then its beats and its estimates' seconds, both in its log.
+   if Flag ("--in-beat") then
+      Line (Core, "estimates within the beat that asks for them (--in-beat)");
+   else
+      Driver.Robot.Compute_Apart (Robot);
+   end if;
    Decider.Start;
    loop
       Driver.Wire.Accept_Client (Connection, Ok);
@@ -429,6 +443,12 @@ begin
             exit when Kind = Driver.Wire.Closed;
             Message.Query (Handle'Access);
          end loop;
+         --  --once: the driver ends when its robot goes, by the process's own exit (a profiled build writes its
+         --  profile there, and a run's killed driver writes none); the tasks are not waited for.
+         if Flag ("--once") then
+            Line (Core, "the robot disconnected; ending (--once)");
+            GNAT.OS_Lib.OS_Exit (0);
+         end if;
          Line (Core, "the robot disconnected; waiting for it on the same port");
       end if;
    end loop;

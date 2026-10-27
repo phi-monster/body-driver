@@ -45,9 +45,10 @@ project Driver is
    --  The body on a robot: without the assertions (the contracts the tests prove, checked on every call of the
    --  aligner's sampling), the language's own checks kept.
    Release_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g") & Same_Every_Run;
-   --  BD_BUILD=fast: the normal build's checks, optimized for the machine that builds it (-O3, its own instruction set,
-   --  inlining across units), for the batches of fake boots on the big machine.
-   Fast_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g")
+   --  BD_BUILD=fast: what a robot runs (the release build's checks: the language's own, no assertions), optimized for
+   --  the machine that builds it (-O3, its own instruction set, inlining across units), for the hall's rounds on the
+   --  big machine. The self tests run the normal build, assertions and all.
+   Fast_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g")
      & Same_Every_Run;
 
    package Compiler is
