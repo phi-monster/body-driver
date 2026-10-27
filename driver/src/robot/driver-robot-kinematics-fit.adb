@@ -8312,6 +8312,9 @@ package body Driver.Robot.Kinematics.Fit is
                Untold_Here : Natural := 0;
                Same_Arm    : Natural := 0;
                Unswept     : Natural := 0;   --  of the untold, those no turn as wide as the sweep's tells, not slides
+               --  The cheap score's least order among those weighed where it puts itself below the order kept, its place
+               --  (none: 0).
+               Disputed    : Natural := 0;
                Scatter     : Real := Real'Last;
                Followable  : Real := 0.0;
                Reach       : Real_Array (1 .. N) := [others => 0.0];
@@ -8415,6 +8418,13 @@ package body Driver.Robot.Kinematics.Fit is
                for X of Sight loop
                   Tracks := Natural'Max (Tracks, X.Track);
                end loop;
+               if Cheapest /= Here.Order and then Cheapest_M < Kept_M then
+                  for K in 1 .. Closes loop
+                     if Close (K) = Cheapest and then Close_Fit (K).Report.All_Count > 0 then
+                        Disputed := K;
+                     end if;
+                  end loop;
+               end if;
                Predict (Here, Here.Order, Hu.all, Hv.all);
                declare
                   Finite : Real_Access := new Real_Array (1 .. 2 * S);
@@ -8585,8 +8595,16 @@ package body Driver.Robot.Kinematics.Fit is
                --  puts apart waits for its turns whatever they find). Refining every untold order some keyframe put
                --  apart took a nine-joint arm's first round past a minute, its turns not yet taken (the bench's
                --  humanoid s2_1, 10-21).
-               if Untold_Here > 0
-                 and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0)
+               --  And the cheap score's least order where it puts itself below the order kept (Cheapest), told or not:
+               --  the two measures disagree, and the refinement with every term sides with one, or neither. ALOHA seed
+               --  1a's first arm (round n27s2, 10-27): the order kept 6 2 3 1 5 4 told every order weighed apart from
+               --  it, the cheap score's least 6 3 2 1 5 4 (the truth) the first, and the arm stayed untold for the
+               --  rest of the boot; UR5e 1a's, the cheap score's least 1 2 5 3 6 4 (the truth) three moves from
+               --  the kept 5 4 1 3 6 2. Each refined with every term from the start of the boot's last fit, the truth
+               --  left every sighting 0.426 px against 0.434 and 0.380 against 0.427.
+               if (Untold_Here > 0
+                   and then (for all K in 1 .. Closes => not Untold_Of (K) or else Telling_Of (K) > 0))
+                 or else Disputed > 0
                then
                   declare
                      Kept_At : constant Positive := Closes + 1;   --  Here's place among the refined
@@ -8596,7 +8614,7 @@ package body Driver.Robot.Kinematics.Fit is
                      Refined : Fit_Table_Access := new Fit_Table (1 .. Kept_At);
                      procedure Refine_One (K : Positive) is
                      begin
-                        if K = Kept_At or else (Resolvable and then Untold_Of (K)) then
+                        if K = Kept_At or else (Resolvable and then Untold_Of (K)) or else K = Disputed then
                            declare
                               X   : constant Order_Fit := (if K = Kept_At then Here else Close_Fit (K));
                               Jx  : Joint_Array := X.Joints;
@@ -8617,16 +8635,18 @@ package body Driver.Robot.Kinematics.Fit is
                   begin
                      Refine_All (1, Kept_At);
                      for K in 1 .. Closes loop
-                        Fits_Made := Fits_Made + Boolean'Pos (Resolvable and then Untold_Of (K));
+                        Fits_Made := Fits_Made + Boolean'Pos ((Resolvable and then Untold_Of (K)) or else K = Disputed);
                      end loop;
                      Fits_Made := Fits_Made + 1;
                      Predict (Refined (Kept_At), Here.Order, Fu.all, Fv.all);
                      for K in 1 .. Closes loop
-                        if Resolvable and then Untold_Of (K) then
+                        if (Resolvable and then Untold_Of (K)) or else K = Disputed then
                            Predict (Refined (K), Close (K), Su.all, Sv.all);
                            if Told_Over (Fu.all, Fv.all, Su.all, Sv.all) then
-                              Untold_Of (K) := False;
-                              Untold_Here := Untold_Here - 1;
+                              if Untold_Of (K) then
+                                 Untold_Of (K) := False;
+                                 Untold_Here := Untold_Here - 1;
+                              end if;
                               Ada.Strings.Unbounded.Append
                                 (Said, " (" & Image (Close (K)) & ": told with every term refined)");
                            elsif Beaten_By = 0 and then Told_Over (Su.all, Sv.all, Fu.all, Fv.all) then
