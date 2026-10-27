@@ -129,13 +129,15 @@ package Driver.Robot.Kinematics.Fit is
    Lens_Terms : constant := Lens_Term'Pos (Lens_Term'Last) + 1;
    type Joint_Term is (Tilt_1, Tilt_2, Point_1, Point_2, Scale);
    Joint_Terms : constant := Joint_Term'Pos (Joint_Term'Last) + 1;
-   function Moves_The_Fit (Decrease : Real) return Boolean is
-     (Decrease > 0.5 * Driver.Conventions.Unchanged_Fraction ** 2);
+   function Moves_The_Fit (Decrease : Real; Fraction : Real := Driver.Conventions.Unchanged_Fraction)
+     return Boolean is (Decrease > 0.5 * Fraction ** 2);
    --  Whether a step of the final refinement that lowers its cost by Decrease
    --  (half the robust chi square, in units of the noise) is worth taking: it
-   --  moves some combination of the parameters by more than Unchanged_Fraction
-   --  of its standard error (a step of m standard errors along an axis of the
-   --  information lowers the cost by m squared over two, at most). A fraction
+   --  moves some combination of the parameters by more than Fraction of its
+   --  standard error (a step of m standard errors along an axis of the
+   --  information lowers the cost by m squared over two, at most); Fraction is
+   --  Unchanged_Fraction but in the passes before the sightings' choice
+   --  settles, which need their fit no nearer than a standard error. A fraction
    --  of the cost itself would stop short, by several standard errors, on the
    --  axes the data barely determine (the focal length against the distortion),
    --  for the cost they carry is far below any fraction of it.

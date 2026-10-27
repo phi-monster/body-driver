@@ -1589,6 +1589,15 @@ package body Driver.Robot.Kinematics.Fit is
          --  for the rest of the refinement.
          Taken_Out : Flags_Access := new Flags'(1 .. Tracks => False);
          Tracks_Judged : Boolean := False;   --  the tracks were judged (below): once a refinement
+         --  A pass refines its fit to within a standard error (Moves_The_Fit) until the sightings' choice first
+         --  settles, and every pass after that to the end: a pass before only chooses the sightings the next fits,
+         --  and each step of its tail moved the fit by a small part of a standard error. Of Panda 1a's last fit of
+         --  round n35s2, replayed on the Mac (10-28), the first refinement's first pass took 17 rounds, its cost
+         --  down by 720, 4783, 4720, 421, 16, then 0.10, 0.58 and eleven of less than 0.05; its second 17, the last
+         --  six by less than 0.6. Settled after a pass to within a standard error, the choice is fitted again to the
+         --  end in one more pass, which goes on as every pass did (the last pass Began allows is one to the end).
+         Strict     : Boolean := False;   --  the choice settled once: every pass from now on to the end
+         Loose_Pass : Boolean := False;   --  the pass under way refines to within a standard error
          X      : Real_Array (1 .. Count);
          --  The sightings each pass began with: the passes end where the choice settles or returns to one it began
          --  from (a choice that cycles has no fixed point to wait for), and at most as many as the float has bits.
@@ -2106,6 +2115,7 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
                exit when 2 * Used <= Count + Tracks;
                Passes := Passes + 1;
+               Loose_Pass := not Strict and then Passes < Began'Last;
                Began (Passes) := new Flags'(Inlier.all);
                declare
                   Index : Real_Access := new Real_Array (1 .. Used);
@@ -2136,6 +2146,9 @@ package body Driver.Robot.Kinematics.Fit is
                   Frame_Rows : Row_Lists := [others => null];
                   --  Per keyframe, the residuals of the relayed sightings it anchors: their sums through its eye.
                   Anchor_Rows : Row_Lists := [others => null];
+                  --  Per track, its sightings (their places among the Used), in their order (Cross_Of).
+                  type Track_Row_Lists is array (1 .. Tracks) of Natural_Access;
+                  Track_Rows : Track_Row_Lists := [others => null];
                   K     : Natural := 0;
                   Lambda : Real := Real'Model_Epsilon;
                   Cost0 : Real;
@@ -2208,6 +2221,25 @@ package body Driver.Robot.Kinematics.Fit is
                         end if;
                      end loop;
                   end;
+                  --  Per track, its sightings (their places among the Used), in their order (Cross_Of).
+                  declare
+                     Taken : array (1 .. Tracks) of Natural := [others => 0];
+                     T     : Positive;
+                  begin
+                     for At_K in 1 .. Used loop
+                        T := Sight (Sight'First + Natural (Index (At_K)) - 1).Track;
+                        Taken (T) := Taken (T) + 1;
+                     end loop;
+                     for U in 1 .. Tracks loop
+                        Track_Rows (U) := new Natural_Array (1 .. Taken (U));
+                        Taken (U) := 0;
+                     end loop;
+                     for At_K in 1 .. Used loop
+                        T := Sight (Sight'First + Natural (Index (At_K)) - 1).Track;
+                        Taken (T) := Taken (T) + 1;
+                        Track_Rows (T) (Taken (T)) := At_K;
+                     end loop;
+                  end;
                   Residuals (X, Depth.all, Index, R0.all);
                   declare
                      Model : constant Error_Model := Model_Of (R0.all, Owns.all);
@@ -2227,6 +2259,9 @@ package body Driver.Robot.Kinematics.Fit is
                      for F in 1 .. Frames loop
                         Free (Frame_Rows (F));
                         Free (Anchor_Rows (F));
+                     end loop;
+                     for J in 1 .. Tracks loop
+                        Free (Track_Rows (J));
                      end loop;
                      Free (Jd);
                      Free (Owns);
@@ -2495,6 +2530,8 @@ package body Driver.Robot.Kinematics.Fit is
                      declare
                         A  : Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Count) := [others => [others => 0.0]];
                         Bm : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Count, 1 .. Tracks);
+                        --  The same terms by track, made once the sums are (after Crosses): the solve reads a track's at once.
+                        Bt : Matrix_Access := null;
                         C  : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
                         Gp : Real_Vector (1 .. Count) := [others => 0.0];
                         Gd : Real_Access := new Real_Array'(1 .. Tracks => 0.0);
@@ -2745,20 +2782,38 @@ package body Driver.Robot.Kinematics.Fit is
                                     for Q in Sum_A'Range loop
                                        A (P, Q) := Sum_A (Q);
                                     end loop;
-                                    for K in 1 .. Used loop
-                                       if Moved (Fz (K), J) then
-                                          declare
-                                             Sum : Real := 0.0;
-                                          begin
-                                             for L in 1 .. 6 loop
-                                                Sum := Sum + Pz (Fz (K), P, L) * Cz (K, L);
-                                             end loop;
-                                             Bz (P, Tz (2 * K)) := Bz (P, Tz (2 * K)) + Sum;
-                                          end;
-                                       end if;
+                                 end;
+                              end if;
+                           end Row_Of;
+                           procedure Rows is new Driver.Parallel_For (Row_Of);
+                           --  A track's cross terms with the joint terms (Bz's rows from 7), over its own sightings in
+                           --  their order (Track_Rows), each sighting's eye derivatives (Pz) read once for every term.
+                           --  Summed term by term over every sighting (Row_Of), each term's row read the eyes of the
+                           --  keyframes in turn, and those sums were most of the rows' time: of Panda 1a's last fit of
+                           --  round n35s2, replayed on the Mac (10-28), 14 of the 37 thousand busy samples. The same
+                           --  additions, in the same order.
+                           procedure Cross_Of (T : Positive) is
+                              Acc : Real_Array (7 .. Count) := [others => 0.0];
+                              Ta  : constant Positive := Track_Anchor (T);
+                           begin
+                              for K of Track_Rows (T).all loop
+                                 declare
+                                    F : constant Positive := Fz (K);
+                                 begin
+                                    for P in 7 .. Count loop
                                        declare
-                                          Ta : constant Positive := Track_Anchor (Tz (2 * K));
+                                          J : constant Positive := (P - 7) / Per_Joint + 1;
                                        begin
+                                          if Moved (F, J) then
+                                             declare
+                                                Sum : Real := 0.0;
+                                             begin
+                                                for L in 1 .. 6 loop
+                                                   Sum := Sum + Pz (F, P, L) * Cz (K, L);
+                                                end loop;
+                                                Acc (P) := Acc (P) + Sum;
+                                             end;
+                                          end if;
                                           if Ta > 1 and then Moved (Ta, J) then
                                              declare
                                                 Sum : Real := 0.0;
@@ -2766,15 +2821,18 @@ package body Driver.Robot.Kinematics.Fit is
                                                 for L in 1 .. 6 loop
                                                    Sum := Sum + Pz (Ta, P, L) * Caz (K, L);
                                                 end loop;
-                                                Bz (P, Tz (2 * K)) := Bz (P, Tz (2 * K)) + Sum;
+                                                Acc (P) := Acc (P) + Sum;
                                              end;
                                           end if;
                                        end;
                                     end loop;
                                  end;
-                              end if;
-                           end Row_Of;
-                           procedure Rows is new Driver.Parallel_For (Row_Of);
+                              end loop;
+                              for P in 7 .. Count loop
+                                 Bz (P, T) := Acc (P);
+                              end loop;
+                           end Cross_Of;
+                           procedure Crosses is new Driver.Parallel_For (Cross_Of);
                         begin
                            for I in 1 .. 2 * Used loop
                               Wz (I) := Huber (Rz (I) / Scales (I)) / Scales (I) ** 2;
@@ -2823,6 +2881,13 @@ package body Driver.Robot.Kinematics.Fit is
                            end loop;
                            Every_Frame_Sum (1, Frames);
                            Rows (1, Count + 1);
+                           Crosses (1, Tracks);
+                           Bt := new Driver.Numerics.Arrays.Real_Matrix (1 .. Tracks, 1 .. Count);
+                           for T in 1 .. Tracks loop
+                              for P in 1 .. Count loop
+                                 Bt (T, P) := Bm (P, T);
+                              end loop;
+                           end loop;
                            Free (Sums);
                            Free (Cross);
                            Free (Anchor_Cross);
@@ -2894,10 +2959,10 @@ package body Driver.Robot.Kinematics.Fit is
                                  procedure Eliminate (P : Positive) is
                                  begin
                                     for T in 1 .. Tracks loop
-                                       if Cl (T) > 0.0 and then Bm (P, T) /= 0.0 then
-                                          Rhs (P) := Rhs (P) - Bm (P, T) * Gd (T) / Cl (T);
+                                       if Cl (T) > 0.0 and then Bt (T, P) /= 0.0 then
+                                          Rhs (P) := Rhs (P) - Bt (T, P) * Gd (T) / Cl (T);
                                           for Q in 1 .. Count loop
-                                             Sm (P, Q) := Sm (P, Q) - Bm (P, T) * Bm (Q, T) / Cl (T);
+                                             Sm (P, Q) := Sm (P, Q) - Bt (T, P) * Bt (T, Q) / Cl (T);
                                           end loop;
                                        end if;
                                     end loop;
@@ -2970,7 +3035,7 @@ package body Driver.Robot.Kinematics.Fit is
                                              Sum : Real := Gd (T);
                                           begin
                                              for P in 1 .. Count loop
-                                                Sum := Sum - Bm (P, T) * Dx (P);
+                                                Sum := Sum - Bt (T, P) * Dx (P);
                                              end loop;
                                              Dn (T) := Depth (T) + Sum / Cl (T);
                                              Moves := Moves or else Dn (T) /= Depth (T);
@@ -2983,7 +3048,9 @@ package body Driver.Robot.Kinematics.Fit is
                                           Cn : constant Real := Cost (Rn.all, Xn);
                                        begin
                                           if Cn < Cost0 then
-                                             Improved := Moves_The_Fit (Cost0 - Cn);
+                                             Improved := Moves_The_Fit
+                                               (Cost0 - Cn,
+                                                (if Loose_Pass then 1.0 else Driver.Conventions.Unchanged_Fraction));
                                              X := Xn;
                                              Depth.all := Dn.all;
                                              R0.all := Rn.all;
@@ -3012,7 +3079,10 @@ package body Driver.Robot.Kinematics.Fit is
                         --  (only the point nearest the eye is kept, two numbers in
                         --  the plane across the axis), and every length scales
                         --  together (the depth of the track seen most is held).
-                        if not Improved then
+                        --  Only once the sightings' choice has settled (not Loose_Pass): a pass before is followed by
+                        --  another, which makes all of it again. Panda 1a's last fit of round n35s2, replayed on the Mac
+                        --  (10-28): 29.0 s made in every pass, 27.3 s in the passes after the choice settles alone.
+                        if not Improved and then not Loose_Pass then
                            for T in 1 .. Tracks loop
                               Depth_Sigma (T) := (if C (T) > 0.0 then 1.0 / Sqrt (C (T)) else Real'Last);
                            end loop;
@@ -3349,6 +3419,7 @@ package body Driver.Robot.Kinematics.Fit is
                            end;
                         end if;
                         Free (Bm);
+                        Free (Bt);
                         Free (C);
                         Free (Gd);
                         exit when not Improved;
@@ -3364,6 +3435,9 @@ package body Driver.Robot.Kinematics.Fit is
                   for F in 1 .. Frames loop
                      Free (Frame_Rows (F));
                      Free (Anchor_Rows (F));
+                  end loop;
+                  for J in 1 .. Tracks loop
+                     Free (Track_Rows (J));
                   end loop;
                   Free (Jd);
                   Free (Owns);
@@ -3635,8 +3709,13 @@ package body Driver.Robot.Kinematics.Fit is
                Free (All_Index);
                Free (All_R);
                Free (All_Own);
-               exit when Now_Changed = 0 or else Passes = Began'Last
-                 or else (for some Earlier of Began (1 .. Passes) => Earlier.all = Inlier.all);
+               declare
+                  Settled : constant Boolean := Now_Changed = 0 or else Passes = Began'Last
+                    or else (for some Earlier of Began (1 .. Passes) => Earlier.all = Inlier.all);
+               begin
+                  exit when Settled and then not Loose_Pass;
+                  Strict := Strict or else Settled;
+               end;
             end;
          end loop;
          --  What the stage's time was made of (B0a: 14 to 115 s a stage on 95 workers, the rounds unknown).
