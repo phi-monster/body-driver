@@ -193,6 +193,12 @@ private package Driver.Robot.Kinematics is
 
    function Fitted (M : Model; A : Arm_Id) return Boolean;
 
+   function Predicts_Narrow (M : Model; A : Arm_Id; Readings : Real_Array) return Boolean;
+   --  The arm is fitted and its prediction of its reference's points in a keyframe at those readings (the group's,
+   --  every channel) states a window no wider than a patch carries where its eye's pictures are finest
+   --  (Driver.Alignment.Finest_Radius), on the median of the points it predicts: the aligner follows that keyframe
+   --  at its finest size, from the prediction alone.
+
    function Contested_Pairs (M : Model; A : Arm_Id) return Joint_Pair_Lists.Vector;
    --  The joints next to each other along the fitted order whose swap leaves residuals not significantly the
    --  larger (Fit_Report's Untold): what the order lacks the evidence of. None when the order is told, or every

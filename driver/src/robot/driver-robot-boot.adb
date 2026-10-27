@@ -1341,6 +1341,35 @@ package body Driver.Robot.Boot is
                            Off := (if Per_Unit (P.Channel) > 0.0 then Real'Max (2.0 * Off, Patch / Per_Unit (P.Channel))
                                    else 2.0 * Off);
                            Last := Off >= Lost_Least (I);
+                           --  A fitted arm whose prediction at the widest turn the aligner follows at its finest
+                           --  size (Kinematics.Predicts_Narrow) takes the widest next, not the doublings below it: the
+                           --  levels between are there to be followed from the one before, and the fit follows this one
+                           --  by itself. Doubled up to it, RB-Y1 2a's second arm (round n33s2, 10-27) took channel 1 at
+                           --  0.522, 1.043, 2.086 and 4.173 units each way before its widest at 5.0, its fit predicting
+                           --  the joints' single turns within 0.7 to 1.0 px; a 7-joint arm's sweep was 5500 to 11800
+                           --  beats, 129 to 298 keyframes. A prediction too wide for that climbs by doubling as before.
+                           if not Last and then Fitted_Now and then not Took_Widest (I)
+                             and then Per_Unit (P.Channel) > 0.0
+                             and then Off * Per_Unit (P.Channel) <= Half
+                             and then Half / Per_Unit (P.Channel) < Lost_Least (I)
+                           then
+                              declare
+                                 Widest_Pose  : Real_Array := Start;
+                                 Narrow_There : Boolean := False;
+                                 procedure Ask_Narrow is
+                                 begin
+                                    Narrow_There := Driver.Robot.Kinematics.Predicts_Narrow (M, A, Widest_Pose);
+                                 end Ask_Narrow;
+                              begin
+                                 Widest_Pose (P.Channel) := Start (P.Channel) + P.Sign * Half / Per_Unit (P.Channel);
+                                 Driver.Beats.Within_A_Beat (Ask_Narrow'Access);
+                                 if Narrow_There then
+                                    Off := Half / Per_Unit (P.Channel);
+                                    Widest_Next := True;
+                                    Took_Widest (I) := True;
+                                 end if;
+                              end;
+                           end if;
                            --  The widest turn is the one that moves the view half of it (Half), and a doubling that would
                            --  pass it stops the ladder short of it, at a half to the whole of it: the turn itself is taken
                            --  next where it is a step the fit counts beyond the level just taken (Least) and short of a

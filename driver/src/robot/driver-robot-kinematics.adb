@@ -4471,6 +4471,40 @@ package body Driver.Robot.Kinematics is
    function Fitted (M : Model; A : Arm_Id) return Boolean is
      (Index_Of (M, A) > 0 and then M.Kinematics (Index_Of (M, A)).Result.Fitted);
 
+   function Predicts_Narrow (M : Model; A : Arm_Id; Readings : Real_Array) return Boolean is
+   begin
+      if not Fitted (M, A) then
+         return False;
+      end if;
+      declare
+         R       : Arm_Evidence renames M.Kinematics (Index_Of (M, A));
+         Queries : constant Natural := Natural (R.Query_U.Length);
+      begin
+         if Queries = 0 or else R.Frames.Is_Empty or else Driver.Images.Width (R.Frames (1).Image) = 0 then
+            return False;
+         end if;
+         declare
+            Offered : Prediction_Access := new Keyframes.Prediction_Array (1 .. Queries);
+            Known   : Boolean;
+            Narrow  : Boolean := False;
+         begin
+            Offer_Of (M, R, Readings, Offered.all, Known);
+            if Known then
+               declare
+                  Stated : constant Real := Stated_By (Offered.all);
+               begin
+                  Narrow := Stated < Real'Last
+                    and then Driver.Alignment.Window_Radius (Stated)
+                             <= Driver.Alignment.Finest_Radius (Driver.Images.Width (R.Frames (1).Image),
+                                                                Driver.Images.Height (R.Frames (1).Image));
+               end;
+            end if;
+            Free (Offered);
+            return Narrow;
+         end;
+      end;
+   end Predicts_Narrow;
+
    function Contested_Pairs (M : Model; A : Arm_Id) return Joint_Pair_Lists.Vector is
       None : Joint_Pair_Lists.Vector;
    begin
