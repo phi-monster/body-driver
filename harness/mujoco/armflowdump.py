@@ -147,7 +147,8 @@ def frame(img):
     x = img.astype(np.float32)
     x += np.sqrt(K_e * x + read_levels ** 2) * noise_rng.standard_normal(x.shape, dtype=np.float32)
     x = np.clip(np.rint(x), 0, 255).astype(np.uint8)
-    if sn["jpeg"]:
+    # BD_NO_JPEG: the camera's noise and rounding without its JPEG
+    if sn["jpeg"] and not os.environ.get("BD_NO_JPEG"):
         buf = io.BytesIO(); Image.fromarray(x).save(buf, format="JPEG", quality=sn["jpeg"])
         x = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB"))
     return luma(x)
