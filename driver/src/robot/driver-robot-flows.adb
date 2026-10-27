@@ -71,6 +71,9 @@ package body Driver.Robot.Flows is
       Unit_Sigma : Real_Access;
       Steps  : Real_Access;
       Taken  : Natural := 0;
+      --  Whether the arm stands at its first pose by the positioning that ended its last taking, and nothing of it moved
+      --  since.
+      Parked : Boolean := False;
       --  The turns the fits of the eyes that see the arm asked for at their last fits (Flow_Eye.Joint_Turns, the least
       --  over the eyes; nought where none did), whether the turns are those (the first pose's search not run again),
       --  and every set of turns the arm's poses were taken at, N a set.
@@ -495,6 +498,7 @@ package body Driver.Robot.Flows is
             procedure Go_To (Target : Real_Array) is
                C : Driver.Commands.Command;
             begin
+               Info.Parked := False;
                Driver.Commands.Set_Target (C, Info.Group, Target);
                Driver.Robot.Motion.Step (M, C, Report, Land => True);
             end Go_To;
@@ -719,9 +723,15 @@ package body Driver.Robot.Flows is
                Achieved : Real_Array (1 .. N) := [others => 0.0];
                Spreads  : array (1 .. Count_E) of Real_Array (1 .. N) := [others => [others => 0.0]];
             begin
-               Go_To (Pose);
-               if Report.Outcome /= Driver.Robot.Motion.Reached then
-                  return;
+               --  The first pose taken again (Resize) where the arm already stands, not asked of it again: a push asking
+               --  nothing it can execute goes unanswered, an unanswered push is blocked, and the pose was lost so (round
+               --  n24s2, 10-27, SO-101 seed 1b: its poses taken again at the turns its fit asked for kept one, the eye
+               --  was not fitted again and step 3 ended there, at two poses).
+               if not (K = 1 and then Info.Parked) then
+                  Go_To (Pose);
+                  if Report.Outcome /= Driver.Robot.Motion.Reached then
+                     return;
+                  end if;
                end if;
                Take (Still);
                if K = 1 and then not Info.Sized then
@@ -837,6 +847,7 @@ package body Driver.Robot.Flows is
                end loop;
             end if;
             Go_To (Pose_Targets (1));
+            Info.Parked := Report.Outcome = Driver.Robot.Motion.Reached;
          end Capture_Arm;
 
          --  Every eye not yet placed fitted to every arm it saw two poses of or more, through its one lens: stored when

@@ -1631,6 +1631,7 @@ driver-robot-flows.adb	if (for all D in 2 .. N - 1 => N mod D /= 0 or else D * D
 driver-robot-flows.adb	if Arms (S) = 1 then	1	structure	the world is the first arm's frame
 driver-robot-flows.adb	if K = 1 and then not Info.Sized then	1	structure	the first pose is the reference
 driver-robot-flows.adb	if Sees_It (E, A) and then Natural (Captures (E, A).Length) >= 2 then	2	statistics	the fewest poses a pose can be left out of (the jackknife over the poses)
+driver-robot-flows.adb	if not (K = 1 and then Info.Parked) then	1	structure	the first pose is the reference, where the arm is parked after a taking
 driver-robot-flows.adb	or else (Info.Eye > 0 and then Driver.Pixels.Frames (M.Eyes (Info.Eye).Settled) < 2)	2	structure	a still view is a mean of two frames or more
 driver-robot-flows.adb	or else Natural (R.Covariance.Length) /= Terms ** 2 or else Natural (R.Table_Response.Length) /= 3 * Terms	3	structure	the response's three rows, one a term of the plane's A
 driver-robot-flows.adb	while Turn > 0.0 and then 2.0 * Turn <= Range_Seen loop	2.0	math	a turn either way spans twice the turn, inside the range seen
