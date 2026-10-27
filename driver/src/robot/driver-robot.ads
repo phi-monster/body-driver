@@ -1095,6 +1095,7 @@ private
       Settling_Kept  : Lag_Vectors.Vector;         --  per eye: the longest it took to settle after a move, as the
                                                    --  body file kept it (Longest_Settling); empty when none was
       Began_Moving   : Flag_Vectors.Vector;        --  per beat: some commandable group began to move
+      Moving_At      : Flag_Vectors.Vector;        --  per beat: some commandable group moved (Channels.Moving)
       Graph          : Body_Graph;
       Graph_Evidence : Natural := 0;               --  push beats behind the current graph
       Lag_Evidence   : Natural := 0;               --  the beats the eyes' lags were last measured from (Recompute)

@@ -4467,6 +4467,7 @@ driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (S
 driver-robot-stillness.adb	if L'Length >= 2 then	2	statistics	a scale is measured from two levels at least
 driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	1	structure	the doubling of the stationary sample begins at one beat
 driver-robot-stillness.adb	if Natural (S.Watch_Diffs.Length) >= 2 * Natural'Max (1, S.Watch_Scatter_Counted) then	2	math	doubling: the medians are recomputed when the stationary beats have doubled
+driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) >= 2 then	2	statistics	a variance needs two frames: a run of fewer measured no noise
 driver-robot-stillness.adb	if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then	2	statistics	a variance needs two frames
 driver-robot-stillness.adb	or else S.Watch_Run >= 2)	2	statistics	a level holds when two stationary steps in a row agree on it (the agreed settling rule)
 driver-robot-surfaces.adb	& C.Edge'Image & "" & Driver.Log.Image (C.Error, 3) & "");	3	format	digits printed in a log line or a message

@@ -41,9 +41,21 @@ package body Driver.Robot.Stillness is
       return Count;
    end Changed_Pixels;
 
-   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array) is
+   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array; Moved : Boolean) is
       W : constant Positive := Driver.Images.Width (Frame);
       H : constant Positive := Driver.Images.Height (Frame);
+      --  The still view begins again at this frame; the run it ends measured the noise, when it was the longest so far
+      --  and held two frames.
+      procedure Start_Again is
+      begin
+         if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) >= 2 then
+            S.Noise_View := S.Settled;
+            S.Noise_Is_Settled := False;
+         end if;
+         S.Settled := Driver.Pixels.Empty (W, H);
+         Driver.Pixels.Add (S.Settled, Frame);
+         S.Run_Moved := False;
+      end Start_Again;
    begin
       if not S.Has_Settled or else Driver.Pixels.Width (S.Settled) /= W or else Driver.Pixels.Height (S.Settled) /= H
       then
@@ -59,7 +71,11 @@ package body Driver.Robot.Stillness is
       --  The noise of a pixel needs two frames to be measured at all; until
       --  then the frames start the first run, unjudged.
       if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) < 2 then
-         Driver.Pixels.Add (S.Settled, Frame);
+         if Moved then
+            Start_Again;
+         else
+            Driver.Pixels.Add (S.Settled, Frame);
+         end if;
          S.Is_Still := False;
          S.Has_Judged := False;
          return;
@@ -80,7 +96,14 @@ package body Driver.Robot.Stillness is
       begin
          S.Is_Still := not Regression.Count_Significant (Changed, W * H, P0);
       end;
-      if S.Is_Still then
+      --  A frame taken while the body moved shows no still picture of where it stands, however small the change one
+      --  frame's test can see: a change too small for it, against the still view's noise, can be plain between two
+      --  still views' means (SO-101's base camera on the hall, 10-27: its elbow turned 0.0084 rad either way for
+      --  step 3's flows, the frames at the second turn joined the still view of the first, and the turn's change
+      --  between the two views was a fifth to a third of the true turn's).
+      if Moved then
+         Start_Again;
+      elsif S.Is_Still then
          Driver.Pixels.Add (S.Settled, Frame);
          --  The longest still run is the best measure of the eye's noise; a run that holds frames the noise called
          --  changed measures none.

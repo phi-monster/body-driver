@@ -95,6 +95,9 @@ package body Driver.Robot is
       --  settle watch starts afresh when its frames show that beat, its lag
       --  later, so the first change it weighs is the move's own.
       Began_Moving : Boolean := False;
+      --  Some commandable group moved at this beat (its readings, Channels.Moving): each picture taken while it did
+      --  starts its still view afresh (Stillness.Judge_Eye).
+      Moving : Boolean := False;
 
       --  One eye's picture of this beat, into its own stream.
       procedure One_Eye (Index : Positive) is
@@ -161,7 +164,19 @@ package body Driver.Robot is
                end if;
                Stage_Done (Flow_Stage);
                if Fresh then
-                  Stillness.Judge_Eye (S, O.Images (E), S.Current.all);
+                  --  The frame shows the body as read at its lag before; taken within that beat, it shows that beat's
+                  --  motion when the readings moved at it, and the beat before's when they moved at that.
+                  declare
+                     Shown : constant Integer := M.Beats - Natural'Max (0, Image_Lag (M, E));
+                     Moved : Boolean := False;
+                  begin
+                     for B in Integer'Max (M.Moving_At.First_Index, Shown - 1)
+                       .. Integer'Min (M.Moving_At.Last_Index, Shown)
+                     loop
+                        Moved := Moved or else M.Moving_At (B);
+                     end loop;
+                     Stillness.Judge_Eye (S, O.Images (E), S.Current.all, Moved);
+                  end;
                   if S.Luma_Variance.Is_Empty then
                      Stillness.Measure_Luma_Noise (S);
                   end if;
@@ -224,13 +239,15 @@ package body Driver.Robot is
       procedure Each_Eye is new Driver.Parallel_For (One_Eye);
    begin
       for G in M.Groups.First_Index .. M.Groups.Last_Index loop
-         if M.Groups (G).Commandable and then Channels.Moving (M, G, M.Beats)
-           and then not (M.Beats > 0 and then Channels.Moving (M, G, M.Beats - 1))
-         then
-            Began_Moving := True;
+         if M.Groups (G).Commandable and then Channels.Moving (M, G, M.Beats) then
+            Moving := True;
+            if not (M.Beats > 0 and then Channels.Moving (M, G, M.Beats - 1)) then
+               Began_Moving := True;
+            end if;
          end if;
       end loop;
       M.Began_Moving.Append (Began_Moving);
+      M.Moving_At.Append (Moving);
       if M.Eyes.Is_Empty then
          for E in O.Images.First_Index .. O.Images.Last_Index loop
             M.Eyes.Append (Eye_Stream'(others => <>));

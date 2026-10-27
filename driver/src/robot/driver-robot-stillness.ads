@@ -30,11 +30,13 @@
 
 private package Driver.Robot.Stillness is
 
-   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array)
+   procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array; Moved : Boolean)
      with Pre => not Driver.Images.Is_Empty (Frame)
                  and then Luma'Length = Driver.Images.Width (Frame) * Driver.Images.Height (Frame);
    --  One beat of an eye that has a frame, and the frame's luma (Driver.Images.Luma):
-   --  judges it and updates its views.
+   --  judges it and updates its views. Moved: the frame was taken while the body moved, by its readings (Observe_Eyes:
+   --  the beat it shows, or the beat before, moved); it starts the still view afresh, whatever the judgement says of
+   --  its change, which stays the picture's own.
 
    procedure Measure_Luma_Noise (S : in out Eye_Stream)
      with Pre => S.Has_Settled;

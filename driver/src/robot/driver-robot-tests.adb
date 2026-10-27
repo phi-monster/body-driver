@@ -1977,7 +1977,7 @@ package body Driver.Robot.Tests is
             L : Real_Array (1 .. Driver.Images.Width (I) * Driver.Images.Height (I));
          begin
             Driver.Images.Luma (I, L);
-            Stillness.Judge_Eye (S, I, L);
+            Stillness.Judge_Eye (S, I, L, Moved => False);
          end;
       end Judge;
    begin
@@ -2007,6 +2007,68 @@ package body Driver.Robot.Tests is
          Check (S.Is_Still, "the moved patch rests again at frame" & B'Image);
       end loop;
    end Eye_Stillness;
+
+   --  A frame taken while the body moved, by its readings, starts the still view afresh though one frame's test sees no
+   --  change in it; the same frame of a body that stood joins the view; the picture's own verdict is the same either
+   --  way. SO-101's base camera on the hall (10-27): the elbow's least visible turn for step 3, unseen frame by frame,
+   --  was averaged into the still view of the turn before it.
+   procedure Eye_Still_View_Starts_At_Motion is
+      Rng          : Generator;
+      Stood, Moved : Eye_Stream;
+
+      --  Eye_Stillness's picture: the texture with a level of Gaussian noise, a 16 x 16 patch moved Shift pixels.
+      function Frame (Shift : Real) return Driver.Images.Image is
+         use type Driver.Bytes.Offset;
+         Data : Driver.Bytes.Byte_Array (1 .. 3 * Rig_Width * Rig_Height);
+      begin
+         for Y in 0 .. Rig_Height - 1 loop
+            for X in 0 .. Rig_Width - 1 loop
+               declare
+                  Off : constant Real := (if X in 20 .. 35 and then Y in 16 .. 31 then Shift else 0.0);
+                  L   : constant Real := Texture (Real (X) - Off, Real (Y)) + Gaussian (Rng);
+                  V   : constant Driver.Bytes.Byte :=
+                    Driver.Bytes.Byte (Integer (Real'Max (0.0, Real'Min (255.0, L))));
+                  K   : constant Driver.Bytes.Offset := Driver.Bytes.Offset (3 * (Y * Rig_Width + X) + 1);
+               begin
+                  Data (K) := V;
+                  Data (K + 1) := V;
+                  Data (K + 2) := V;
+               end;
+            end loop;
+         end loop;
+         return Driver.Images.Create (Rig_Width, Rig_Height, Data);
+      end Frame;
+
+      procedure Judge (S : in out Eye_Stream; I : Driver.Images.Image; Body_Moved : Boolean) is
+         L : Real_Array (1 .. Driver.Images.Width (I) * Driver.Images.Height (I));
+      begin
+         Driver.Images.Luma (I, L);
+         Stillness.Judge_Eye (S, I, L, Body_Moved);
+      end Judge;
+   begin
+      for B in 1 .. 10 loop
+         declare
+            F : constant Driver.Images.Image := Frame (0.0);
+         begin
+            Judge (Stood, F, Body_Moved => False);
+            Judge (Moved, F, Body_Moved => False);
+         end;
+      end loop;
+      declare
+         Before : constant Natural := Driver.Pixels.Frames (Stood.Settled);
+         F      : constant Driver.Images.Image := Frame (0.02);
+      begin
+         Judge (Stood, F, Body_Moved => False);
+         Judge (Moved, F, Body_Moved => True);
+         Check (Stood.Is_Still, "a patch moved by a fiftieth of a pixel is a change one frame's test sees");
+         Check (Driver.Pixels.Frames (Stood.Settled) = Before + 1,
+                "a frame of a body that stood, its change unseen, was left out of the still view");
+         Check (Moved.Is_Still = Stood.Is_Still, "the body's readings changed the picture's own verdict on a frame");
+         Check (Driver.Pixels.Frames (Moved.Settled) = 1,
+                "a frame taken while the body moved joined the still view of before it:"
+                & Driver.Pixels.Frames (Moved.Settled)'Image & " frames");
+      end;
+   end Eye_Still_View_Starts_At_Motion;
 
    --  The one stop rule on pictures of three kinds, each after a move that began the watch: noise that wanders
    --  (every pixel a random walk, as A22's three eyes were at rest: a change over two beats 1.43 to 1.46 times one
@@ -9810,6 +9872,9 @@ package body Driver.Robot.Tests is
                              & "answer is not the measured delay", Step_Responses'Access);
       Driver.Tests.Register ("robot.stillness", "an eye with ordinary camera noise never comes to rest, or a moving "
                              & "patch goes unnoticed", Eye_Stillness'Access);
+      Driver.Tests.Register ("robot.stillness.moved", "a frame taken while the body moved joins the still view of "
+                             & "before it, or a frame of a body that stood is left out of it, or the body's readings "
+                             & "change the picture's own verdict", Eye_Still_View_Starts_At_Motion'Access);
       Driver.Tests.Register ("robot.stillness.watch", "a picture whose noise wanders from beat to beat, or flickers, is "
                              & "not at rest within a few beats of a move, or a drift is, or a move that decays is before "
                              & "it has", Eye_Watch_Stops_On_Noise_Not_On_Drift'Access);
