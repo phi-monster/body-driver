@@ -1053,25 +1053,6 @@ package body Driver.Robot.Boot is
                Driver.Robot.Kinematics.Ask_Fit (M, A);
             end Ask_For_Fit;
 
-            --  And the fit made in place: the decider reads it after the next estimate (Kinematics.Fit_Now).
-            procedure Ask_For_Fit_Now is
-            begin
-               Driver.Robot.Kinematics.Ask_Fit (M, A);
-               Driver.Robot.Kinematics.Fit_Now (M, A);
-            end Ask_For_Fit_Now;
-
-            --  The fit under way taken in at the next estimate, a fit due made in place (Kinematics.Fit_Now).
-            procedure Fit_Now_For is
-            begin
-               Driver.Robot.Kinematics.Fit_Now (M, A);
-            end Fit_Now_For;
-
-            --  The arm's fits made in place from its next estimate on (Kinematics.End_Sweep).
-            procedure End_Its_Sweep is
-            begin
-               Driver.Robot.Kinematics.End_Sweep (M, A);
-            end End_Its_Sweep;
-
             --  Whether the arm is fitted now, read in a held beat (the levels' own verdicts: Read_Round).
             Fitted_Now   : Boolean := False;
             Told_Now     : Boolean := False;   --  and its joints' order told (Kinematics.Order_Told)
@@ -1952,13 +1933,6 @@ package body Driver.Robot.Boot is
                         End_Cells;
                         Measure_The_Round;
                      end if;
-                     --  Where no push climbs on, the pass's verdicts rest on the fit of every keyframe taken: the arm's fit
-                     --  made in the background is taken in first, the body held (Kinematics.Fit_Now): read a round late, a
-                     --  first fit still under way would leave the arm unfitted here and end its sweep.
-                     if (for all I in 1 .. Count => State (I) /= Climbing) then
-                        Driver.Beats.Within_A_Beat (Fit_Now_For'Access);
-                        Measure_The_Round;
-                     end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);
                      exit when Gone
                        or else ((for all I in 1 .. Count => State (I) /= Climbing)
@@ -2030,7 +2004,7 @@ package body Driver.Robot.Boot is
                               end loop;
                            end if;
                         end;
-                        Driver.Beats.Within_A_Beat (Ask_For_Fit_Now'Access);
+                        Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Followed'Access);
                         exit when not Fitted_Now or else Told_Now;
@@ -2046,7 +2020,6 @@ package body Driver.Robot.Boot is
                if Fitted_Now and then not Gone then
                   Driver.Robot.Kinematics.Weigh_Across_Joints (M, A);
                end if;
-               Driver.Beats.Within_A_Beat (End_Its_Sweep'Access);
             end;
             declare
                Waited_Here : Natural;   --  each arm's own: arms are swept at once

@@ -977,11 +977,6 @@ private
 
    package Fixed_Fit_Vectors is new Ada.Containers.Vectors (Eye_Id, Fixed_Fit);
 
-   --  Work an estimate begins and the next estimate takes in: an arm's fit made in the background while its sweep goes
-   --  on (Kinematics.Refit). Kinematics makes and reads it; the arm's evidence only keeps it.
-   type Pending_Work is abstract tagged limited null record;
-   type Pending_Work_Access is access all Pending_Work'Class;
-
    type Arm_Evidence is record
       Arm      : Arm_Id'Base := 0;
       Group    : Group_Id'Base := 0;
@@ -1005,13 +1000,6 @@ private
       Across_Due : Boolean := False;
       --  The arm's next fit takes the jackknife over its joints into its covariance (Fit's Across_Joints): asked once
       --  its sweep has ended (Kinematics.Weigh_Across_Joints).
-      Pending  : Pending_Work_Access;
-      --  The arm's fit an estimate began in the background, taken in by the next estimate (Kinematics.Take_In_Fits);
-      --  null when none is under way.
-      Fit_Now  : Boolean := False;
-      --  This estimate takes the arm's fit under way in and makes the one due, if any, in place (Kinematics.Fit_Now).
-      Swept    : Boolean := False;
-      --  The arm's sweep has ended (Kinematics.End_Sweep): its fits are made in place.
       Matches  : Match_Set_Vectors.Vector;   --  one per aligned keyframe after the reference, in order
       Shifts   : Real_Vectors.Vector;
       --  Per channel: how far the eye's view moves per reading unit of it, in pixels, as the aligner measured it over

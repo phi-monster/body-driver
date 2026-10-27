@@ -3977,6 +3977,7 @@ driver-robot-kinematics.adb	(if P < Natural (S.Sigma.Length) and then S.Sigma (P
 driver-robot-kinematics.adb	(if P mod 2 = 1 then R.Result.Joints (R.Result.Joints.First_Index + (P - 1) / 2).Slack	1	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	(if P mod 2 = 1 then R.Result.Joints (R.Result.Joints.First_Index + (P - 1) / 2).Slack	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	(if P mod 2 = 1 then R.Result.Joints (R.Result.Joints.First_Index + (P - 1) / 2).Slack	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
+driver-robot-kinematics.adb	(if Slack'Length = 2 * N	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	+ Covariance (3, 3)), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	+ Covariance (6, 6)), 4)	4	format	four decimals in the log
 driver-robot-kinematics.adb	+ Cross (Row, 2) * (Cv_Lens (1, 1) - Cv_Lens (1, 2))) / Fx_Fy);	1	structure	the two focal lengths
@@ -4048,10 +4049,6 @@ driver-robot-kinematics.adb	J (I + 3, K) := W (I) / H;	3	structure	the turn's th
 driver-robot-kinematics.adb	J : Real_Matrix (1 .. 6, 1 .. N);	6	structure	a pose has six ways to move: three of place and three of turn
 driver-robot-kinematics.adb	J : array (1 .. 3, 1 .. Free_Terms) of Real := [others => [others => 0.0]];	3	structure	three coordinates
 driver-robot-kinematics.adb	Jd : Real_Matrix (1 .. 3, 1 .. Inputs) := [others => [others => 0.0]];	3	structure	a point's or a frame's three dimensions
-driver-robot-kinematics.adb	Job.Slack (P) := Slack (2 * Index ((P + 1) / 2) - 1 + (P - 1) mod 2);	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
-driver-robot-kinematics.adb	Job.Slack (P) := Slack (2 * Index ((P + 1) / 2) - 1 + (P - 1) mod 2);	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
-driver-robot-kinematics.adb	Job.Slack (P) := Slack (2 * Index ((P + 1) / 2) - 1 + (P - 1) mod 2);	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
-driver-robot-kinematics.adb	Job.Slack := new Real_Array (1 .. 2 * Count);	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
 driver-robot-kinematics.adb	Lambda := 2.0 * Lambda;	2.0	numerics	the damping doubles after a step that did not help
 driver-robot-kinematics.adb	Lambda := Lambda / 2.0;	2.0	numerics	the damping halves after a step that helped
 driver-robot-kinematics.adb	Land ((1.0 + Step) * X, Zero3, Zero3, Up, F1);	1.0	math	the depth moved by a fraction of itself: the point's scale is one plus the step
@@ -4117,7 +4114,6 @@ driver-robot-kinematics.adb	Unpredicted : constant Real := Real'Last / 4.0;	4.0	
 driver-robot-kinematics.adb	V.Append (Real (Best_Y) + 0.5);	0.5	structure	the centre of the pixel (a place is a pixel's centre)
 driver-robot-kinematics.adb	Variance : array (1 .. 3) of Real := [others => 0.0];	3	structure	the covariance of a place has three entries: uu, uv and vv
 driver-robot-kinematics.adb	W : constant Natural := Index_Of (M, 1);	1	structure	the first arm is the world
-driver-robot-kinematics.adb	Width, Height : Positive := 1;	1	structure	a picture's size before the job is given its eye's
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	2	structure	a track's three coordinates in a flat list
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	2	structure	the last of a track's three numbers
 driver-robot-kinematics.adb	X : constant Vec3 := [F.Tracks (3 * T), F.Tracks (3 * T + 1), F.Tracks (3 * T + 2)];	3	structure	a track's three coordinates in a flat list
@@ -4162,7 +4158,6 @@ driver-robot-kinematics.adb	for I in 1 .. 3 loop	3	structure	the three component
 driver-robot-kinematics.adb	for I in 2 .. Frames loop	2	structure	an insertion sort: the first element stands sorted by itself
 driver-robot-kinematics.adb	for J in 1 .. 3 loop	3	structure	the three components of a vector
 driver-robot-kinematics.adb	for Lens_Term in 1 .. 2 loop	2	structure	a pixel's two coordinates, or the two focal lengths
-driver-robot-kinematics.adb	for P in 1 .. 2 * Count loop	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
 driver-robot-kinematics.adb	for P in 1 .. 3 loop	3	structure	the three components of a vector, the three terms of a turn
@@ -4193,7 +4188,6 @@ driver-robot-kinematics.adb	if Pictured and then W > 2 * Half and then H > 2 * H
 driver-robot-kinematics.adb	if Report.Focal_Sigma >= Real'Last or else T < 2 or else T * T /= Natural (Report.Covariance.Length)	2	structure	the lens's first two terms, the two focal lengths' logarithms
 driver-robot-kinematics.adb	if Rows >= 1 then	1	structure	a point answered in one keyframe is regressed: the rank of each channel's block tells what its rows determine
 driver-robot-kinematics.adb	if Slack'Length = 2 * N then	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
-driver-robot-kinematics.adb	if Slack'Length = 2 * N then	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics.adb	or else (Chi > 0.0 and then Driver.Distributions.Chi_Square_Deviate (Chi, 2) > Driver.Conventions.Z)	2	math	a place in a picture has two dimensions
 driver-robot-kinematics.adb	or else Natural (M.Kinematics (K).Result.Placement_Covariance.Length) < 36	36	structure	a six by six covariance, row by row
 driver-robot-kinematics.adb	or else Natural (R.Matches.Length) >= 2 * R.Fitted_Keyframes)	2	statistics	a fit of twice the keyframes halves the variance of what the last one told
@@ -4213,6 +4207,10 @@ driver-robot-kinematics.adb	then Driver.Uncertain.Significant (Change (S.Frame, 
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	2	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then F.Tracks (3 * K + 2) else 0.0),	3	structure	a track's point, three numbers each: its depth along its line of sight is the third
 driver-robot-kinematics.adb	then Real'Max (Told, Driver.Conventions.Z * Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0) * Jitter)	2.0	statistics	the noise of a difference of two readings
+driver-robot-kinematics.adb	then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
+driver-robot-kinematics.adb	then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
+driver-robot-kinematics.adb	then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
+driver-robot-kinematics.adb	then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference, of the channel each fitted joint is
 driver-robot-kinematics.adb	type Pixel_Derivative is array (1 .. 2) of Real;	2	structure	a pixel has two coordinates
 driver-robot-kinematics.adb	when 1 => (L with delta Fx => L.Fx * Ada.Numerics.Long_Elementary_Functions.Exp (By)),	1	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
 driver-robot-kinematics.adb	when 2 => (L with delta Fy => L.Fy * Ada.Numerics.Long_Elementary_Functions.Exp (By)),	2	structure	the lens terms in order: log Fx, log Fy, Cx, Cy, K1, K2
@@ -4623,8 +4621,6 @@ driver-robot.adb	Flags : Channel_Flags (1 .. Natural'Max (0, Count - 3));	3	form
 driver-robot.adb	Kinematics.Ask_Fit (M, Arm_Id'Value (Word (2)));	2	format	a note's words: its name, then its arm
 driver-robot.adb	Kinematics.Base.Begin_Walk (M, Arm_Id'Value (Word (2)));	2	structure	the note's second word: the arm
 driver-robot.adb	Kinematics.Base.Take_Still (M, Arm_Id'Value (Word (2)));	2	structure	the note's second word: the arm
-driver-robot.adb	Kinematics.End_Sweep (M, Arm_Id'Value (Word (2)));	2	format	a note's words: its name, then its arm
-driver-robot.adb	Kinematics.Fit_Now (M, Arm_Id'Value (Word (2)));	2	format	a note's words: its name, then its arm
 driver-robot.adb	Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	M.Stepping := Word (2) = "";	"1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	M.Stepping := Word (2) = "";	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
@@ -4658,16 +4654,12 @@ driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	structure	the note's words: what, then the arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	structure	the note's words: what, then the arm
-driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	a note's words: its name, then its arm
-driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	1	format	a note's words: its name, then its arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	a note's words: its name, then its arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	structure	the note's words: what, then the arm
 driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	structure	the note's words: what, then the arm
-driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	a note's words: its name, then its arm
-driver-robot.adb	elsif Count >= 2 and then Word (1) = "" then	2	format	a note's words: its name, then its arm
 driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
