@@ -18,11 +18,14 @@
 # scorer of steps 2 to 4 (driver/tools/score).
 import argparse
 import collections
+import concurrent.futures
 import io
 import json
 import math
 import os
+import queue
 import sys
+import threading
 import time
 
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -400,6 +403,25 @@ if os.environ.get("BD_GPU_PICTURES") == "1" and torch is not None and torch.cuda
     gpu_rng.manual_seed(args.seed * 1000003 + 11)
 
 
+# The pictures' read and shot noise drawn ahead, a thread a camera, while the world steps and the pictures render:
+# numpy's normal draws let go of the interpreter, and a picture's 230 thousand of them took 2.7 to 3.6 ms of the robot's
+# beat on the big machine (10-28; one thread for three cameras kept ALOHA's pictures at 36 ms a beat). Each camera's
+# from its own generator, two of its beats waiting drawn.
+for k, c in enumerate(cameras):
+    c["noise"] = queue.Queue(maxsize=2)
+
+
+def draw_noise(c, k):
+    g = np.random.default_rng([args.seed, 13, k])
+    while True:
+        c["noise"].put(g.standard_normal((args.height, args.width, 3), dtype=np.float32))
+
+
+if GPU is None:
+    for k, c in enumerate(cameras):
+        threading.Thread(target=draw_noise, args=(c, k), daemon=True).start()
+
+
 def capture(c):
     t = time.perf_counter()
     renderer.update_scene(d, camera=c["id"])
@@ -415,19 +437,31 @@ def capture(c):
             x = torchvision.io.decode_jpeg(enc.cpu() if enc.is_cuda else enc, device=GPU).permute(1, 2, 0)
         img = x.contiguous().cpu().numpy()
     else:
-        img = renderer.render().astype(np.float32)
-        img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * noise_rng.standard_normal(img.shape, dtype=np.float32)
-        img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
-        if coded:
-            buf = io.BytesIO()
-            Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
-            img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()
+        # Rendered here (the GL context is this thread's), the noise and the codec on the cameras' own threads, while
+        # the world steps on and the next camera renders: numpy and the codec let go of the interpreter.
+        img = processing.submit(sensed, c, renderer.render(), coded)
     c["queue"].append(img)
     t_capture[0] += time.perf_counter() - t
 
 
+def sensed(c, raw, coded):
+    img = raw.astype(np.float32)
+    img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * c["noise"].get()
+    img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
+    if coded:
+        buf = io.BytesIO()
+        Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
+        img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()
+    return img
+
+
+processing = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(cameras)))
+
+
 def pictures():
-    return {c["name"]: {"color": c["queue"][0]} for c in cameras}
+    def done(x):
+        return x.result() if isinstance(x, concurrent.futures.Future) else x
+    return {c["name"]: {"color": done(c["queue"][0])} for c in cameras}
 
 
 # ---------------------------------------------------------------------------------------------------------------------

@@ -39,7 +39,11 @@ if [ "${RECORD:-0}" = 1 ]; then
   mkfifo "$R/rec.fifo"; zstd -q -T2 -o "$R/run.rec.zst" < "$R/rec.fifo" & ZST=$!
   RECORD_ARGS=(--record "$R/rec.fifo")
 fi
-"$BIN/body_driver" --listen "$PORT" --body "$R/body.json" "${RECORD_ARGS[@]}" > "$R/driver.log" 2>&1 &
+# Unpaced (RATE unset or 0: the robot waits for every answer), the driver makes its estimates within the beat that
+# asks for them (--in-beat): no beat of the robot held still while it computes, and its time is its beats and its
+# estimates' seconds, both in its log.
+IN_BEAT_ARGS=(); [ "${RATE:-0}" = 0 ] && IN_BEAT_ARGS=(--in-beat)
+"$BIN/body_driver" --listen "$PORT" --body "$R/body.json" "${RECORD_ARGS[@]}" "${IN_BEAT_ARGS[@]}" > "$R/driver.log" 2>&1 &
 DRV=$!
 for _ in $(seq 1 120); do grep -qE "listening on port|cannot listen" "$R/driver.log" 2>/dev/null && break; sleep 0.5; done
 if grep -q "cannot listen" "$R/driver.log"; then
