@@ -68,7 +68,11 @@ package Driver.Rig is
       Covariance      : Driver.Numerics.Arrays.Real_Matrix (1 .. 8, 1 .. 8) := [others => [others => 0.0]];
       --  Of the second eye's frame on the first (its turn as Exp takes it, then its place, in the scale above) and
       --  both focal lengths' logarithms, the first eye's then the second's: the residuals' scale taken in, every
-      --  still's pose and every inverse depth left free, and nothing along the scale (no residual moves it).
+      --  still's pose and every inverse depth left free, and nothing along the scale (no residual moves it). A term
+      --  some other direction the sightings leave unmoved moves has Real'Last for its variance and no covariance.
+      Focals_Told     : Boolean := False;
+      --  Both focal lengths known within their own size (their logarithms' sigmas significant against one): Ok needs
+      --  it, and the turn's sigma below Real'Last.
       Misfit          : Real := 0.0;   --  the median over the sightings of the larger residual over its sigma
       Scale           : Real := 1.0;
       --  the residuals' own scale in those sigmas, no less than one (Huber's cut is at Z of it)

@@ -1655,6 +1655,49 @@ package body Driver.Robot.Boot is
                      --  never began; arm 1 of the same run ended its passes when one followed nothing at all.
                      New_In_Pass : Natural := 0;
                      Most_Before : constant Real_Array (1 .. 2 * Size) := Followed_Most;
+                     --  The pass's end cells were taken in its round, before the round's estimate (End_Cells).
+                     Ended_In_Round : Boolean := False;
+
+                     --  A fitted arm ends the pass with the joints together at the
+                     --  widest offsets followed (the rounds before the fit had their
+                     --  own); its predictions go into these frames. Where the fit
+                     --  names joints next to each other whose swap it cannot tell
+                     --  (Contested), the pass ends turning those two, a pair at a time
+                     --  (Pair_Shares), as the passes' end does, in place of every
+                     --  joint at once: the fake's seed 26 (10-22) was fitted at 39
+                     --  keyframes after its third pass, its order untold, and took its
+                     --  cells of every joint and its single turns for 12663 beats and
+                     --  four estimates more before its order was told, at 75.
+                     procedure End_Cells is
+                     begin
+                        if not Told_Now and then not Contested.Is_Empty then
+                           declare
+                              Said : Ada.Strings.Unbounded.Unbounded_String;
+                           begin
+                              for K in Contested.First_Index .. Contested.Last_Index loop
+                                 declare
+                                    P     : constant Joint_Pair := Contested (K);
+                                    Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
+                                 begin
+                                    Ada.Strings.Unbounded.Append
+                                      (Said, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later)
+                                             & " by " & Driver.Log.Image (Share (P.Earlier), 3) & " and "
+                                             & Driver.Log.Image (Share (P.Later), 3) & " units");
+                                 end;
+                              end loop;
+                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
+                                               & " ends with its joints' order not told (" & Untold_Now'Image
+                                               & " orders untold); its cells turn the pairs whose turns tell its untold"
+                                               & " orders apart, a pair at a time:" & Ada.Strings.Unbounded.To_String (Said));
+                           end;
+                           for K in Contested.First_Index .. Contested.Last_Index loop
+                              Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
+                           end loop;
+                           Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
+                        else
+                           Together (Shares, Climb => True);
+                        end if;
+                     end End_Cells;
                   begin
                      if (for some I in 1 .. Count => State (I) = Climbing) then
                         Rounds := Rounds + 1;
@@ -1685,6 +1728,15 @@ package body Driver.Robot.Boot is
                            Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " round" & Rounds'Image
                                             & ": no cell of several joints yet, the view's motion per unit of a joint is"
                                             & " unmeasured for some of them");
+                        end if;
+                        --  An arm fitted as the pass begins takes the pass's end cells in its round, by the fit it began
+                        --  with, and the round's one estimate aligns and fits both: the cells' turns are named by that
+                        --  fit either way, and taken after the round's estimate they waited on a second one. Panda seed
+                        --  1a (round n25s2, 10-27): the estimates after its passes' end cells, passes 2 to 5, took 326 s
+                        --  of the 715 its boot's estimates took, of which the kinematics' 571 (each a named fit).
+                        if N > 1 and then Fitted_Now then
+                           End_Cells;
+                           Ended_In_Round := True;
                         end if;
                         Measure_The_Round;
                         Driver.Beats.Within_A_Beat (Read_Round'Access);
@@ -1875,44 +1927,10 @@ package body Driver.Robot.Boot is
                            & " are followed to offsets" & Image (Reached) & ", the pushes stopped by"
                            & Ada.Strings.Unbounded.To_String (Stops));
                      end;
-                     --  A fitted arm ends the pass with the joints together at the
-                     --  widest offsets followed (the rounds before the fit had their
-                     --  own); its predictions go into these frames. Where the fit
-                     --  names joints next to each other whose swap it cannot tell
-                     --  (Contested), the pass ends turning those two, a pair at a time
-                     --  (Pair_Shares), as the passes' end does, in place of every
-                     --  joint at once: the fake's seed 26 (10-22) was fitted at 39
-                     --  keyframes after its third pass, its order untold, and took its
-                     --  cells of every joint and its single turns for 12663 beats and
-                     --  four estimates more before its order was told, at 75.
-                     if N > 1 and then New_In_Pass > 0 and then Fitted_Now then
-                        if not Told_Now and then not Contested.Is_Empty then
-                           declare
-                              Said : Ada.Strings.Unbounded.Unbounded_String;
-                           begin
-                              for K in Contested.First_Index .. Contested.Last_Index loop
-                                 declare
-                                    P     : constant Joint_Pair := Contested (K);
-                                    Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
-                                 begin
-                                    Ada.Strings.Unbounded.Append
-                                      (Said, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later)
-                                             & " by " & Driver.Log.Image (Share (P.Earlier), 3) & " and "
-                                             & Driver.Log.Image (Share (P.Later), 3) & " units");
-                                 end;
-                              end loop;
-                              Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
-                                               & " ends with its joints' order not told (" & Untold_Now'Image
-                                               & " orders untold); its cells turn the pairs whose turns tell its untold"
-                                               & " orders apart, a pair at a time:" & Ada.Strings.Unbounded.To_String (Said));
-                           end;
-                           for K in Contested.First_Index .. Contested.Last_Index loop
-                              Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
-                           end loop;
-                           Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
-                        else
-                           Together (Shares, Climb => True);
-                        end if;
+                     --  The pass's end cells (End_Cells), where its round did not take them: the pass in which the
+                     --  arm was first fitted.
+                     if N > 1 and then New_In_Pass > 0 and then Fitted_Now and then not Ended_In_Round then
+                        End_Cells;
                         Measure_The_Round;
                      end if;
                      Driver.Beats.Within_A_Beat (Read_Followed'Access);

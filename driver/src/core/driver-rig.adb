@@ -4,6 +4,7 @@ with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
 with Driver.Stats;
+with Driver.Uncertain;
 
 package body Driver.Rig is
 
@@ -1663,9 +1664,14 @@ package body Driver.Rig is
             Result.Misfit := (if Used > 0 then Driver.Stats.Median (Used_Larger (1 .. Used)) else Real'Last);
             Result.Scale := Final_Scale;
             --  The second eye's turn's covariance: the pose terms' normal matrix (the inverse depths taken out)
-            --  inverted on the subspace the sightings determine (its eigenvalues above the float's resolution of
-            --  the largest; the scale, which no residual moves, is not), the turn's block, times the residuals'
-            --  weighted squares over their degrees of freedom.
+            --  inverted on every direction of its terms but the scale's, which no residual moves (the places of
+            --  every still and of the second eye together, as Gauge takes them), the turn's block, times the
+            --  residuals' weighted squares over their degrees of freedom. A direction besides the scale's that the
+            --  sightings leave as unmoved (its eigenvalue not above the float's resolution of the largest) leaves
+            --  every term it moves unknown: inverted on the determined directions alone, the walks of round n25s2
+            --  (10-27) that told the body eye's turn and the focal lengths least were told the surest, RB-Y1 seed 2a's
+            --  "107.22 deg (+- 0.000)", its second eye 1137173 of the walk's scale away and its focal lengths
+            --  106129979 and 0.02 px, seed 1a's 566 and 20244 px (the truth 157 and 160).
             declare
                Values  : Real_Vector (1 .. Np);
                Vectors : Real_Matrix (1 .. Np, 1 .. Np);
@@ -1674,19 +1680,57 @@ package body Driver.Rig is
                Largest : Real := 0.0;
                V3      : Vec3;
                M3      : Mat3;
+               Along   : Real_Vector (1 .. Np) := [others => 0.0];   --  the scale's direction in the terms
+               Length  : Real := 0.0;
+               Gauge_P : Natural := 0;   --  the eigenvector nearest it
+               Nearest : Real := 0.0;
+               Unknown : array (1 .. 8) of Boolean := [others => False];   --  a term an undetermined direction moves
             begin
                Driver.Numerics.Dense.Small_Eigensystem (Best_Normal, Values, Vectors);
                for P in 1 .. Np loop
                   Largest := Real'Max (Largest, Values (P));
                end loop;
+               for Q in 1 .. S loop
+                  for I in 1 .. 3 loop
+                     Along (6 * (Q - 1) + 3 + I) := Best.Place_At (Q) (I);
+                  end loop;
+               end loop;
+               for I in 1 .. 3 loop
+                  Along (6 * S + 3 + I) := Best.X_Place (I);
+               end loop;
+               for X of Along loop
+                  Length := Length + X ** 2;
+               end loop;
+               for P in 1 .. Np loop
+                  declare
+                     Dot : Real := 0.0;
+                  begin
+                     for I in 1 .. Np loop
+                        Dot := Dot + Vectors (I, P) * Along (I);
+                     end loop;
+                     if Length > 0.0 and then abs Dot > Nearest then
+                        Nearest := abs Dot;
+                        Gauge_P := P;
+                     end if;
+                  end;
+               end loop;
                Result.Covariance := [others => [others => 0.0]];
                for P in 1 .. Np loop
-                  if Values (P) > Real'Model_Epsilon * Largest * Real (Np) then
+                  if P = Gauge_P then
+                     null;
+                  elsif Values (P) > Real'Model_Epsilon * Largest * Real (Np) then
                      for A in 1 .. 8 loop
                         for B in 1 .. 8 loop
                            Result.Covariance (A, B) := Result.Covariance (A, B)
                              + Vectors (6 * S + A, P) * Vectors (6 * S + B, P) / Values (P);
                         end loop;
+                     end loop;
+                  else
+                     --  Its share of a term a rounding of the eigenvector would leave there is none.
+                     for A in 1 .. 8 loop
+                        if abs Vectors (6 * S + A, P) > Sqrt (Real'Model_Epsilon) then
+                           Unknown (A) := True;
+                        end if;
                      end loop;
                   end if;
                end loop;
@@ -1702,14 +1746,33 @@ package body Driver.Rig is
                      Cov (A, B) := Result.Covariance (A, B);
                   end loop;
                end loop;
-               if (for all I in 1 .. 3 => (for all J in 1 .. 3 => Finite (Cov (I, J)))) then
+               if (for all I in 1 .. 3 => not Unknown (I))
+                 and then (for all I in 1 .. 3 => (for all J in 1 .. 3 => Finite (Cov (I, J))))
+               then
                   Symmetric_Eigensystem (Cov, V3, M3);
                   Result.Turn_Sigma := Sqrt (Real'Max (0.0, V3 (1)));
                else
                   Result.Turn_Sigma := Real'Last;
                end if;
+               --  An unknown term's variance is none the sightings bound.
+               for A in 1 .. 8 loop
+                  if Unknown (A) then
+                     for B in 1 .. 8 loop
+                        Result.Covariance (A, B) := 0.0;
+                        Result.Covariance (B, A) := 0.0;
+                     end loop;
+                     Result.Covariance (A, A) := Real'Last;
+                  end if;
+               end loop;
+               --  And both focal lengths told within their own size (the terms are their logarithms): a walk whose
+               --  stills cannot tell a lens leaves it anywhere from a pixel to a thousand pictures' width.
+               Result.Focals_Told := (for all A in 7 .. 8 =>
+                                        not Unknown (A) and then Finite (Result.Covariance (A, A))
+                                        and then Driver.Uncertain.Significant
+                                                   (1.0, Sqrt (Real'Max (0.0, Result.Covariance (A, A)))));
             end;
             Result.Ok := Result.Misfit <= Driver.Conventions.Z and then Result.Turn_Sigma < Real'Last
+              and then Result.Focals_Told
               and then not (Ambiguous_Cost <= Driver.Conventions.Z ** 2 / 2.0
                             and then Ambiguous_Turn > Driver.Conventions.Z * Result.Turn_Sigma)
               and then (for all I in 1 .. 3 => Finite (Best.X_Turn (I)) and then Finite (Best.X_Place (I)));
