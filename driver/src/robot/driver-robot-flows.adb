@@ -22,6 +22,7 @@ with Driver.Robot.Kinematics;
 with Driver.Robot.Kinematics.Fit;
 with Driver.Robot.Kinematics.Flow_Eye;
 with Driver.Robot.Motion;
+with Driver.Robot.Steps;
 
 package body Driver.Robot.Flows is
 
@@ -576,7 +577,19 @@ package body Driver.Robot.Flows is
                for J in 1 .. N loop
                   declare
                      C     : constant Positive := Channel (J);
-                     Turn  : Real := Driver.Robot.Motion.Least_Turn (M, Info.Arm, C);
+                     --  The first turn tried: the least the joint executes and its readings tell from rest, its dead
+                     --  band and its readings' noise (Steps.Dead_Band, Channels.Noise), where they give any size, and
+                     --  never more than step 2's least turn (Motion.Least_Turn), which is sized for the arm's own eye
+                     --  to count a keyframe, not for a fixed eye's rates. SO-101 seed 3's base camera on the hall
+                     --  (n18s2, 10-27): its first turns, 21 to 39 ticks, were shown at once and kept, and moved the
+                     --  arm's median pixel 1 to 3.5 px, far past the rates' linear range; renders of the same poses
+                     --  with each turn moving the median pixel 0.4 px placed the fixed eye within 5 to 9 px where
+                     --  those turns left it 22 to 87 px off.
+                     Least : constant Real := Driver.Robot.Motion.Least_Turn (M, Info.Arm, C);
+                     Small : constant Real :=
+                       Real'Max (Driver.Robot.Steps.Dead_Band (M, Info.Group, C),
+                                 Driver.Robot.Channels.Noise (M, Info.Group, C));
+                     Turn  : Real := (if Small > 0.0 then Real'Min (Least, Small) else Least);
                      Range_Seen : constant Real := Info.High (C - 1) - Info.Low (C - 1);
                      Views : View_Vectors.Vector;
                   begin

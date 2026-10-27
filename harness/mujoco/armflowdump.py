@@ -166,6 +166,9 @@ for t in chain:
 for v, p in enumerate(poses, 1):
     dq = np.array([t["C"] * p["readings"][J] for J, t in enumerate(chain)])
     turns = np.array([abs(t["C"] * p["steps"][J]) for J, t in enumerate(chain)])
+    # BD_TURN_SCALE: every joint's turn times its own factor (a comma list along the chain), for turns of another size
+    if os.environ.get("BD_TURN_SCALE"):
+        turns = turns * np.array([float(x) for x in os.environ["BD_TURN_SCALE"].split(",")])
     q = qref.copy()
     for J, t in enumerate(chain):
         q[m.jnt_qposadr[t["j"]]] += dq[J]
@@ -187,7 +190,21 @@ for v, p in enumerate(poses, 1):
             write("arm_1_pose_%d_plus_%d.bin" % (v, J + 1), still)
     index.append("pose %d noise %.17E" % (v, noise))
     index.append("readings " + " ".join("%.17E" % x for x in dq))
-    index.append("steps " + " ".join("%.17E" % x for x in turns))
+    # BD_READ_TURNS: each turn written as the readings would give it (robot.py's sensed_reading: the joint's angle with a
+    # count's jitter, rounded to the encoder's step, at the turn either way, half the difference), the render exact
+    if os.environ.get("BD_READ_TURNS"):
+        st = per if g["ticks"] else 2.0 * math.pi / 2 ** g["sensor"]["bits"]
+        jit = g["sensor"]["jitter"]
+        read = []
+        for J, t in enumerate(chain):
+            q0 = qref[m.jnt_qposadr[t["j"]]] + dq[J]
+            hi = round((q0 + turns[J]) / st + jit * noise_rng.standard_normal()) * st
+            lo = round((q0 - turns[J]) / st + jit * noise_rng.standard_normal()) * st
+            read.append(abs(hi - lo) / 2.0)
+        turns_written = np.array(read)
+    else:
+        turns_written = turns
+    index.append("steps " + " ".join("%.17E" % x for x in turns_written))
 open(os.path.join(out, "index.txt"), "w").write("\n".join(index) + "\n")
 f = (height / 2.0) / math.tan(math.radians(m.cam_fovy[cf]) / 2.0)
 R = Ra.T @ Rf; tc = Ra.T @ (pf - pa) / unit
