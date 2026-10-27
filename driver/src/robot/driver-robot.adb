@@ -290,7 +290,8 @@ package body Driver.Robot is
          Lockin.Measure_Rest_Noise (M);
       end if;
       Took ("rest noise");
-      if not M.From_File (Stored_Responses) then
+      --  As the groups were recognized, once they are (Note_Recognized).
+      if not M.From_File (Stored_Responses) and then not M.Recognized then
          Lockin.Measure (M);
       end if;
       Took ("lock-in");
@@ -368,6 +369,8 @@ package body Driver.Robot is
          Kinematics.Base.Take_Still (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "alone" then
          Note_Channels_Alone (M, Group_Id'Value (Word (2)));
+      elsif Word (1) = "recognized" then
+         Note_Recognized (M);
       elsif Count >= 3 and then Word (1) = "back" then
          Note_Comes_Back (M, Group_Id'Value (Word (2)), Positive'Value (Word (3)));
       elsif Count >= 3 and then Word (1) = "stayed" then
@@ -1123,6 +1126,12 @@ package body Driver.Robot is
       Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("alone" & G'Image));
       M.Groups (G).Channels_Alone := True;
    end Note_Channels_Alone;
+
+   procedure Note_Recognized (M : in out Model) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("recognized"));
+      M.Recognized := True;
+   end Note_Recognized;
 
    procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive) is
       S : Group_Stream renames M.Groups (G);

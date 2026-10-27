@@ -628,6 +628,11 @@ package body Driver.Robot.Motion is
    procedure Note_Stayed (M : in out Model; G : Group_Id; Way : Real) is
       Gate : constant Driver.Uncertain.Gate := Driver.Uncertain.Vector_Gate (2);
    begin
+      --  What the recognition's pushes left in the views: once the groups are recognized, an arm's sweep and a walk
+      --  are no part of it (Note_Recognized).
+      if M.Recognized then
+         return;
+      end if;
       Driver.Recording.Write_Shared
         (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("stayed" & G'Image & (if Way > 0.0 then " 1" else " -1")));
       for E in 1 .. Eye_Count (M) loop

@@ -1118,6 +1118,9 @@ package body Driver.Robot.Boot is
                --  after one, from Start: what tells a level that took the joint no farther than one before it (Take).
                Asked_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
                Along_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
+               --  Per push: the farthest its channel's reading stood beyond what a level of it asked, or back against it,
+               --  after one: how far something other than the push carries the reading (Take).
+               Carried_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];
                --  Per push: its ladder is going down from a first level the aligner could not follow.
                Descending : array (1 .. 2 * Size) of Boolean := [others => False];
                --  A ladder that went down from a lost first level to the least turn and followed nothing on the way is tried
@@ -1256,10 +1259,22 @@ package body Driver.Robot.Boot is
                      --  than they asked or the other way; UR5e 3b's elbow, asked 0.0043 units, read 0.0253 along
                      --  against 0.0292 before, its sag about 0.02, turned 0.008 rad in the whole sweep, and the arm
                      --  ended not fitted).
+                     --  Nor within how far something other than the push has carried the reading at the push's levels
+                     --  (Carried_Most: its reading beyond what a level asked, or back against the push): the sag shifts
+                     --  between the levels with the other joints' poses by more than the standoff measured at rest
+                     --  shows, and a level's reading is the push's only beyond that. Round n25s2 (10-27, the standoff
+                     --  judged as above): of its 136 pushes judged no farther, 63 had read along by more than twice their
+                     --  ask or the other way (the Shadow's 38 of 51, the G1's 13 of 27, the UR5e's 9 of 15, Stretch's 3 of
+                     --  6; none of the ALOHA's, Panda's, RB-Y1's or SO-101's); held as well to twice the farthest carry,
+                     --  59 of them are judged no more, the 4 left reading within 0.03 units of nought where 0.03 to 0.46
+                     --  were asked; of the other 73, the 18 whose reading had run past an ask at a level before are
+                     --  judged no more, and the 55 left include every reading that stood still as its ask grew (Panda 1a's
+                     --  seventh channel at 0.31 of 0.68 asked, the Shadow 1a's sixth at 50.3 of 189).
                      declare
                         Further : Boolean := False;
                         Along   : Real := 0.0;
                         Stands  : Real := 0.0;   --  the joint's standoff at rest (Steps.Standoff)
+                        Bound   : Real := 0.0;   --  and no less than the reading's farthest carry (Carried_Most)
                         procedure Read_Along is
                            D : Real_Array (1 .. Size) := [others => 0.0];
                         begin
@@ -1272,9 +1287,11 @@ package body Driver.Robot.Boot is
                         end Read_Along;
                      begin
                         Driver.Beats.Within_A_Beat (Read_Along'Access);
-                        Mark.Short := (Report.Outcome = Driver.Robot.Motion.Blocked and then Off - Previous > Stands)
+                        Carried_Most (I) := Real'Max (Carried_Most (I), Real'Max (Along - Off, -Along));
+                        Bound := Real'Max (Stands, Carried_Most (I));
+                        Mark.Short := (Report.Outcome = Driver.Robot.Motion.Blocked and then Off - Previous > Bound)
                           or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further
-                                   and then (Off - Asked_Most (I)) / 2.0 > Stands);
+                                   and then (Off - Asked_Most (I)) / 2.0 > Bound);
                         --  Said with the readings it was judged from: SO-101 seed 1's fifth channel (n7s2 1b, n9s2 1a,
                         --  10-26), its readings in steps of 4 units, was judged at its end in its second pass both ways
                         --  and never pushed again, and the log named neither reading.
@@ -1284,7 +1301,8 @@ package body Driver.Robot.Boot is
                                             & " at " & Driver.Log.Image (Off, 4) & " units reached, its reading "
                                             & Driver.Log.Image (Along, 4) & " along it, against "
                                             & Driver.Log.Image (Along_Most (I), 4) & " at the levels before (the farthest "
-                                            & Driver.Log.Image (Asked_Most (I), 4) & "): no farther, judged at its end");
+                                            & Driver.Log.Image (Asked_Most (I), 4) & "), its farthest carry "
+                                            & Driver.Log.Image (Carried_Most (I), 4) & ": no farther, judged at its end");
                         end if;
                         Asked_Most (I) := Real'Max (Asked_Most (I), Off);
                         Along_Most (I) := Real'Max (Along_Most (I), Along);
@@ -2169,6 +2187,9 @@ package body Driver.Robot.Boot is
                                 & Contract_Breach (M, Group_Id (G))'Image & " of the porting contract");
             end if;
          end loop;
+         --  The groups as recognized stand on the recognition's pushes alone: an arm's sweep does not move them again
+         --  (Driver.Robot.Note_Recognized).
+         Driver.Robot.Note_Recognized (M);
       end Read_Body;
 
       --  Every arm of the current estimate is swept with the eye it carries,

@@ -1373,9 +1373,10 @@ driver-robot-boot.adb	& (if Per_Unit (C) > 0.0 then Driver.Log.Image (Per_Unit (
 driver-robot-boot.adb	& (if Unswept.Length = 1 then "" else "" & Unswept.Length'Image	1	structure	one arm left to sweep: nothing to say of the others
 driver-robot-boot.adb	& Driver.Log.Image (Along, 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Along_Most (I), 4) & ""	4	format	digits printed in a log line or a message
-driver-robot-boot.adb	& Driver.Log.Image (Asked_Most (I), 4) & "");	4	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Asked_Most (I), 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Back_Now, 2) & "");	2	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Back_Now, 2) & "");	2	format	digits printed in a log line or a message
+driver-robot-boot.adb	& Driver.Log.Image (Carried_Most (I), 4) & "");	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Least (C), 3)	3	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Offset (I), 4) & ""	4	format	digits printed in a log line or a message
 driver-robot-boot.adb	& Driver.Log.Image (Out_Report.Delivered.Value, 2) & ""	2	format	digits printed in a log line or a message
@@ -1405,6 +1406,7 @@ driver-robot-boot.adb	Amount := 2.0 * Amount;	2.0	structure	a level up, as the l
 driver-robot-boot.adb	Arm : Arm_Id := 1;	1	structure	the default of a record field, overwritten where a pair is found
 driver-robot-boot.adb	Asked_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Back_Now : Real := 1.0;	1.0	math	not yet read: all of the way back, as a way of none is
+driver-robot-boot.adb	Carried_Most : Real_Array (1 .. 2 * Size) := [others => 0.0];	2	structure	two pushes a channel: one each way
 driver-robot-boot.adb	Col := Col / 2;	2	math	the parity and the next bit of a row and a column
 driver-robot-boot.adb	Count := Count + 2;	2	structure	two pushes per channel, one each way
 driver-robot-boot.adb	Descending : array (1 .. 2 * Size) of Boolean := [others => False];	2	structure	two pushes per joint, one each way
@@ -1474,7 +1476,7 @@ driver-robot-boot.adb	Tried_Up : array (1 .. 2 * Size) of Boolean := [others => 
 driver-robot-boot.adb	Up_From (I) := 2.0 * Offset (I);	2.0	structure	the ladder climbs by doubling the level (the sweep's levels double)
 driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0];	2	structure	a channel has two ways, up and down, and a ladder state for each
 driver-robot-boot.adb	Whole_Amounts.Append (0.0);	0.0	format	nought marks a group whose channels are probed one at a time
-driver-robot-boot.adb	and then (Off - Asked_Most (I)) / 2.0 > Stands);	2.0	structure	two levels' readings, each standing off its target by up to the standoff: their difference by up to twice it
+driver-robot-boot.adb	and then (Off - Asked_Most (I)) / 2.0 > Bound);	2.0	structure	two levels' readings, each standing off its target by up to the standoff or the farthest carry: their difference by up to twice it
 driver-robot-boot.adb	and then Report.Delivered.Value > 0.5)));	0.5	structure	the level below asked half as much: more than half of this ask delivered is further than all of that one (as Push_Group)
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before
@@ -4648,6 +4650,7 @@ driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words
 driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Count >= 3 and then Word (1) = "" then	3	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
 driver-robot.adb	elsif Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): which word is which, a flag or a way written as 1, 0 or -1
+driver-robot.adb	elsif Word (1) = "" then	1	format	the words of a recording's note (Driver.Recording, kind N): its first word names it
 driver-robot.adb	function Up (M : Model) return Direction_Estimate is (Up_In_Arm (M, 1));	1	structure	the world is the first arm's reference frame
 driver-robot.adb	if Count < 2 or else Word (1) /= "" then	1	format	the words of a record Q: "arm", its number, "asked", then one flag a channel
 driver-robot.adb	if Count < 2 or else Word (1) /= "" then	2	format	the words of a record Q: "arm", its number, "asked", then one flag a channel

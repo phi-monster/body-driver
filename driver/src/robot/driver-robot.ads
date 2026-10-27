@@ -322,6 +322,19 @@ package Driver.Robot is
    procedure Note_Channels_Alone (M : in out Model; G : Group_Id);
    --  The group's channels are pushed one at a time (Group_Stream.Channels_Alone).
 
+   procedure Note_Recognized (M : in out Model);
+   --  The groups are recognized: the lock-in's verdicts and what the pushes left in the views stand as they are.
+   --  The lock-in reads every cell's motion as a sum of each group's reading changes times a gain, which holds for
+   --  the recognition's pushes, a part's image moving a little in a fixed eye's view or an eye's view moving whole
+   --  with what carries it. An arm's sweep turns its joints by as far as its eye can follow, its image crossing
+   --  most of a fixed eye's view over the sweep's poses, and regressed so, every cell of that view responds to the
+   --  arm as if it carried the eye. Round n25s2 (10-27): after the arms' sweeps the Shadow's base camera, a patch for
+   --  its hand and undecided for its arm as the groups were recognized, was moved whole by both (240 and 230 of its
+   --  255 cells), and was put on the arm. Over rounds n17s2, n18s2, n23s2, n24s2 and n25s2 the groups and eyes as
+   --  recognized were right in 8 boots the estimates after the sweeps put wrong (the Shadow's base camera in 7, a
+   --  G1 in 1), and wrong in none they put right. The sweeps' own evidence of an eye's mount is the keyframes'
+   --  (Kinematics.Measure_Shifts), and stands.
+
    procedure Note_Comes_Back (M : in out Model; G : Group_Id; Channel : Positive);
    function Comes_Back (M : Model; G : Group_Id; Channel : Positive) return Boolean;
    --  A push of the channel, held and sent back, came back with the eyes' pictures (Motion.Settle): a joint.
@@ -1106,6 +1119,9 @@ private
       Due            : Boolean := False;   --  computed apart: they are due
       From_File      : Stored_Flags := [others => False];   --  reloaded, so not measured again (Load_Body)
       Report         : Ada.Strings.Unbounded.Unbounded_String;   --  what the last estimate found, for Describe
+      Recognized     : Boolean := False;
+      --  The groups are recognized (Note_Recognized): the lock-in is not measured again, and no push is noted for
+      --  what it left in the views (Motion.Note_Stayed).
    end record;
 
 end Driver.Robot;
