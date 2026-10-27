@@ -11,6 +11,7 @@
 --  studied so takes seconds, not a boot.
 
 with Ada.Command_Line;
+with Ada.Environment_Variables;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Long_Float_Text_IO;
 with Ada.Numerics;
@@ -262,8 +263,10 @@ begin
                                                         Width, Height);
                      end loop;
                   end;
+                  --  BD_PROFILED: each pixel's link the model's (as the driver fits poses taken at turns a fit sized).
                   In_Arms (U) := (Poses => Views (U).all'Unchecked_Access, Joints => Joints (U).all'Unchecked_Access,
-                                  Unit_Sigma => Sigmas (U).all'Unchecked_Access);
+                                  Unit_Sigma => Sigmas (U).all'Unchecked_Access,
+                                  Profiled => Ada.Environment_Variables.Exists ("BD_PROFILED"));
                   Put ("arm" & Id'Image & ":" & N'Image & " joints," & P'Image & " poses, pixels a pose:");
                   for V of Views (U).all loop
                      Put (V.Pixels'Image);

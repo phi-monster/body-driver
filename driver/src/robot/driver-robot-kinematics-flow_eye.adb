@@ -478,6 +478,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Relative : Real := 0.0;
       --  Each joint's unit times its own factor (the fit's units' terms, Fit_Eye): none, each one.
       Unit : Real_Access;
+      --  Each pixel's link chosen by the model at the terms (Arm_Flow.Profiled).
+      Profiled : Boolean := False;
    end record;
 
    function Unit_Of (P : Problem; J : Positive) return Real is (if P.Unit = null then 1.0 else P.Unit (J));
@@ -575,16 +577,6 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Ok := True;
    end Pixel_Residuals_To;
 
-   --  One pixel's residuals at the terms, in units of their sigmas, the joints that move it in order (Count of them),
-   --  its depth's inverse eliminated (Inverse_Depth the one the rates give, nought or less behind the eye); Ok False
-   --  when the terms move no point on its line of sight.
-   procedure Pixel_Residuals
-     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; Count : out Natural;
-      Inverse_Depth : out Real; Ok : out Boolean) is
-   begin
-      Pixel_Residuals_To (P, V, I, Base, X, P.Poses (V).Link (I), R, Count, Inverse_Depth, Ok);
-   end Pixel_Residuals;
-
    --  What a pixel costs at the terms X were it on the link after joint K of the chain, every joint's rate up to Up_To
    --  (the joints whose changes stood out at it) in: the first K's as the arm moves the point on its line of sight (its
    --  depth's inverse eliminated), the others' as nought. A change that a turned joint's load or its light made on a
@@ -640,6 +632,35 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       end loop;
       return Best_K;
    end Best_Label;
+
+   --  A rate held to nought, over its spread (nought where its joint did not turn).
+   function Nought_Residual (P : Problem; V : Positive; I : Positive; J : Positive) return Real is
+      View : Pose_View renames P.Poses (V).all;
+   begin
+      if View.Sigma (I, J) >= Real'Last then
+         return 0.0;
+      end if;
+      return View.Rate (I, J) / Sqrt ((P.Additive * View.Sigma (I, J)) ** 2 + (P.Relative * View.Rate (I, J)) ** 2);
+   end Nought_Residual;
+
+   --  One pixel's residuals at the terms, in units of their sigmas, the joints that move it in order (Count of them),
+   --  its depth's inverse eliminated (Inverse_Depth the one the rates give, nought or less behind the eye); Ok False
+   --  when the terms move no point on its line of sight. Profiled: the joints the model's link moves as the arm moves
+   --  the point, the rest held to nought.
+   procedure Pixel_Residuals
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; Count : out Natural;
+      Inverse_Depth : out Real; Ok : out Boolean)
+   is
+      Up_To : constant Natural := P.Poses (V).Link (I);
+      K     : constant Natural := (if P.Profiled then Best_Label (P, V, I, Base, X) else Up_To);
+      Moved : Natural;
+   begin
+      Pixel_Residuals_To (P, V, I, Base, X, K, R, Moved, Inverse_Depth, Ok);
+      for J in K + 1 .. Up_To loop
+         R (R'First + J - 1) := Nought_Residual (P, V, I, J);
+      end loop;
+      Count := Up_To;
+   end Pixel_Residuals;
 
    --  Every kept pixel's residuals in one vector, a pixel's in place even when it is not Ok (then zeros, and Seen
    --  False).
@@ -740,9 +761,31 @@ package body Driver.Robot.Kinematics.Flow_Eye is
    --  length scales the gradient across and down and the line of sight inversely, and the aspect the same down alone
    --  (dGy = Gy, dyn = -yn). Written out, not through the vector operators: the secondary stack they take was most of
    --  a fit's time (10-20, the arm's fit).
+   procedure Pixel_Jacobian_To
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; Up_To : Natural; R : in out Real_Array;
+      D : in out Real_Matrix; D_Unit : in out Real_Matrix; Ok : out Boolean);
+
    procedure Pixel_Jacobian
      (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; R : out Real_Array; D : out Real_Matrix;
       D_Unit : out Real_Matrix; Count : out Natural; Ok : out Boolean)
+   is
+      Up_To : constant Natural := P.Poses (V).Link (I);
+      K_All : constant Natural := (if P.Profiled then Best_Label (P, V, I, Base, X) else Up_To);
+   begin
+      if P.Profiled then
+         D := [others => [others => 0.0]];
+         D_Unit := [others => [others => 0.0]];
+         for J in K_All + 1 .. Up_To loop
+            R (R'First + J - 1) := Nought_Residual (P, V, I, J);
+         end loop;
+      end if;
+      Pixel_Jacobian_To (P, V, I, Base, X, K_All, R, D, D_Unit, Ok);
+      Count := Up_To;
+   end Pixel_Jacobian;
+
+   procedure Pixel_Jacobian_To
+     (P : Problem; V : Positive; I : Positive; Base : Mat3; X : Parameters; Up_To : Natural; R : in out Real_Array;
+      D : in out Real_Matrix; D_Unit : in out Real_Matrix; Ok : out Boolean)
    is
       View : Pose_View renames P.Poses (V).all;
       F    : constant Real := Exp (X (1));
@@ -757,13 +800,12 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Gx : constant Real := F * Gu;
       Gy : constant Real := Fy * Gv;
       Gz : constant Real := -(Gu * Du + Gv * Dv);
-      K    : constant Natural := View.Link (I);
+      K    : constant Natural := Up_To;
       A, B, Sg : Real_Array (1 .. Natural'Max (1, K)) := [others => 0.0];
       DA, DB : Real_Matrix (1 .. Natural'Max (1, K), 1 .. Terms) := [others => [others => 0.0]];
       function G_Dot (V1, V2, V3 : Real) return Real is (Gx * V1 + Gy * V2 + Gz * V3);
       function GF_Dot (V1, V2 : Real) return Real is (Gx * V1 + Gy * V2);
    begin
-      Count := K;
       Ok := False;
       for J in 1 .. K loop
          declare
@@ -903,7 +945,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          end loop;
          Ok := True;
       end;
-   end Pixel_Jacobian;
+   end Pixel_Jacobian_To;
 
    --  Every kept pixel's residuals and their derivatives (Pixel_Jacobian), rows as All_Residuals lays them out, and in
    --  JU the derivatives in each joint's unit (a column each, of as many joints as JU has columns: none when it has
@@ -2186,7 +2228,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
          begin
             S (A).P := (Poses => Arm.Poses, Twists => null, Width => Width, Height => Height,
                         Joints => Arm.Joints'Length, Cx => Real (Width) / 2.0, Cy => Real (Height) / 2.0,
-                        Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
+                        Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,
+                        Profiled => Arm.Profiled);
             S (A).P.Twists := new Twist_Grid (Arm.Poses'Range, 1 .. Natural'Max (1, Arm.Joints'Length));
             for V in Arm.Poses'Range loop
                declare
@@ -3154,7 +3197,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
                           Twists => new Twist_Grid (F.Poses'Range, 1 .. Natural'Max (1, F.Joints'Length)),
                           Width => Width, Height => Height, Joints => F.Joints'Length, Cx => Lens0.Cx, Cy => Lens0.Cy,
                           Aspect => Lens0.Fy / Lens0.Fx, Additive => Real'Max (1.0, Result.Additive),
-                          Relative => Result.Relative, Unit => null, K1 => Lens0.K1, K2 => Lens0.K2);
+                          Relative => Result.Relative, Unit => null, K1 => Lens0.K1, K2 => Lens0.K2,
+                          Profiled => F.Profiled);
             for V in F.Poses'Range loop
                declare
                   T : constant Twist_Array := Twists_At (F.Joints.all, F.Poses (V).Readings);
@@ -4446,7 +4490,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held   : aliased constant Pose_Array := Poses;
       P      : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                            Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy, Aspect => Lens.Fy / Lens.Fx,
-                           Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0);
+                           Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0, Profiled => False);
       X      : constant Parameters :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
          Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
@@ -4538,7 +4582,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held    : aliased constant Pose_Array := Poses;
       P       : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                             Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy, Aspect => Lens.Fy / Lens.Fx,
-                            Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0);
+                            Additive => Additive, Relative => Relative, Unit => null, K1 | K2 => 0.0,
+                            Profiled => False);
       X       : constant Parameters :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,
          Pose.Translation (1), Pose.Translation (2), Pose.Translation (3), Lens.Cx, Lens.Cy,
@@ -4625,7 +4670,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held : aliased constant Pose_Array := Poses;
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
-                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,
+                         Profiled => False);
       L    : Layout_Access;
    begin
       P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
@@ -4726,7 +4772,7 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
                          Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null,
-                         K1 | K2 => 0.0);
+                         K1 | K2 => 0.0, Profiled => False);
       L    : Layout_Access;
    begin
       P.Twists := new Twist_Grid (Poses'Range, 1 .. Natural'Max (1, Joints'Length));
@@ -4770,7 +4816,8 @@ package body Driver.Robot.Kinematics.Flow_Eye is
       Held : aliased constant Pose_Array := Poses;
       P    : Problem := (Poses => Held'Unchecked_Access, Twists => null, Width => Width, Height => Height,
                          Joints => Joints'Length, Cx => Lens.Cx, Cy => Lens.Cy,
-                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);
+                         Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,
+                         Profiled => False);
       L    : Layout_Access;
       X    : constant Parameters :=
         [Ada.Numerics.Long_Elementary_Functions.Log (Lens.Fx), 0.0, 0.0, 0.0,

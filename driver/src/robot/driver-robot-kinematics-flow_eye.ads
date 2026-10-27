@@ -81,6 +81,10 @@ package Driver.Robot.Kinematics.Flow_Eye is
       Poses      : access constant Pose_Array;
       Joints     : access constant Fit.Joint_Array;
       Unit_Sigma : access constant Real_Array := null;
+      --  Each pixel's link the model's at the terms (the least Label_Cost, up to the one Evidence gave it), the rates
+      --  past it held to nought: for poses taken at turns a fit sized (with turns past the linear model's reach, the
+      --  links chosen so let the fit fall to an eye at infinity, or to a focal length of a few pixels).
+      Profiled   : Boolean := False;
    end record;
 
    type Arm_Flow_Array is array (Positive range <>) of Arm_Flow;

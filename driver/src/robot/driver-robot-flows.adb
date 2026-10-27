@@ -922,6 +922,7 @@ package body Driver.Robot.Flows is
          --  them.
          procedure Fit_All (May_Grow : Boolean) is
             More : Boolean := False;
+            Flows_Spread : Real := Real'Last;   --  the last fit's own, before the places
          begin
             for A of Arms loop
                A.Asked.all := [others => 0.0];
@@ -988,13 +989,15 @@ package body Driver.Robot.Flows is
                                     Joints     => Arms (A).Joints.all'Unchecked_Access,
                                     Unit_Sigma =>
                                       (if Arms (A).Unit_Sigma = null then null
-                                       else Arms (A).Unit_Sigma.all'Unchecked_Access));
+                                       else Arms (A).Unit_Sigma.all'Unchecked_Access),
+                                    Profiled   => Arms (A).Sized);
                               end;
                            end loop;
                            if Ada.Environment_Variables.Exists ("BD_DUMP_FITS") then
                               Dump_Flow (E, Used, [for U in 1 .. Used => Which (U)], Width, Height);
                            end if;
                            Flow.Fit_Eye (In_Arms, Width, Height, Result);
+                           Flows_Spread := Result.Spread;
                            --  Placed again by the world the arms' own eyes saw at their poses (their tables' points
                            --  in this eye's picture at the first arm's first pose).
                            declare
@@ -1069,10 +1072,19 @@ package body Driver.Robot.Flows is
                               Told (E) := True;
                            else
                               Last_Why (E) := Result.Why;
-                              if Result.Spread < Last_Spread (E) then
-                                 More := True;
-                                 Last_Spread (E) := Result.Spread;
-                              end if;
+                              --  Whether the doubling made the eye surer: by the places' spread, or by the flows' own
+                              --  where the places did not settle (their spread none): judged by nothing, a fit of two
+                              --  poses stopped the poses' doubling there (n22s2, 10-27: seven of nine fixed eyes left
+                              --  at two poses; the one that went on to 31 placed its eye within 5.7 px).
+                              declare
+                                 Judged : constant Real :=
+                                   (if Result.Spread < Real'Last then Result.Spread else Flows_Spread);
+                              begin
+                                 if Judged < Last_Spread (E) then
+                                    More := True;
+                                    Last_Spread (E) := Judged;
+                                 end if;
+                              end;
                            end if;
                            Last_Places (E) := Result.Places_Told;
                            for U in 1 .. Used loop
@@ -1093,7 +1105,10 @@ package body Driver.Robot.Flows is
          --  step) away from the turn its fits ask for (Arm_Info.Asked) is taken again from its first pose at the
          --  turns asked for, each kept to no less than the least turn the arm's fit counts and to half the range seen,
          --  unless every joint's is within a doubling of a set its poses were taken at before; its first pose's search
-         --  is not run again, and its eyes judge the next fit's spread afresh. Best_Turn's own estimate, from the
+         --  is not run again, and its eyes judge the next fit's spread afresh. Once an arm's turns are its fits', they
+         --  stay: fits of two poses ask for turns that swing past a doubling from one to the next (n22s2 so1011b, five
+         --  re-takes as its focal length went 62, 96, 264, 120, 12 px against 205), and a re-take throws away every
+         --  pose the doubling took. Best_Turn's own estimate, from the
          --  pixels that change, mixes the joint's links with what changes off them and with its fastest pixels (the
          --  hall, 10-27: turns 2 to 12 times off, step 3's main error on SO-101 seed 3); a first fit's eye, even 87 px
          --  off, sized them so that renders of the same poses placed the eye within 4 to 18 px (SO-101; Panda 3b 58
@@ -1114,7 +1129,7 @@ package body Driver.Robot.Flows is
                        or else (One (J) > 0.0 and then Other (J) > 0.0
                                 and then One (J) <= 2.0 * Other (J) and then Other (J) <= 2.0 * One (J)));
                begin
-                  if (for some E in 1 .. Count_E => Sees_It (E, A) and then not Told (E)) then
+                  if not Info.Sized and then (for some E in 1 .. Count_E => Sees_It (E, A) and then not Told (E)) then
                      for J in 1 .. N loop
                         if Info.Asked (J) > 0.0 then
                            declare

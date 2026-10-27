@@ -9078,7 +9078,7 @@ package body Driver.Robot.Tests is
    --  picture there a reading unit as the arm's motion has it (central differences of the point's projection, not the
    --  fit's own formula) with Gaussian noise of the sigma each states; the joints that do not move a point change it by
    --  noise alone. The lens and the pose come back within Z of their sigmas, and the eye is told.
-   procedure Flow_Eye_On_A_Synthetic_Arm is
+   procedure Flow_Eye_On_A_Synthetic_Arm_With (Profiled : Boolean) is
       package Flow renames Driver.Robot.Kinematics.Flow_Eye;
       package KFit renames Driver.Robot.Kinematics.Fit;
       Width  : constant := 320;
@@ -9172,8 +9172,8 @@ package body Driver.Robot.Tests is
             Views (P) := View;
          end;
       end loop;
-      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access, Unit_Sigma => null)],
-                    Width, Height, Result);
+      Flow.Fit_Eye ([1 => (Poses => Views'Unchecked_Access, Joints => Joints'Unchecked_Access, Unit_Sigma => null,
+                           Profiled => Profiled)], Width, Height, Result);
       Check (Result.Determined, "the synthetic arm's eye is not told: " & Ada.Strings.Unbounded.To_String (Result.Why));
       if Result.Determined then
          declare
@@ -9196,7 +9196,19 @@ package body Driver.Robot.Tests is
             end loop;
          end;
       end if;
+   end Flow_Eye_On_A_Synthetic_Arm_With;
+
+   procedure Flow_Eye_On_A_Synthetic_Arm is
+   begin
+      Flow_Eye_On_A_Synthetic_Arm_With (Profiled => False);
    end Flow_Eye_On_A_Synthetic_Arm;
+
+   --  The same with every pixel's link the model's (Arm_Flow.Profiled): on an arm whose rates are its links' own, the
+   --  links the model chooses are those, and the eye comes back as well.
+   procedure Flow_Eye_Profiled_On_A_Synthetic_Arm is
+   begin
+      Flow_Eye_On_A_Synthetic_Arm_With (Profiled => True);
+   end Flow_Eye_Profiled_On_A_Synthetic_Arm;
 
    --  A fixed eye placed again by the table two arms' own eyes see (Kinematics.Flow_Eye.Refine_By_Scene): the arm of
    --  robot.flow.eye twice, side by side above a table 0.25 below their bases, each flow as that test makes it but
@@ -9418,7 +9430,7 @@ package body Driver.Robot.Tests is
             end;
          end loop;
          In_Arms (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Joints (A).all'Unchecked_Access,
-                         Unit_Sigma => null);
+                         Unit_Sigma => null, Profiled => False);
          Worlds (A) := (Pictures => Pictures (A).all'Unchecked_Access, Lens => Wrist_Lens,
                         Table    => (Centre => [0.0, 0.25, Table_Z], Normal => [0.0, 0.0, 1.0],
                                      Tangent_1 => [1.0, 0.0, 0.0], Tangent_2 => [0.0, 1.0, 0.0],
@@ -9583,7 +9595,7 @@ package body Driver.Robot.Tests is
                end loop;
             end loop;
             Arms_Off (A) := (Poses => Views (A).all'Unchecked_Access, Joints => Off (A).all'Unchecked_Access,
-                             Unit_Sigma => null);
+                             Unit_Sigma => null, Profiled => False);
             Worlds_Off (A) := (Pictures => Shown (A).all'Unchecked_Access, Lens => Wrist_Lens,
                                Table => Worlds (A).Table, Variants => Variants (A).all'Unchecked_Access);
          end loop;
@@ -9714,6 +9726,9 @@ package body Driver.Robot.Tests is
    begin
       Driver.Tests.Register ("robot.flow.eye", "a fixed eye placed by a synthetic arm's edge flow is not told or comes "
                              & "back off its own sigmas", Flow_Eye_On_A_Synthetic_Arm'Access);
+      Driver.Tests.Register ("robot.flow.eye.profiled", "a fixed eye placed by a synthetic arm's edge flow with each "
+                             & "pixel's link the model's is not told or comes back off its own sigmas",
+                             Flow_Eye_Profiled_On_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.flow.motions", "a joint's predicted motion at a synthetic arm's true eye is not its "
                              & "links' pixels' projected motion", Flow_Motions_On_A_Synthetic_Arm'Access);
       Driver.Tests.Register ("robot.flow.scene", "a fixed eye placed again by the table two arms' own eyes see is "

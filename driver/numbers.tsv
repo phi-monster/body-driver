@@ -3513,10 +3513,10 @@ driver-robot-kinematics-flow_eye.adb	Arm : Positive := 1;	1	structure	placeholde
 driver-robot-kinematics-flow_eye.adb	Arm, Picture : Positive := 1;	1	structure	placeholder, set before use
 driver-robot-kinematics-flow_eye.adb	Arm_Count_Terms : constant := 6;	6	structure	an arm's terms: the turn's three and the centre's three
 driver-robot-kinematics-flow_eye.adb	Aspect : Real := 1.0;	1.0	math	square pixels (§9A: the cameras' pixels are square)
-driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
-driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
-driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
-driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0);	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => 1.0, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,	1.0	statistics	square pixels (§9A: the cameras' pixels are square), the sigmas as stated; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
+driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => 0.0, Unit => null, K1 | K2 => 0.0,	1.0	statistics	the sigmas the pictures state, no share of the rate; no bend read through
 driver-robot-kinematics-flow_eye.adb	Aspect => Lens.Fy / Lens.Fx, Additive => 1.0, Relative => Relative, Unit => null,	1.0	statistics	the sigmas the pictures state, the share of the rate the caller gives (a study at a given eye)
 driver-robot-kinematics-flow_eye.adb	Aspect => Lens0.Fy / Lens0.Fx, Additive => Real'Max (1.0, Result.Additive),	1.0	statistics	never under the sigma the pictures state
 driver-robot-kinematics-flow_eye.adb	Ata : Real_Matrix (1 .. 3, 1 .. 3) := [others => [others => 0.0]];	3	structure	three dimensions
