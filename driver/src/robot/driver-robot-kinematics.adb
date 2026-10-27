@@ -1,4 +1,6 @@
 with Ada.Characters.Handling;
+with Ada.Dispatching;
+with Ada.Exceptions;
 with Ada.Environment_Variables;
 with Ada.Text_IO;
 with Ada.Numerics.Long_Elementary_Functions;
@@ -51,6 +53,7 @@ package body Driver.Robot.Kinematics is
    --  axes and its centre).
    Fixed_Terms : constant := Fit.Lens_Terms + 6;
 
+   use type Ada.Exceptions.Exception_Occurrence_Access;
    use type Driver.Observations.Group_Id;
    use type Driver.Observations.Camera_Id;
 
@@ -955,10 +958,13 @@ package body Driver.Robot.Kinematics is
             begin
                --  And the stills of the body's walk, taken before the reference this sweep begins from
                --  (Kinematics.Base).
+               --  And a fit under way in the background, which the next estimate waits for and drops: its evidence
+               --  is gone (Take_In_Fits takes a fit in only at the reference it was made at).
                M.Kinematics.Replace_Element
                  (K, (Arm => R.Arm, Group => R.Group, Eye => R.Eye, Shifts => Kept, Shift_Sigmas => Sigmas,
                       Shift_Points => Points, Shift_Seen => Seen, Shift_Told => Told, Scatter => Error,
-                      Sweeping => True, Body_Eye => R.Body_Eye, Stills => R.Stills, others => <>));
+                      Sweeping => True, Body_Eye => R.Body_Eye, Stills => R.Stills, Pending => R.Pending,
+                      others => <>));
             end;
          end;
       end if;
@@ -2721,6 +2727,535 @@ package body Driver.Robot.Kinematics is
       end loop;
    end Weigh_Across_Joints;
 
+   ---------------------------------------------------------------------------
+   --  An arm's fit in three parts: what its stages are given, read from the model as an estimate finds it (Refit's
+   --  Fit_Arm_Once), with what the fit made of them takes from the arm's evidence as it stood then (Fit_Job); the
+   --  stages and that fit, which read nothing else (Compute); and the arm's evidence taking the fit in (Refit's
+   --  Finish).
+   type Seen_Access is access Fit.Sighting_Array;
+   procedure Free is new Ada.Unchecked_Deallocation (Fit.Sighting_Array, Seen_Access);
+   type Start_Access is access Fit.Fit_Start;
+   procedure Free is new Ada.Unchecked_Deallocation (Fit.Fit_Start, Start_Access);
+
+   type Fit_Job (N : Natural) is record
+      Arm     : Arm_Id'Base := 0;
+      Frames, Queries, Kept : Natural := 0;
+      --  The stages' inputs as Fit.Fit takes them: every joint's, or those of the Count of them that turned (Index the
+      --  channel of each fitted joint, Into back, 0 for a held one).
+      Count   : Natural := 0;
+      Index, Into : Count_List (1 .. N) := [others => 0];
+      Changes : Matrix_Access;
+      Asked   : Flags_Access;
+      Visible : Real_Access;
+      Seen    : Seen_Access;
+      Play    : Play_Access;
+      Slack   : Real_Access;
+      Start   : Start_Access;
+      Width, Height : Positive := 1;
+      Across  : Boolean := False;
+      --  The arm's evidence as the estimate found it: the fit that held (Arm_Evidence.Result), the reference's query
+      --  points, every keyframe's readings (a row of the arm's channels each, the reference's first), the matches and
+      --  the revision behind the fit, the estimate's beat.
+      Was     : Arm_Fit;
+      Query_U, Query_V, Readings, Reference : Real_Vectors.Vector;
+      Reference_Beat, Matches_Count, Revision, Made_At : Natural := 0;
+      --  What the stages found, and the arm's fit made of it.
+      Joints  : Fit.Joint_Array (1 .. N);
+      Chain   : Fit.Chain_Order (1 .. N);
+      Lens    : Fit.Lens;
+      Report  : Fit.Fit_Report;
+      Result  : Arm_Fit;
+      Failed  : Boolean := False;
+      Error   : Ada.Exceptions.Exception_Occurrence_Access;
+   end record;
+   type Fit_Job_Access is access Fit_Job;
+   procedure Free is new Ada.Unchecked_Deallocation (Fit_Job, Fit_Job_Access);
+
+   procedure Release (Job : in out Fit_Job_Access) is
+   begin
+      if Job /= null then
+         Free (Job.Changes);
+         Free (Job.Asked);
+         Free (Job.Visible);
+         Free (Job.Seen);
+         Free (Job.Play);
+         Free (Job.Slack);
+         Free (Job.Start);
+         Free (Job);
+      end if;
+   end Release;
+
+   --  The stages on the job's inputs, and the arm's fit made of what they found. What the stages raise is kept with
+   --  the job (Failed, Error) and raised again where the fit is taken in (Finish), as a fit made in place raised it.
+   procedure Compute (Job : in out Fit_Job) is
+      N       : constant Natural := Job.N;
+      Frames  : constant Natural := Job.Frames;
+      Queries : constant Natural := Job.Queries;
+      Count   : constant Natural := Job.Count;
+      Index   : Count_List renames Job.Index;
+      Into    : Count_List renames Job.Into;
+      Joints  : Fit.Joint_Array renames Job.Joints;
+      Chain   : Fit.Chain_Order renames Job.Chain;
+      Lens    : Fit.Lens renames Job.Lens;
+      Report  : Fit.Fit_Report renames Job.Report;
+      Result  : Arm_Fit renames Job.Result;
+      Was     : Arm_Fit renames Job.Was;
+   begin
+      if Count = N or else Count = 0 then
+         Fit.Fit (Job.Changes.all, Job.Asked.all, Job.Visible.all, Job.Seen.all, Job.Width, Job.Height,
+                  Was.Unit_Frames, Joints, Chain, Lens, Report, Who => "arm" & Job.Arm'Image, From => Job.Start.all,
+                  Play => Job.Play.all, Slack_Start => Job.Slack.all, Across_Joints => Job.Across);
+      else
+         declare
+            Joints_R : Fit.Joint_Array (1 .. Count);
+            Chain_R  : Fit.Chain_Order (1 .. Count);
+            K        : Natural := 0;
+         begin
+            Fit.Fit (Job.Changes.all, Job.Asked.all, Job.Visible.all, Job.Seen.all, Job.Width, Job.Height,
+                     Was.Unit_Frames, Joints_R, Chain_R, Lens, Report, Who => "arm" & Job.Arm'Image,
+                     From => Job.Start.all, Play => Job.Play.all, Slack_Start => Job.Slack.all,
+                     Across_Joints => Job.Across);
+            --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
+            --  of the chain, their terms nought.
+            for C in 1 .. N loop
+               Joints (C) := (if Into (C) > 0 then Joints_R (Into (C))
+                              else (W => [0.0, 0.0, 1.0], P => Zero3, C => 0.0, Slide => False));
+            end loop;
+            --  And their slacks: the held ones' none.
+            declare
+               Slacks : constant Fit.Real_Lists.Vector := Report.Slacks;
+               Places : constant Fit.Real_Lists.Vector := Report.Slack_Places;
+            begin
+               if Natural (Slacks.Length) = Count and then Natural (Places.Length) = Count then
+                  Report.Slacks.Clear;
+                  Report.Slack_Places.Clear;
+                  for C in 1 .. N loop
+                     Report.Slacks.Append (if Into (C) > 0 then Slacks (Into (C)) else 0.0);
+                     Report.Slack_Places.Append (if Into (C) > 0 then Places (Into (C)) else 0.0);
+                  end loop;
+               end if;
+            end;
+            K := 0;
+            for P of Chain_R loop
+               K := K + 1;
+               Chain (K) := Index (P);
+            end loop;
+            for C in 1 .. N loop
+               if Into (C) = 0 then
+                  K := K + 1;
+                  Chain (K) := C;
+               end if;
+            end loop;
+            declare
+               Small : constant Natural := Fit.Terms (Count);
+               Whole : constant Natural := Fit.Terms (N);
+               --  The term of the whole arm a term of the fitted joints is.
+               function Term_Of (T : Positive) return Positive is
+                 (if T <= Fit.Lens_Terms then T
+                  else Fit.Lens_Terms + Fit.Joint_Terms * (Index ((T - Fit.Lens_Terms - 1) / Fit.Joint_Terms + 1) - 1)
+                       + (T - Fit.Lens_Terms - 1) mod Fit.Joint_Terms + 1);
+               Was : constant Fit.Real_Lists.Vector := Report.Covariance;
+               Gains : constant Fit.Real_Lists.Vector := Report.Depth_Gains;
+               Grid : array (1 .. Whole, 1 .. Whole) of Real := [others => [others => 0.0]];
+            begin
+               if Natural (Was.Length) = Small * Small then
+                  for I in 1 .. Small loop
+                     for J in 1 .. Small loop
+                        Grid (Term_Of (I), Term_Of (J)) := Was (Was.First_Index + (I - 1) * Small + J - 1);
+                     end loop;
+                  end loop;
+                  Report.Covariance.Clear;
+                  for I in 1 .. Whole loop
+                     for J in 1 .. Whole loop
+                        Report.Covariance.Append (Grid (I, J));
+                     end loop;
+                  end loop;
+               end if;
+               if Small > 0 and then Natural (Gains.Length) mod Small = 0 then
+                  Report.Depth_Gains.Clear;
+                  for Track in 1 .. Natural (Gains.Length) / Small loop
+                     declare
+                        Row : array (1 .. Whole) of Real := [others => 0.0];
+                     begin
+                        for T in 1 .. Small loop
+                           Row (Term_Of (T)) := Gains (Gains.First_Index + (Track - 1) * Small + T - 1);
+                        end loop;
+                        for X of Row loop
+                           Report.Depth_Gains.Append (X);
+                        end loop;
+                     end;
+                  end loop;
+               end if;
+            end;
+            declare
+               Pairs : constant Joint_Pair_Lists.Vector := Report.Untold;
+               Ways  : constant Fit.Joint_Lists.Vector := Report.Untold_Orders;
+            begin
+               Report.Untold.Clear;
+               for P of Pairs loop
+                  Report.Untold.Append (Joint_Pair'(Earlier => Index (P.Earlier), Later => Index (P.Later)));
+               end loop;
+               declare
+                  Told : constant Fit.Joint_Lists.Vector := Report.Turns_Told;
+               begin
+                  Report.Turns_Told.Clear;
+                  for J of Told loop
+                     Report.Turns_Told.Append (Index (J));
+                  end loop;
+               end;
+               --  Each untold order as the chain is: the turned joints' channels in it, then the held ones.
+               Report.Untold_Orders.Clear;
+               for W in 0 .. Natural (Ways.Length) / Count - 1 loop
+                  for J in 1 .. Count loop
+                     Report.Untold_Orders.Append (Index (Ways (Ways.First_Index + W * Count + J - 1)));
+                  end loop;
+                  for C in 1 .. N loop
+                     if Into (C) = 0 then
+                        Report.Untold_Orders.Append (C);
+                     end if;
+                  end loop;
+               end loop;
+            end;
+         end;
+      end if;
+      --  The table its eye sees, away from it towards the eye,
+      --  and its tracks' points: Up is the first arm's (the world
+      --  is that eye's reference frame), and the points place the
+      --  other arms (Place).
+      if Report.Fitted then
+         declare
+            Plane  : Fit.Sight_Plane;
+            Sights : Sight_Access := new Fit.Sight_Point_Array (1 .. Queries);
+            On     : Fit_Flag_Access := new Fit.Flag_Array (1 .. Queries);
+         begin
+            --  The points where the fit put them: each track's refined
+            --  depth along its reference line of sight.
+            for I in 0 .. Queries - 1 loop
+               declare
+                  D : constant Real :=
+                    (if I < Natural (Report.Depths.Length) then Report.Depths (Report.Depths.First_Index + I)
+                     else 0.0);
+                  S : constant Real :=
+                    (if I < Natural (Report.Depth_Sigmas.Length)
+                     then Report.Depth_Sigmas (Report.Depth_Sigmas.First_Index + I) else Real'Last);
+                  H : constant Vec3 := Fit.Ray (Lens, Job.Query_U (I), Job.Query_V (I));
+               begin
+                  Result.Track_Known.Append (Fit.Depth_Known (D, S));
+                  Result.Track_Sigmas.Append (S);
+                  for X of H loop
+                     Result.Tracks.Append (D * X);
+                  end loop;
+                  Sights (I + 1) := (H => H, Depth => D, Sigma => S);
+               end;
+            end loop;
+            --  How every depth moves with the fit's terms together, which the table's uncertainty carries
+            --  (Table_Estimate). The fit has a track to the last query that has a sighting: the
+            --  queries after it, that no keyframe answered, have no depth (above) and none that
+            --  moves with a term.
+            declare
+               Terms : constant Natural :=
+                 Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
+                            (Real (Natural (Report.Covariance.Length))));
+            begin
+               while Natural (Report.Depth_Gains.Length) < Queries * Terms loop
+                  Report.Depth_Gains.Append (0.0);
+               end loop;
+               for X of Report.Depth_Gains loop
+                  Result.Track_Gains.Append (X);
+               end loop;
+            end;
+            --  The table: the plane most of them lie on, with its
+            --  whole uncertainty (Table_In_Arm).
+            Fit.Dominant_Plane (Sights.all, Plane, On.all);
+            Result.Table_Own := Plane.Covariance;
+            for B of On.all loop
+               Result.Table_On.Append (B);
+            end loop;
+            Table_Estimate (Job.Query_U, Job.Query_V, Result, Lens, Sights.all, Plane,
+                            Report.Depth_Gains, Report.Covariance, Result.Table,
+                            Result.Table_Response);
+            --  For the arm's placement: the plane as its eye sees it, with its points' scatter and
+            --  what the fit moves every depth by together.
+            Plane.Covariance :=
+              Fit.Plane_Covariance (Sights.all, On.all, Plane, Report.Depth_Gains, Report.Covariance);
+            Result.Table_A := Plane.A;
+            Result.Table_Covariance := Plane.Covariance;
+            Free (Sights);
+            Free (On);
+         end;
+      end if;
+      Result.Fitted := Report.Fitted;
+      Result.Focal_Within := Report.Focal_Within;
+      Result.Searched_Least := Report.Searched_Least;
+      Result.Searched_Most := Report.Searched_Most;
+      Result.Profiled_Over := Report.Profiled_Over;
+      Result.Profile_Var := Report.Profile_Var;
+      Result.Order_Told := Report.Order_Told;
+      --  The untold pairs of the fit that searched the orders; a fit begun from another keeps the ones before.
+      if Report.Order_Told then
+         Result.Untold.Clear;
+      elsif not Report.Untold.Is_Empty then
+         Result.Untold := Report.Untold;
+      else
+         Result.Untold := Was.Untold;
+      end if;
+      Result.Slide_Turns.Clear;
+      for X of Report.Slide_Turns loop
+         Result.Slide_Turns.Append (X);
+      end loop;
+      Result.Turns_Told.Clear;
+      for J of Report.Turns_Told loop
+         Result.Turns_Told.Append (J);
+      end loop;
+      Result.Untold_Turns.Clear;
+      if not Report.Order_Told then
+         if not Report.Untold.Is_Empty then
+            for X of Report.Untold_Turns loop
+               Result.Untold_Turns.Append (X);
+            end loop;
+         else
+            Result.Untold_Turns := Was.Untold_Turns;
+         end if;
+      end if;
+      Result.Untold_Orders.Clear;
+      if not Report.Order_Told then
+         if not Report.Untold_Orders.Is_Empty then
+            for P of Report.Untold_Orders loop
+               Result.Untold_Orders.Append (P);
+            end loop;
+         else
+            Result.Untold_Orders := Was.Untold_Orders;
+         end if;
+      end if;
+      Result.Made_At := Job.Made_At;
+      Result.Unit_Frames :=
+        (if Was.Unit_Frames > 0 then Was.Unit_Frames elsif Report.Fitted then Frames else 0);
+      if Was.Unit_Frames > 0 and then not Was.Unit_Changes.Is_Empty then
+         Result.Unit_Changes := Was.Unit_Changes;
+      else
+         Result.Unit_Changes.Clear;
+         for F in 1 .. Result.Unit_Frames loop
+            for C in 1 .. N loop
+               Result.Unit_Changes.Append (Job.Readings ((F - 1) * N + C - 1) - Job.Readings (C - 1));
+            end loop;
+         end loop;
+      end if;
+      Result.Matches := Job.Matches_Count + Job.Revision;
+      Result.Used := Report.Used;
+      Result.Median_Px := Report.Median_Px;
+      Result.Sigma_Px := Report.Sigma_Px;
+      Result.Why := Report.Why;
+      Result.Reference := Job.Reference;
+      Result.Reference_Beat := Job.Reference_Beat;
+      for K in Joints'Range loop
+         declare
+            J : constant Natural := K - Joints'First;   --  from nought
+         begin
+            Result.Joints.Append
+              (Joint_Fit'(W => Joints (K).W, P => Joints (K).P, C => Joints (K).C, Slide => Joints (K).Slide,
+                          Slack       =>
+                            (if J < Natural (Report.Slacks.Length)
+                             then Report.Slacks (Report.Slacks.First_Index + J) else 0.0),
+                          Slack_Place =>
+                            (if J < Natural (Report.Slack_Places.Length)
+                             then Report.Slack_Places (Report.Slack_Places.First_Index + J) else 0.0)));
+         end;
+      end loop;
+      for P of Chain loop
+         Result.Chain.Append (P);
+      end loop;
+      Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
+      for X of Report.Covariance loop
+         Result.Covariance.Append (X);
+      end loop;
+   exception
+      when E : others =>
+         Job.Failed := True;
+         Job.Error := Ada.Exceptions.Save_Occurrence (E);
+   end Compute;
+
+   --  The arm's evidence takes its fit in (the job's Result): a fit that failed keeps the last one that held.
+   procedure Finish (M : in out Model; Index : Positive; Job : Fit_Job) is
+      R      : Arm_Evidence renames M.Kinematics (Index);
+      Report : Fit.Fit_Report renames Job.Report;
+      Lens   : Fit.Lens renames Job.Lens;
+      Chain  : Fit.Chain_Order renames Job.Chain;
+      Result : Arm_Fit renames Job.Result;
+   begin
+      if Job.Failed then
+         if Job.Error /= null then
+            Ada.Exceptions.Reraise_Occurrence (Job.Error.all);
+         end if;
+         raise Program_Error with "arm" & Job.Arm'Image & "'s fit in the background ended without its fit";
+      end if;
+      R.Fitted_Keyframes := Job.Matches_Count;
+      R.Fitted_Revision := Job.Revision;
+      if Report.Fitted or else not R.Result.Fitted then
+         R.Result := Result;
+      else
+         R.Result.Matches := Result.Matches;
+         R.Result.Why := Result.Why;
+      end if;
+      Driver.Log.Line
+        (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " "
+         & (if Report.Fitted
+            then "fitted from" & Job.Kept'Image & " sightings of" & Job.Frames'Image & " keyframes,"
+                 & Report.Used'Image & " fit, median " & Driver.Log.Image (Report.Median_Px, 3)
+                 & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px and "
+                & Driver.Log.Image (Report.Own_Gain, 2) & " of what the matcher states; focal "
+                 & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
+                 & (if Report.Focal_Sigma < Real'Last then " +- " & Driver.Log.Image (Report.Focal_Sigma, 2)
+                    & " px" else "")
+                 & Aspect_Image (Report, Lens)
+                 & "; its joints from the base, by their readings: " & Chain_Image (Chain)
+                 & Slacks_Image (Report)
+                 & (if Report.Errors.Measured
+                    then "; errors, px: a sighting's own "
+                         & Driver.Log.Image (Report.Errors.Alone, 3) & ", a point's in every keyframe "
+                         & Driver.Log.Image (Report.Errors.Persistent, 3) & " (half as alike at "
+                         & Driver.Log.Image (Report.Errors.Persistent_Half, 0)
+                         & " px apart), a keyframe's added for its points "
+                         & Driver.Log.Image (Report.Errors.Keyframe, 3) & "; the clip took "
+                         & Driver.Log.Image (Report.Errors.Clipped, 3)
+                    else "")
+            else "not fitted (stage" & Report.Stage'Image & "): "
+                 & Ada.Strings.Unbounded.To_String (Report.Why))
+         & Stages_Image (Report));
+   end Finish;
+
+   ---------------------------------------------------------------------------
+   --  Fits made in the background (Refit's arms whose sweep goes on). A task of its own makes each job's stages
+   --  (Compute) while the decider's task moves the body on; the next estimate waits for it, takes the fit in (Finish)
+   --  and frees it (Take_In_Fits). Where the estimates are made in place (Model.Apart false: the tests'), the job is
+   --  made at once and taken in at the next estimate all the same.
+   protected type Fit_State is
+      procedure Set_Done;
+      entry Wait_Done;
+   private
+      Done : Boolean := False;
+   end Fit_State;
+
+   protected body Fit_State is
+      procedure Set_Done is
+      begin
+         Done := True;
+      end Set_Done;
+
+      entry Wait_Done when Done is
+      begin
+         null;
+      end Wait_Done;
+   end Fit_State;
+
+   type Pending_Fit;
+   task type Fit_Runner (Work : not null access Pending_Fit);
+   type Runner_Access is access Fit_Runner;
+
+   type Pending_Fit is new Pending_Work with record
+      Job    : Fit_Job_Access;
+      State  : Fit_State;
+      Runner : Runner_Access;
+   end record;
+   type Pending_Fit_Access is access all Pending_Fit;
+
+   task body Fit_Runner is
+   begin
+      Compute (Work.Job.all);
+      Work.State.Set_Done;
+   exception
+      when others =>
+         --  Compute keeps what its stages raise with the job; whatever else ends the task ends the job.
+         Work.Job.Failed := True;
+         Work.State.Set_Done;
+   end Fit_Runner;
+
+   procedure Free is new Ada.Unchecked_Deallocation (Fit_Runner, Runner_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Pending_Fit, Pending_Fit_Access);
+
+   procedure Begin_Background (M : Model; R : in out Arm_Evidence; Job : Fit_Job_Access) is
+      P : constant Pending_Fit_Access := new Pending_Fit;
+   begin
+      P.Job := Job;
+      if M.Apart then
+         P.Runner := new Fit_Runner (P);
+      else
+         Compute (Job.all);
+         P.State.Set_Done;
+      end if;
+      R.Pending := Pending_Work_Access (P);
+   end Begin_Background;
+
+   --  The job under way ended, its task too (the job's state is freed with it, the task's last call its own).
+   procedure Settle (P : Pending_Fit_Access) is
+   begin
+      P.State.Wait_Done;
+      if P.Runner /= null then
+         while not P.Runner'Terminated loop
+            Ada.Dispatching.Yield;
+         end loop;
+      end if;
+   end Settle;
+
+   procedure Take_In_Fits (M : in out Model) is
+      Taken : Boolean := False;
+   begin
+      for Index in M.Kinematics.First_Index .. M.Kinematics.Last_Index loop
+         declare
+            R : Arm_Evidence renames M.Kinematics (Index);
+         begin
+            if R.Pending /= null then
+               declare
+                  P : Pending_Fit_Access := Pending_Fit_Access (R.Pending);
+               begin
+                  Settle (P);
+                  R.Pending := null;
+                  --  Taken in where the evidence it was made of is still the arm's: the graph may have given the arm
+                  --  another group or eye since (Current), and a sweep begun anew has another reference (Begin_Anew).
+                  if Current (M, R) and then not R.Frames.Is_Empty and then R.Frames (1).Beat = P.Job.Reference_Beat
+                  then
+                     Finish (M, Index, P.Job.all);
+                     Taken := True;
+                  end if;
+                  Release (P.Job);
+                  Free (P.Runner);
+                  Free (P);
+               end;
+            end if;
+         end;
+      end loop;
+      if Taken then
+         Place (M);
+      end if;
+   end Take_In_Fits;
+
+   procedure Fit_Now (M : in out Model; A : Arm_Id) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("now" & A'Image));
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            R.Fit_Now := True;
+         end if;
+      end loop;
+   end Fit_Now;
+
+   procedure End_Sweep (M : in out Model; A : Arm_Id) is
+   begin
+      Driver.Recording.Write_Shared (Driver.Recording.Model_Noted, Driver.Bytes.To_Bytes ("swept" & A'Image));
+      for R of M.Kinematics loop
+         if R.Arm = A then
+            R.Swept := True;
+         end if;
+      end loop;
+   end End_Sweep;
+
+   procedure Close_Estimate (M : in out Model) is
+   begin
+      for R of M.Kinematics loop
+         R.Fit_Now := False;
+      end loop;
+   end Close_Estimate;
+
+
    procedure Refit (M : in out Model; Again : Boolean := False) is
       Start : constant Duration := Driver.Clock.Seconds;
       Fitted : Duration;
@@ -2734,6 +3269,7 @@ package body Driver.Robot.Kinematics is
             R.Result := (others => <>);
          elsif not R.Matches.Is_Empty and then Natural (R.Matches.Length) + R.Revision /= R.Result.Matches
            and then R.Group <= M.Groups.Last_Index and then R.Eye <= M.Eyes.Last_Index
+           and then R.Pending = null   --  none of its fits is under way (Take_In_Fits takes it in at the next estimate)
            and then (not R.Result.Fitted or else R.Revision /= R.Fitted_Revision
                      or else Natural (R.Matches.Length) >= 2 * R.Fitted_Keyframes)
          then
@@ -2913,17 +3449,11 @@ package body Driver.Robot.Kinematics is
                      end loop;
                   end loop;
                   declare
-                     type Sighting_Access is access Fit.Sighting_Array;
-                     procedure Free is new Ada.Unchecked_Deallocation (Fit.Sighting_Array, Sighting_Access);
-                     Seen   : Sighting_Access := new Fit.Sighting_Array (1 .. Kept);
+                     Seen   : Seen_Access := new Fit.Sighting_Array (1 .. Kept);
                      K      : Natural := 0;
                      Slack  : Real_Access;     --  the joints' slack as measured, two a joint (Fit.Measure_Slack)
                      Linked : Matrix_Access;   --  the keyframes' changes less the slack's
-                     Joints : Fit.Joint_Array (1 .. N);
-                     Chain  : Fit.Chain_Order (1 .. N);
-                     Lens   : Fit.Lens;
-                     Report : Fit.Fit_Report;
-                     Result : Arm_Fit;
+                     Job    : Fit_Job_Access;  --  the fit of these sightings (Compute), taken in by the arm (Finish)
                      --  Begun from the arm's fit when it has one: within the estimate whose fit holds (Again), its last
                      --  stage alone; in a later estimate, the stages after the search (Fit_Start.Whole).
                      Start  : Fit.Fit_Start (if R.Result.Fitted and then Natural (R.Result.Joints.Length) = N
@@ -3111,24 +3641,39 @@ package body Driver.Robot.Kinematics is
                                          not Turned (C) or else Start.Joints (C).Slide
                                          or else abs Start.Joints (C).C > 0.0);
                         end if;
+                        Job := new Fit_Job (N);
+                        Job.Arm := R.Arm;
+                        Job.Frames := Frames;
+                        Job.Queries := Queries;
+                        Job.Kept := Kept;
+                        Job.Count := Count;
+                        Job.Width := M.Eyes (R.Eye).Grid.Width;
+                        Job.Height := M.Eyes (R.Eye).Grid.Height;
+                        Job.Across := R.Across_Due;
+                        Job.Seen := Seen;
+                        Seen := null;
                         if Count = N or else Count = 0 then
-                           Fit.Fit (Changes.all, Asked.all, Visible, Seen.all, M.Eyes (R.Eye).Grid.Width,
-                                    M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints, Chain, Lens, Report,
-                                    Who => "arm" & R.Arm'Image, From => Start, Play => Play.all,
-                                    Slack_Start => Slack.all, Across_Joints => R.Across_Due);
+                           Job.Changes := Changes;
+                           Job.Asked := Asked;
+                           Job.Play := Play;
+                           Job.Slack := Slack;
+                           Changes := null;
+                           Asked := null;
+                           Play := null;
+                           Slack := null;
+                           Job.Visible := new Real_Array'(Visible);
+                           Job.Start := new Fit.Fit_Start'(Start);
                         else
                            declare
-                              Index     : array (1 .. Count) of Positive;   --  the channel of each joint fitted
-                              Into      : array (1 .. N) of Natural := [others => 0];   --  and back, 0 for one held
+                              Index     : Count_List renames Job.Index;   --  the channel of each joint fitted
+                              Into      : Count_List renames Job.Into;    --  and back, 0 for one held
                               K         : Natural := 0;
-                              Changes_R : Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. Count);
-                              Asked_R   : Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. Count => False]);
-                              Play_R    : Play_Access :=
+                              Changes_R : constant Matrix_Access := new Driver.Numerics.Arrays.Real_Matrix (1 .. Frames, 1 .. Count);
+                              Asked_R   : constant Flags_Access := new Fit.Flag_Matrix'(1 .. Frames => [1 .. Count => False]);
+                              Play_R    : constant Play_Access :=
                                 new Fit.Play_Paths (Stretches => Play.Stretches, Frames => Frames, Joints => Count);
-                              Visible_R : Real_Array (1 .. Count);
-                              Joints_R  : Fit.Joint_Array (1 .. Count);
-                              Chain_R   : Fit.Chain_Order (1 .. Count);
-                              Start_R   : Fit.Fit_Start (if Start.N > 0 then Count else 0);
+                              Visible_R : constant Real_Access := new Real_Array (1 .. Count);
+                              Start_R   : constant Start_Access := new Fit.Fit_Start (if Start.N > 0 then Count else 0);
                               Held      : Ada.Strings.Unbounded.Unbounded_String;
                            begin
                               for C in 1 .. N loop
@@ -3194,309 +3739,52 @@ package body Driver.Robot.Kinematics is
                                                & Ada.Strings.Unbounded.To_String (Held) & " at the reference: no keyframe"
                                                & " turned it by what the fit counts as a turn; the arm is fitted by the"
                                                & Count'Image & " that turned");
-                              Fit.Fit (Changes_R.all, Asked_R.all, Visible_R, Seen.all, M.Eyes (R.Eye).Grid.Width,
-                                       M.Eyes (R.Eye).Grid.Height, R.Result.Unit_Frames, Joints_R, Chain_R, Lens, Report,
-                                       Who => "arm" & R.Arm'Image, From => Start_R, Play => Play_R.all,
-                                       Slack_Start =>
-                                         (if Slack'Length = 2 * N
-                                          then [for K in 1 .. 2 * Count => Slack (2 * Index ((K + 1) / 2) - 1 + (K - 1) mod 2)]
-                                          else Fit.No_Slack),
-                                       Across_Joints => R.Across_Due);
-                              --  Back to every channel: the joints fitted where they are, the held ones rigid at the end
-                              --  of the chain, their terms nought.
-                              for C in 1 .. N loop
-                                 Joints (C) := (if Into (C) > 0 then Joints_R (Into (C))
-                                                else (W => [0.0, 0.0, 1.0], P => Zero3, C => 0.0, Slide => False));
-                              end loop;
-                              --  And their slacks: the held ones' none.
-                              declare
-                                 Slacks : constant Fit.Real_Lists.Vector := Report.Slacks;
-                                 Places : constant Fit.Real_Lists.Vector := Report.Slack_Places;
-                              begin
-                                 if Natural (Slacks.Length) = Count and then Natural (Places.Length) = Count then
-                                    Report.Slacks.Clear;
-                                    Report.Slack_Places.Clear;
-                                    for C in 1 .. N loop
-                                       Report.Slacks.Append (if Into (C) > 0 then Slacks (Into (C)) else 0.0);
-                                       Report.Slack_Places.Append (if Into (C) > 0 then Places (Into (C)) else 0.0);
-                                    end loop;
-                                 end if;
-                              end;
-                              K := 0;
-                              for P of Chain_R loop
-                                 K := K + 1;
-                                 Chain (K) := Index (P);
-                              end loop;
-                              for C in 1 .. N loop
-                                 if Into (C) = 0 then
-                                    K := K + 1;
-                                    Chain (K) := C;
-                                 end if;
-                              end loop;
-                              declare
-                                 Small : constant Natural := Fit.Terms (Count);
-                                 Whole : constant Natural := Fit.Terms (N);
-                                 --  The term of the whole arm a term of the fitted joints is.
-                                 function Term_Of (T : Positive) return Positive is
-                                   (if T <= Fit.Lens_Terms then T
-                                    else Fit.Lens_Terms + Fit.Joint_Terms * (Index ((T - Fit.Lens_Terms - 1) / Fit.Joint_Terms + 1) - 1)
-                                         + (T - Fit.Lens_Terms - 1) mod Fit.Joint_Terms + 1);
-                                 Was : constant Fit.Real_Lists.Vector := Report.Covariance;
-                                 Gains : constant Fit.Real_Lists.Vector := Report.Depth_Gains;
-                                 Grid : array (1 .. Whole, 1 .. Whole) of Real := [others => [others => 0.0]];
-                              begin
-                                 if Natural (Was.Length) = Small * Small then
-                                    for I in 1 .. Small loop
-                                       for J in 1 .. Small loop
-                                          Grid (Term_Of (I), Term_Of (J)) := Was (Was.First_Index + (I - 1) * Small + J - 1);
-                                       end loop;
-                                    end loop;
-                                    Report.Covariance.Clear;
-                                    for I in 1 .. Whole loop
-                                       for J in 1 .. Whole loop
-                                          Report.Covariance.Append (Grid (I, J));
-                                       end loop;
-                                    end loop;
-                                 end if;
-                                 if Small > 0 and then Natural (Gains.Length) mod Small = 0 then
-                                    Report.Depth_Gains.Clear;
-                                    for Track in 1 .. Natural (Gains.Length) / Small loop
-                                       declare
-                                          Row : array (1 .. Whole) of Real := [others => 0.0];
-                                       begin
-                                          for T in 1 .. Small loop
-                                             Row (Term_Of (T)) := Gains (Gains.First_Index + (Track - 1) * Small + T - 1);
-                                          end loop;
-                                          for X of Row loop
-                                             Report.Depth_Gains.Append (X);
-                                          end loop;
-                                       end;
-                                    end loop;
-                                 end if;
-                              end;
-                              declare
-                                 Pairs : constant Joint_Pair_Lists.Vector := Report.Untold;
-                                 Ways  : constant Fit.Joint_Lists.Vector := Report.Untold_Orders;
-                              begin
-                                 Report.Untold.Clear;
-                                 for P of Pairs loop
-                                    Report.Untold.Append (Joint_Pair'(Earlier => Index (P.Earlier), Later => Index (P.Later)));
+                              Job.Changes := Changes_R;
+                              Job.Asked := Asked_R;
+                              Job.Play := Play_R;
+                              Job.Visible := Visible_R;
+                              Job.Start := Start_R;
+                              if Slack'Length = 2 * N then
+                                 Job.Slack := new Real_Array (1 .. 2 * Count);
+                                 for P in 1 .. 2 * Count loop
+                                    Job.Slack (P) := Slack (2 * Index ((P + 1) / 2) - 1 + (P - 1) mod 2);
                                  end loop;
-                                 declare
-                                    Told : constant Fit.Joint_Lists.Vector := Report.Turns_Told;
-                                 begin
-                                    Report.Turns_Told.Clear;
-                                    for J of Told loop
-                                       Report.Turns_Told.Append (Index (J));
-                                    end loop;
-                                 end;
-                                 --  Each untold order as the chain is: the turned joints' channels in it, then the held ones.
-                                 Report.Untold_Orders.Clear;
-                                 for W in 0 .. Natural (Ways.Length) / Count - 1 loop
-                                    for J in 1 .. Count loop
-                                       Report.Untold_Orders.Append (Index (Ways (Ways.First_Index + W * Count + J - 1)));
-                                    end loop;
-                                    for C in 1 .. N loop
-                                       if Into (C) = 0 then
-                                          Report.Untold_Orders.Append (C);
-                                       end if;
-                                    end loop;
-                                 end loop;
-                              end;
-                              Free (Changes_R);
-                              Free (Play_R);
-                              Free (Asked_R);
+                              else
+                                 Job.Slack := new Real_Array'(Fit.No_Slack);
+                              end if;
                            end;
                         end if;
                      end;
-                     --  The table its eye sees, away from it towards the eye,
-                     --  and its tracks' points: Up is the first arm's (the world
-                     --  is that eye's reference frame), and the points place the
-                     --  other arms (Place).
-                     if Report.Fitted then
-                        declare
-                           Plane  : Fit.Sight_Plane;
-                           Sights : Sight_Access := new Fit.Sight_Point_Array (1 .. Queries);
-                           On     : Fit_Flag_Access := new Fit.Flag_Array (1 .. Queries);
-                        begin
-                           --  The points where the fit put them: each track's refined
-                           --  depth along its reference line of sight.
-                           for I in 0 .. Queries - 1 loop
-                              declare
-                                 D : constant Real :=
-                                   (if I < Natural (Report.Depths.Length) then Report.Depths (Report.Depths.First_Index + I)
-                                    else 0.0);
-                                 S : constant Real :=
-                                   (if I < Natural (Report.Depth_Sigmas.Length)
-                                    then Report.Depth_Sigmas (Report.Depth_Sigmas.First_Index + I) else Real'Last);
-                                 H : constant Vec3 := Fit.Ray (Lens, R.Query_U (I), R.Query_V (I));
-                              begin
-                                 Result.Track_Known.Append (Fit.Depth_Known (D, S));
-                                 Result.Track_Sigmas.Append (S);
-                                 for X of H loop
-                                    Result.Tracks.Append (D * X);
-                                 end loop;
-                                 Sights (I + 1) := (H => H, Depth => D, Sigma => S);
-                              end;
-                           end loop;
-                           --  How every depth moves with the fit's terms together, which the table's uncertainty carries
-                           --  (Table_Estimate). The fit has a track to the last query that has a sighting: the
-                           --  queries after it, that no keyframe answered, have no depth (above) and none that
-                           --  moves with a term.
-                           declare
-                              Terms : constant Natural :=
-                                Natural (Ada.Numerics.Long_Elementary_Functions.Sqrt
-                                           (Real (Natural (Report.Covariance.Length))));
-                           begin
-                              while Natural (Report.Depth_Gains.Length) < Queries * Terms loop
-                                 Report.Depth_Gains.Append (0.0);
-                              end loop;
-                              for X of Report.Depth_Gains loop
-                                 Result.Track_Gains.Append (X);
-                              end loop;
-                           end;
-                           --  The table: the plane most of them lie on, with its
-                           --  whole uncertainty (Table_In_Arm).
-                           Fit.Dominant_Plane (Sights.all, Plane, On.all);
-                           Result.Table_Own := Plane.Covariance;
-                           for B of On.all loop
-                              Result.Table_On.Append (B);
-                           end loop;
-                           Table_Estimate (R.Query_U, R.Query_V, Result, Lens, Sights.all, Plane,
-                                           Report.Depth_Gains, Report.Covariance, Result.Table,
-                                           Result.Table_Response);
-                           --  For the arm's placement: the plane as its eye sees it, with its points' scatter and
-                           --  what the fit moves every depth by together.
-                           Plane.Covariance :=
-                             Fit.Plane_Covariance (Sights.all, On.all, Plane, Report.Depth_Gains, Report.Covariance);
-                           Result.Table_A := Plane.A;
-                           Result.Table_Covariance := Plane.Covariance;
-                           Free (Sights);
-                           Free (On);
-                        end;
-                     end if;
                      Free (Seen);
                      Free (Slack);
                      Free (Linked);
-                     Result.Fitted := Report.Fitted;
-                     Result.Focal_Within := Report.Focal_Within;
-                     Result.Searched_Least := Report.Searched_Least;
-                     Result.Searched_Most := Report.Searched_Most;
-                     Result.Profiled_Over := Report.Profiled_Over;
-                     Result.Profile_Var := Report.Profile_Var;
-                     Result.Order_Told := Report.Order_Told;
-                     --  The untold pairs of the fit that searched the orders; a fit begun from another keeps the ones before.
-                     if Report.Order_Told then
-                        Result.Untold.Clear;
-                     elsif not Report.Untold.Is_Empty then
-                        Result.Untold := Report.Untold;
-                     else
-                        Result.Untold := R.Result.Untold;
-                     end if;
-                     Result.Slide_Turns.Clear;
-                     for X of Report.Slide_Turns loop
-                        Result.Slide_Turns.Append (X);
-                     end loop;
-                     Result.Turns_Told.Clear;
-                     for J of Report.Turns_Told loop
-                        Result.Turns_Told.Append (J);
-                     end loop;
-                     Result.Untold_Turns.Clear;
-                     if not Report.Order_Told then
-                        if not Report.Untold.Is_Empty then
-                           for X of Report.Untold_Turns loop
-                              Result.Untold_Turns.Append (X);
-                           end loop;
-                        else
-                           Result.Untold_Turns := R.Result.Untold_Turns;
-                        end if;
-                     end if;
-                     Result.Untold_Orders.Clear;
-                     if not Report.Order_Told then
-                        if not Report.Untold_Orders.Is_Empty then
-                           for P of Report.Untold_Orders loop
-                              Result.Untold_Orders.Append (P);
-                           end loop;
-                        else
-                           Result.Untold_Orders := R.Result.Untold_Orders;
-                        end if;
-                     end if;
-                     Result.Made_At := M.Beats;
-                     Result.Unit_Frames :=
-                       (if R.Result.Unit_Frames > 0 then R.Result.Unit_Frames elsif Report.Fitted then Frames else 0);
-                     if R.Result.Unit_Frames > 0 and then not R.Result.Unit_Changes.Is_Empty then
-                        Result.Unit_Changes := R.Result.Unit_Changes;
-                     else
-                        Result.Unit_Changes.Clear;
-                        for F in 1 .. Result.Unit_Frames loop
-                           for C in 1 .. N loop
-                              Result.Unit_Changes.Append (R.Frames (F).Readings (C - 1) - R.Frames (1).Readings (C - 1));
-                           end loop;
+                     --  What the fit takes from the arm's evidence as this estimate found it.
+                     Job.Was := R.Result;
+                     Job.Query_U := R.Query_U;
+                     Job.Query_V := R.Query_V;
+                     for F in 1 .. Frames loop
+                        for C in 1 .. N loop
+                           Job.Readings.Append (R.Frames (F).Readings (C - 1));
                         end loop;
-                     end if;
-                     Result.Matches := Natural (R.Matches.Length) + R.Revision;
-                     Result.Used := Report.Used;
-                     Result.Median_Px := Report.Median_Px;
-                     Result.Sigma_Px := Report.Sigma_Px;
-                     Result.Why := Report.Why;
-                     Result.Reference := R.Frames (1).Readings;
-                     Result.Reference_Beat := R.Frames (1).Beat;
-                     for K in Joints'Range loop
-                        declare
-                           J : constant Natural := K - Joints'First;   --  from nought
-                        begin
-                           Result.Joints.Append
-                             (Joint_Fit'(W => Joints (K).W, P => Joints (K).P, C => Joints (K).C, Slide => Joints (K).Slide,
-                                         Slack       =>
-                                           (if J < Natural (Report.Slacks.Length)
-                                            then Report.Slacks (Report.Slacks.First_Index + J) else 0.0),
-                                         Slack_Place =>
-                                           (if J < Natural (Report.Slack_Places.Length)
-                                            then Report.Slack_Places (Report.Slack_Places.First_Index + J) else 0.0)));
-                        end;
                      end loop;
-                     for P of Chain loop
-                        Result.Chain.Append (P);
-                     end loop;
-                     Result.Lens := (Fx => Lens.Fx, Fy => Lens.Fy, Cx => Lens.Cx, Cy => Lens.Cy, K1 => Lens.K1, K2 => Lens.K2);
-                     for X of Report.Covariance loop
-                        Result.Covariance.Append (X);
-                     end loop;
-                     R.Fitted_Keyframes := Natural (R.Matches.Length);
-                     R.Fitted_Revision := R.Revision;
-                     --  A fit that failed keeps the last one that held.
-                     if Report.Fitted or else not R.Result.Fitted then
-                        R.Result := Result;
-                     else
-                        R.Result.Matches := Result.Matches;
-                        R.Result.Why := Result.Why;
-                     end if;
+                     Job.Reference := R.Frames (1).Readings;
+                     Job.Reference_Beat := R.Frames (1).Beat;
+                     Job.Matches_Count := Natural (R.Matches.Length);
+                     Job.Revision := R.Revision;
+                     Job.Made_At := M.Beats;
                      R.Across_Due := False;
-                     Driver.Log.Line
-                       (Driver.Log.Robot, "kinematics: arm" & R.Arm'Image & " "
-                        & (if Report.Fitted
-                           then "fitted from" & Kept'Image & " sightings of" & Frames'Image & " keyframes,"
-                                & Report.Used'Image & " fit, median " & Driver.Log.Image (Report.Median_Px, 3)
-                                & " px, noise " & Driver.Log.Image (Report.Sigma_Px, 3) & " px and "
-                               & Driver.Log.Image (Report.Own_Gain, 2) & " of what the matcher states; focal "
-                                & Driver.Log.Image (Lens.Fx, 2) & " x " & Driver.Log.Image (Lens.Fy, 2) & " px"
-                                & (if Report.Focal_Sigma < Real'Last then " +- " & Driver.Log.Image (Report.Focal_Sigma, 2)
-                                   & " px" else "")
-                                & Aspect_Image (Report, Lens)
-                                & "; its joints from the base, by their readings: " & Chain_Image (Chain)
-                                & Slacks_Image (Report)
-                                & (if Report.Errors.Measured
-                                   then "; errors, px: a sighting's own "
-                                        & Driver.Log.Image (Report.Errors.Alone, 3) & ", a point's in every keyframe "
-                                        & Driver.Log.Image (Report.Errors.Persistent, 3) & " (half as alike at "
-                                        & Driver.Log.Image (Report.Errors.Persistent_Half, 0)
-                                        & " px apart), a keyframe's added for its points "
-                                        & Driver.Log.Image (Report.Errors.Keyframe, 3) & "; the clip took "
-                                        & Driver.Log.Image (Report.Errors.Clipped, 3)
-                                   else "")
-                           else "not fitted (stage" & Report.Stage'Image & "): "
-                                & Ada.Strings.Unbounded.To_String (Report.Why))
-                        & Stages_Image (Report));
+                     --  An arm whose sweep goes on has its fit made in the background, taken in by the next estimate
+                     --  (Take_In_Fits); in place where the decider asked for it now (Fit_Now) and where the fit judges
+                     --  whether the base's shifts stand (Fit_Arm).
+                     if R.Sweeping and then not R.Swept and then not R.Fit_Now
+                       and then not (R.Base_Verdict = Unjudged and then (for some B of R.Base => B.Moved))
+                     then
+                        Begin_Background (M, R, Job);
+                     else
+                        Compute (Job.all);
+                        Finish (M, Index, Job.all);
+                        Release (Job);
+                     end if;
                   end;
                   Free (Moving);
                end;

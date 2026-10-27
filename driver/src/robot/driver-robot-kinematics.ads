@@ -161,6 +161,21 @@ private package Driver.Robot.Kinematics is
    --  its next move rests on a fit of every keyframe taken (the pairs an untold order's rounds turn next, Contested).
    --  Recorded as a note ("fit A"), which a replay applies where the run made it.
 
+   procedure Fit_Now (M : in out Model; A : Arm_Id);
+   --  Arm A's next estimate takes its fit under way in and makes the fit due, if one is, in place (Refit), so that
+   --  what the decider reads after that estimate is the fit of every keyframe taken: the boot's word where the sweep
+   --  decides whether it has ended and what its last rounds turn. Recorded as a note ("now A").
+
+   procedure End_Sweep (M : in out Model; A : Arm_Id);
+   --  Arm A's sweep has ended: its fits are made in place from its next estimate on. Recorded as a note ("swept A").
+
+   procedure Take_In_Fits (M : in out Model);
+   --  The fits estimates began in the background (Refit), taken in, those under way waited for: an estimate's first
+   --  step, before its keyframes are aligned (Driver.Robot.Recompute).
+
+   procedure Close_Estimate (M : in out Model);
+   --  An estimate's last step: the decider's Fit_Now served.
+
    procedure Refit (M : in out Model; Again : Boolean := False);
    --  Fits every arm whose answers changed since its last fit
    --  (Driver.Robot.Kinematics.Fit): an arm not fitted yet at every change, a fitted arm once its keyframes have
@@ -174,6 +189,13 @@ private package Driver.Robot.Kinematics is
    --  Again: the keyframes were just aligned again from the fits of this
    --  estimate, and an arm fitted in it is fitted again from that fit (Fit's
    --  From: its last stage alone).
+   --  An arm whose sweep goes on (Begin_Anew, End_Sweep) has its fit made in the background, the body moving on, and
+   --  taken in by the next estimate (Take_In_Fits); in place where the decider asked it to be (Fit_Now) and where the
+   --  fit decides whether the base's shifts stand (Arm_Evidence.Base_Verdict). An estimate stopped the body for its
+   --  fits: they took 15 to 37 % of every boot's beats (round n27s2, 10-27: the Panda's 376 s of its 10280 beats,
+   --  ALOHA's 410 s of 12000, at ten beats a second), while the sweep's next round rests on its keyframes' alignment
+   --  and on the fit only through the pairs it names and whether the order is told, which a round later serve as
+   --  well. Taken in at the next estimate's start, a fit enters the model at the same place in a replay as in its run.
 
    function Sees_World (M : Model; A : Arm_Id; U, V : Real) return Boolean;
    --  Whether arm A's own eye sees the world at the place (U, V) of its picture: its lock-in cell there follows the

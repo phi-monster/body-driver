@@ -302,6 +302,12 @@ package body Driver.Robot is
       --  not aligned (the evidence was no current arm's), the next pass took no keyframe (the arm had no eye until the
       --  estimate after it), and the closer's sweep was dropped.
       --  They are aligned as the graph last had the arms (Kinematics.Current).
+      --  The fits the estimate before began in the background (Kinematics.Refit), taken in before the keyframes are
+      --  aligned: the alignment predicts from them, the graph reads them.
+      if not M.From_File (Stored_Kinematics) then
+         Kinematics.Take_In_Fits (M);
+      end if;
+      Took ("fits waited for");
       if not M.From_File (Stored_Kinematics) then
          Kinematics.Align_New (M);
       end if;
@@ -318,6 +324,7 @@ package body Driver.Robot is
          while Kinematics.Realign (M) loop
             Kinematics.Refit (M, Again => True);
          end loop;
+         Kinematics.Close_Estimate (M);
       end if;
       Took ("kinematics");
       M.Graph_Evidence := M.Beats;
@@ -363,6 +370,10 @@ package body Driver.Robot is
          Kinematics.Weigh_Across_Joints (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "fit" then
          Kinematics.Ask_Fit (M, Arm_Id'Value (Word (2)));
+      elsif Count >= 2 and then Word (1) = "now" then
+         Kinematics.Fit_Now (M, Arm_Id'Value (Word (2)));
+      elsif Count >= 2 and then Word (1) = "swept" then
+         Kinematics.End_Sweep (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "walk" then
          Kinematics.Base.Begin_Walk (M, Arm_Id'Value (Word (2)));
       elsif Count >= 2 and then Word (1) = "still" then
