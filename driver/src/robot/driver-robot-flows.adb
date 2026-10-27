@@ -1148,6 +1148,10 @@ package body Driver.Robot.Flows is
                            end;
                         end if;
                      end loop;
+                     --  A fit that asked for turns within a doubling of those taken: they are its turns as well.
+                     if not Far and then (for some J in 1 .. N => Info.Asked (J) > 0.0) then
+                        Info.Sized := True;
+                     end if;
                      if Far then
                         if Info.Tried.Is_Empty then
                            for J in 1 .. N loop
