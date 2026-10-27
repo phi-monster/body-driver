@@ -8055,6 +8055,10 @@ package body Driver.Robot.Kinematics.Fit is
             Closes     : Natural := 0;
             Passes     : Natural := 0;
             Beaten     : Boolean := False;   --  an order refined beside the one kept was told the better this pass
+            --  The last pass's least order by the cheap score (Global), its score and the kept order's.
+            Cheapest   : Chain_Order (1 .. N) := [for I in 1 .. N => I];
+            Cheapest_M : Real := Real'Last;
+            Kept_M     : Real := Real'Last;
             Fitted_Now : Natural := 0;   --  of the pass's orders weighed, those fitted
             --  The orders a verdict was given from, one after another, N joints each; and whether the last verdict
             --  went to an order its refinement told better than the one kept, the search to go on from it.
@@ -8139,6 +8143,9 @@ package body Driver.Robot.Kinematics.Fit is
                   Best_M := Mo;
                   Beaten := False;
                   Global (Here.Order, G, Gm, Starts);
+                  Cheapest := G;
+                  Cheapest_M := Gm;
+                  Kept_M := Mo;
                   Closes := 0;
                   if G /= Here.Order then
                      Closes := 1;
@@ -8297,6 +8304,7 @@ package body Driver.Robot.Kinematics.Fit is
                Untold_Of   : array (1 .. Neighbours) of Boolean := [others => False];
                Untold_Here : Natural := 0;
                Same_Arm    : Natural := 0;
+               Unswept     : Natural := 0;   --  of the untold, those no turn as wide as the sweep's tells, not slides
                Scatter     : Real := Real'Last;
                Followable  : Real := 0.0;
                Reach       : Real_Array (1 .. N) := [others => 0.0];
@@ -8532,10 +8540,30 @@ package body Driver.Robot.Kinematics.Fit is
                                        & "; turned as wide as the sweep turned them its pairs tell it by "
                                        & Driver.Log.Image (Reach_Pow, 1) & " of its error, no turn a narrow window"
                                        & " follows by Z]");
-                           else
+                           --  The same arm at every pose only where every pair it swaps is of two slides: translations
+                           --  commute, and no turn of them tells the two orders apart however wide. A pair of which a
+                           --  joint turns does not commute (the turn moves the other's axis): its orders part as the
+                           --  joints turn farther than the sweep turned them, as a task may turn them. Counted as the same
+                           --  arm as far as the sweep turned them, round n25s2 (10-27) told three orders wrong, both of a
+                           --  G1's arms (each of the 36 orders weighed the same arm, the fits' focal lengths 1779 to
+                           --  9529 px) and a Shadow's (16 of 16), and no order right.
+                           elsif (for all Ia in 1 .. N =>
+                                    (for all Ib in Ia + 1 .. N =>
+                                       Pos (Here.Order (Ib)) > Pos (Here.Order (Ia))
+                                       or else (Here.Joints (Here.Order (Ia)).Slide
+                                                and then Here.Joints (Here.Order (Ib)).Slide)))
+                           then
                               Same_Arm := Same_Arm + 1;
-                              Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, no turn"
-                                                            & " as wide as the sweep's tells it by Z)");
+                              Ada.Strings.Unbounded.Append (Said, " (" & Image (Close (K)) & ": the same arm, the joints"
+                                                            & " it swaps two slides each)");
+                           else
+                              Untold_Of (K) := True;
+                              Untold_Here := Untold_Here + 1;
+                              Unswept := Unswept + 1;
+                              Telling_Of (K) := Judge (Hu.all, Hv.all, Cu.all, Cv.all, 0).Telling;
+                              Ada.Strings.Unbounded.Append (Said, " [" & Image (Close (K)) & ", not told: no turn as"
+                                                            & " wide as the sweep's tells it by Z, and a joint it"
+                                                            & " swaps turns]");
                            end if;
                         end;
                      end if;
@@ -8633,7 +8661,13 @@ package body Driver.Robot.Kinematics.Fit is
                      end;
                   end if;
                end loop;
-               Order_Is_Told := not Beaten and then Untold_Here = 0;
+               --  Nor where the cheap score put another order below the one kept: the refinement told every order
+               --  weighed apart from it, the global least one too, and the two measures disagree on which is the
+               --  less. ALOHA seed 3a's second arm (round n25s2, 10-27): the cheap score's least 5 2 6 4 1 3, its
+               --  truth, at 0.267 px against the kept 5 2 4 1 6 3's 0.274, the 25 weighed all told apart, and the
+               --  wrong order told; of the round's 29 orders told and right, every one was the cheap score's least.
+               Order_Is_Told := not Beaten and then Untold_Here = 0
+                 and then not (Cheapest /= Here.Order and then Cheapest_M < Kept_M);
                Untold.Clear;
                Untold_Turns.Clear;
                Untold_Orders.Clear;
@@ -8676,6 +8710,11 @@ package body Driver.Robot.Kinematics.Fit is
                                 & Image (Here.Order) & ", is " & (if Order_Is_Told then "told" else "NOT told")
                                 & ": " & Closes'Image & " orders weighed," & Untold_Here'Image & " untold,"
                                 & Same_Arm'Image & " the same arm"
+                                & (if Unswept > 0 then "," & Unswept'Image & " of the untold not turned wide enough to tell"
+                                   else "")
+                                & (if Cheapest /= Here.Order and then Cheapest_M < Kept_M
+                                   then "; the cheap score's least order" & Image (Cheapest) & " is less than it"
+                                   else "")
                                 & (if Beaten then "; an order refined beside it is the better, the search goes on from it"
                                    else "")
                                 & "; passes" & Passes'Image & "," & Fits_Made'Image & " fits"
