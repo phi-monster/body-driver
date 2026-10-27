@@ -31,6 +31,14 @@ import mujoco
 import msgpack
 import websocket
 from PIL import Image
+# The pictures' sensor noise and stream codec made on a GPU where torch has one, the same noise and the same codec's
+# quality: on the big machine (10-28) a 320x240 picture took 4.8 ms of noise and 1.6 of JPEG on the robot's CPU, and 60
+# robots at once spent 18 to 82 ms a beat on their pictures, beside the drivers' fits on the same cores.
+try:
+    import torch
+    import torchvision
+except ImportError:
+    torch = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bodies
@@ -381,18 +389,39 @@ for c in cameras:
 t_capture = [0.0]
 
 
+# Only where asked (BD_GPU_PICTURES=1): one CUDA context a robot, 30 robots a GPU beside their renderers, spent the
+# GPUs time-slicing (round f2s2 on the big machine, 10-28: the GPUs 84 and 94 % busy, pictures 28 to 64 ms a beat
+# against 16 to 82 on the CPU), so a GPU serves the pictures only once one process or the GPU's own sharing does it
+# for every robot at once.
+GPU = None
+if os.environ.get("BD_GPU_PICTURES") == "1" and torch is not None and torch.cuda.is_available():
+    GPU = torch.device("cuda:%d" % (int(os.environ.get("MUJOCO_EGL_DEVICE_ID", "0")) % torch.cuda.device_count()))
+    gpu_rng = torch.Generator(device=GPU)
+    gpu_rng.manual_seed(args.seed * 1000003 + 11)
+
+
 def capture(c):
     t = time.perf_counter()
     renderer.update_scene(d, camera=c["id"])
-    img = renderer.render().astype(np.float32)
-    img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * noise_rng.standard_normal(img.shape, dtype=np.float32)
-    img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
     # BD_NO_JPEG=1: a diagnostic, never a hall's world: the pictures as the sensor makes them, no codec's loss (what of a
     # fit's error the compression makes, 10-27: step 3's flows against the rigid-point model on SO-101's base camera).
-    if c["sensor"]["jpeg"] and not os.environ.get("BD_NO_JPEG"):
-        buf = io.BytesIO()
-        Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
-        img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()
+    coded = c["sensor"]["jpeg"] and not os.environ.get("BD_NO_JPEG")
+    if GPU is not None:
+        x = torch.from_numpy(renderer.render()).to(GPU).float()
+        x += torch.sqrt(c["K"] * x + c["read_levels"] ** 2) * torch.randn(x.shape, device=GPU, generator=gpu_rng)
+        x = torch.clamp(torch.round(x), 0, 255).to(torch.uint8)
+        if coded:
+            enc = torchvision.io.encode_jpeg(x.permute(2, 0, 1).contiguous(), quality=int(c["sensor"]["jpeg"]))
+            x = torchvision.io.decode_jpeg(enc.cpu() if enc.is_cuda else enc, device=GPU).permute(1, 2, 0)
+        img = x.contiguous().cpu().numpy()
+    else:
+        img = renderer.render().astype(np.float32)
+        img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * noise_rng.standard_normal(img.shape, dtype=np.float32)
+        img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
+        if coded:
+            buf = io.BytesIO()
+            Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
+            img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()
     c["queue"].append(img)
     t_capture[0] += time.perf_counter() - t
 
