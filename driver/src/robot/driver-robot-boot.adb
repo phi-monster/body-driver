@@ -1168,8 +1168,9 @@ package body Driver.Robot.Boot is
                Swept   : array (1 .. Size) of Positive;
                N       : Natural := 0;
                Rounds, Passes : Natural := 0;
-               --  The pairs the last pass's end cells turned (End_Cells) and how many orders were untold then.
-               Ended_Named  : Ada.Strings.Unbounded.Unbounded_String;
+               --  How wide a pass's end cells turned each pair of channels (End_Cells), the widest turn of the first
+               --  channel with the second; and how many orders were untold when they were last taken.
+               Ended_Share  : array (1 .. Size, 1 .. Size) of Real := [others => [others => 0.0]];
                Ended_Untold : Natural := Natural'Last;
 
                --  What the round's estimate told, read in one held beat after it: how far the view moves per unit of
@@ -1680,52 +1681,79 @@ package body Driver.Robot.Boot is
                      --  keyframes after its third pass, its order untold, and took its
                      --  cells of every joint and its single turns for 12663 beats and
                      --  four estimates more before its order was told, at 75.
-                     --  The pairs a pass's end turned are not turned again at the next pass's end while the fit names
-                     --  the same pairs and no order was told since, as the order rounds after the passes do (Sweep's
-                     --  last loop): turned again at the share the fit names, which moves only with its lens and
-                     --  points, they give what they gave. RB-Y1 2a's second arm (round n33s2, 10-27) turned c7 with c5
-                     --  by 0.019 and 0.022 units at the ends of passes 5 to 10, each telling its one untold order apart
-                     --  by 0.05 px against 0.18 to 0.20, about 2000 beats with an estimate each.
+                     --  A pair a pass's end turned is not turned again at a later pass's end while no order was told
+                     --  since and the fit names it no wider than it was turned: turned again at the same turns, its
+                     --  cells give what they gave. RB-Y1 2a's second arm (round n33s2, 10-27) turned c7 with c5 by 0.019
+                     --  and 0.022 units at the ends of passes 5 to 10, each telling its one untold order apart by 0.05
+                     --  px against 0.18 to 0.20, about 2000 beats with an estimate each. The turns the fit names grow
+                     --  with the offsets the joints' keyframes are followed to: Panda 1a (n33s2) turned its pairs by
+                     --  0.007 to 0.043 units at the ends of passes 1 and 2 and by 0.017 to 1.357 at pass 3's, its untold
+                     --  orders 37, 26, then 11; kept from turning any pair the fit had named before, whatever its turns
+                     --  (n34s2), the same seed turned them by 0.003 to 0.040 at pass 1's end and never again, its 37
+                     --  orders untold to the end and the order kept 7 3 4 6 1 2 5 for the true 1 7 4 3 2 6 5.
                      procedure End_Cells is
                      begin
                         if not Told_Now and then not Contested.Is_Empty then
                            declare
-                              use type Ada.Strings.Unbounded.Unbounded_String;
-                              Said  : Ada.Strings.Unbounded.Unbounded_String;
-                              Named : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs alone
+                              Told_Since : constant Boolean := Untold_Now < Ended_Untold;
+                              Turned     : array (Contested.First_Index .. Contested.Last_Index) of Boolean;
+                              Said       : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs turned, by how much
+                              Kept       : Ada.Strings.Unbounded.Unbounded_String;   --  the pairs not turned again
                            begin
-                              for K in Contested.First_Index .. Contested.Last_Index loop
+                              for K in Turned'Range loop
                                  declare
                                     P     : constant Joint_Pair := Contested (K);
                                     Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
                                  begin
-                                    Ada.Strings.Unbounded.Append
-                                      (Named, " c" & Driver.Log.Image (P.Earlier) & " with c"
-                                              & Driver.Log.Image (P.Later));
-                                    Ada.Strings.Unbounded.Append
-                                      (Said, " c" & Driver.Log.Image (P.Earlier) & " with c" & Driver.Log.Image (P.Later)
-                                             & " by " & Driver.Log.Image (Share (P.Earlier), 3) & " and "
-                                             & Driver.Log.Image (Share (P.Later), 3) & " units");
+                                    Turned (K) := Told_Since
+                                      or else Share (P.Earlier) > Ended_Share (P.Earlier, P.Later)
+                                      or else Share (P.Later) > Ended_Share (P.Later, P.Earlier);
+                                    if Turned (K) then
+                                       Ada.Strings.Unbounded.Append
+                                         (Said, " c" & Driver.Log.Image (P.Earlier) & " with c"
+                                                & Driver.Log.Image (P.Later) & " by "
+                                                & Driver.Log.Image (Share (P.Earlier), 3) & " and "
+                                                & Driver.Log.Image (Share (P.Later), 3) & " units");
+                                    else
+                                       Ada.Strings.Unbounded.Append
+                                         (Kept, " c" & Driver.Log.Image (P.Earlier) & " with c"
+                                                & Driver.Log.Image (P.Later));
+                                    end if;
                                  end;
                               end loop;
-                              if Named = Ended_Named and then Untold_Now >= Ended_Untold then
-                                 Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
-                                                  & " ends with its joints' order not told (" & Untold_Now'Image
-                                                  & " orders untold); the fit names the pairs the last pass's end"
-                                                  & " turned,"
-                                                  & Ada.Strings.Unbounded.To_String (Named)
-                                                  & ", and no order was told since: not turned again");
-                              else
-                                 Ended_Named := Named;
-                                 Ended_Untold := Untold_Now;
+                              if (for some T of Turned => T) then
                                  Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
                                                   & " ends with its joints' order not told (" & Untold_Now'Image
                                                   & " orders untold); its cells turn the pairs whose turns tell its"
                                                   & " untold orders apart, a pair at a time:"
-                                                  & Ada.Strings.Unbounded.To_String (Said));
-                                 for K in Contested.First_Index .. Contested.Last_Index loop
-                                    Together (Pair_Shares (Contested (K), K - Contested.First_Index), Climb => False);
+                                                  & Ada.Strings.Unbounded.To_String (Said)
+                                                  & (if Ada.Strings.Unbounded.Length (Kept) > 0
+                                                     then "; not turned again, named no wider than a pass's end"
+                                                          & " turned them and no order told since:"
+                                                          & Ada.Strings.Unbounded.To_String (Kept)
+                                                     else ""));
+                                 Ended_Untold := Untold_Now;
+                                 for K in Turned'Range loop
+                                    if Turned (K) then
+                                       declare
+                                          P     : constant Joint_Pair := Contested (K);
+                                          Share : constant Real_Array := Pair_Shares (P, K - Contested.First_Index);
+                                       begin
+                                          Together (Share, Climb => False);
+                                          Ended_Share (P.Earlier, P.Later) :=
+                                            Real'Max (Ended_Share (P.Earlier, P.Later), Share (P.Earlier));
+                                          Ended_Share (P.Later, P.Earlier) :=
+                                            Real'Max (Ended_Share (P.Later, P.Earlier), Share (P.Later));
+                                       end;
+                                    end if;
                                  end loop;
+                              else
+                                 Driver.Log.Line (Driver.Log.Robot, "boot: arm" & A'Image & " pass" & Passes'Image
+                                                  & " ends with its joints' order not told (" & Untold_Now'Image
+                                                  & " orders untold); the fit names the pairs no wider than a pass's"
+                                                  & " end turned them,"
+                                                  & Ada.Strings.Unbounded.To_String (Kept)
+                                                  & ", and no order was told since: not turned again");
                               end if;
                            end;
                            Driver.Beats.Within_A_Beat (Ask_For_Fit'Access);
