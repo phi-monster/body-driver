@@ -18,6 +18,8 @@
 import hashlib
 import json
 import os
+import queue
+import threading
 
 import numpy as np
 import mujoco
@@ -116,6 +118,14 @@ class Truth:
         self.links = [b for b in range(1, m.nbody) if b not in self.objects]
         self.file = open(path, "w")
         self.file.write(json.dumps(self._geometry(), separators=(",", ":")) + "\n")
+        # A beat's line made and written on a thread of its own, from copies of what it reads, in the beats' order: on
+        # the robot's own thread it was 1.2 to 1.9 ms of every beat (cpu4, 10-28: the readings 1.16 ms a beat for Panda
+        # and 1.86 for G1 with the truth, 0.09 to 0.20 without), its world held while it ran.
+        self.flip = np.diag([1.0, -1.0, -1.0])   # MuJoCo's camera looks down -z, y up
+        self.cam_ids = [c["id"] for c in cameras]
+        self.lines = queue.Queue()
+        self.writer = threading.Thread(target=self._write_lines, daemon=True)
+        self.writer.start()
 
     def _body_meshes(self, b):
         m = self.m
@@ -146,10 +156,15 @@ class Truth:
                 "objects": {self.names[b]: _stored(self._body_meshes(b), self.store) for b in self.objects}}
 
     def write(self, beat, state, width, height):
-        m, d = self.m, self.d
+        d = self.d
+        self.lines.put((beat, state, width, height, d.cam_xmat[self.cam_ids].copy(), d.cam_xpos[self.cam_ids].copy(),
+                        d.xpos.copy(), d.xquat.copy()))
+
+    def _line(self, beat, state, width, height, cam_xmat, cam_xpos, xpos, xquat):
+        m = self.m
         cams = {}
-        for c in self.cameras:
-            R = d.cam_xmat[c["id"]].reshape(3, 3) @ np.diag([1.0, -1.0, -1.0])   # MuJoCo's camera looks down -z, y up
+        for k, c in enumerate(self.cameras):
+            R = cam_xmat[k].reshape(3, 3) @ self.flip
             q = np.zeros(4)
             mujoco.mju_mat2Quat(q, R.ravel())
             # A camera with a sensor of its own (focal and sensorsize in the model, as ALOHA's) is drawn with that
@@ -164,15 +179,24 @@ class Truth:
                 fx, fy = float(fi[0] / ss[0] * width), float(fi[1] / ss[1] * height)
             else:
                 fx = fy = 0.5 * height / np.tan(np.radians(m.cam_fovy[c["id"]]) / 2.0)
-            cams[c["name"]] = {"pose": _pose(d.cam_xpos[c["id"]], q), "resolution": [width, height],
+            cams[c["name"]] = {"pose": _pose(cam_xpos[k], q), "resolution": [width, height],
                                "K": [[fx, 0.0, width / 2.0], [0.0, fy, height / 2.0], [0.0, 0.0, 1.0]], "lens": None}
         line = {"kind": "observation", "call": beat,
                 "state": {k: np.asarray(v).tolist() for k, v in state.items()},
-                "links": {self.names[b]: _pose(d.xpos[b], d.xquat[b]) for b in self.links},
+                "links": {self.names[b]: _pose(xpos[b], xquat[b]) for b in self.links},
                 "cameras": cams,
-                "objects": {self.names[b]: {"label": self.names[b], "type": "rigid", "pose": _pose(d.xpos[b], d.xquat[b])}
+                "objects": {self.names[b]: {"label": self.names[b], "type": "rigid", "pose": _pose(xpos[b], xquat[b])}
                             for b in self.objects}}
-        self.file.write(json.dumps(line, separators=(",", ":")) + "\n")
+        return json.dumps(line, separators=(",", ":")) + "\n"
+
+    def _write_lines(self):
+        while True:
+            item = self.lines.get()
+            if item is None:
+                return
+            self.file.write(self._line(*item))
 
     def close(self):
+        self.lines.put(None)
+        self.writer.join()
         self.file.close()
