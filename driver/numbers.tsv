@@ -2748,7 +2748,7 @@ driver-robot-kinematics-fit.adb	Every_Pose (1, Frames);	1	structure	indexes star
 driver-robot-kinematics-fit.adb	Every_Residual (1, Index'Length);	1	structure	every sighting chosen, from the first
 driver-robot-kinematics-fit.adb	Every_Sighting (1, Used);	1	structure	every sighting used, from the first
 driver-robot-kinematics-fit.adb	Every_View (1, Frames);	1	structure	every keyframe, from the first
-driver-robot-kinematics-fit.adb	Eye_At (Jp (C (K) .. C (K)), [1], [Ch (Ch'First + C (K) - 1)]);	1	structure	one joint's own step: its slice's first and only place
+driver-robot-kinematics-fit.adb	Eye_At ([Joint_Of (Vp, C (K))], [1], [Ch (Ch'First + C (K) - 1)]);	1	structure	one joint's own step: the one joint's chain, its first and only place
 driver-robot-kinematics-fit.adb	F : constant Positive := In_Frame ((I + 1) / 2);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
 driver-robot-kinematics-fit.adb	F : constant Real := 1.0 / Sqrt (Sum / Real (Unit_Count));	1.0	math	lengths scale by the inverse of the root mean square that is the unit
@@ -2899,14 +2899,14 @@ driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint 
 driver-robot-kinematics-fit.adb	O : constant Natural := X'First + 6 + Per_Joint * (J - 1);	6	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Offset := 2.0 * Offset;	2.0	structure	the profile's steps double: any distance is reached within a factor two in a number of steps that grows only with its logarithm
 driver-robot-kinematics-fit.adb	Order_Is_Told := N <= 1;	1	structure	one joint has one order
-driver-robot-kinematics-fit.adb	Out_J (J).C := A.C * Exp (V (O + 4));	4	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
-driver-robot-kinematics-fit.adb	Out_J (J).P := A.P + V (O + 2) * Side_1 (J) + V (O + 3) * Side_2 (J);	2	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
-driver-robot-kinematics-fit.adb	Out_J (J).P := A.P + V (O + 2) * Side_1 (J) + V (O + 3) * Side_2 (J);	3	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).C := X (O + 5);	5	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];	2	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J (Out_J'First + J - 1).P := [X (O + 2), X (O + 3), X (O + 4)];	4	structure	the positions of the parameters in the vector
+driver-robot-kinematics-fit.adb	Out_J.C := A.C * Exp (V (O + 4));	4	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
 driver-robot-kinematics-fit.adb	Out_J.C := X (O + 5);	5	structure	the positions of the parameters in the vector
+driver-robot-kinematics-fit.adb	Out_J.P := Plus (Plus (A.P, Scaled (V (O + 2), Side_1 (J))), Scaled (V (O + 3), Side_2 (J)));	2	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
+driver-robot-kinematics-fit.adb	Out_J.P := Plus (Plus (A.P, Scaled (V (O + 2), Side_1 (J))), Scaled (V (O + 3), Side_2 (J)));	3	structure	terms a joint in the order search's fit: its axis's tilt (two), its point across the axis (two), its scale
 driver-robot-kinematics-fit.adb	Out_J.P := [X (O + 2), X (O + 3), X (O + 4)];	2	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J.P := [X (O + 2), X (O + 3), X (O + 4)];	3	structure	the positions of the parameters in the vector
 driver-robot-kinematics-fit.adb	Out_J.P := [X (O + 2), X (O + 3), X (O + 4)];	4	structure	the positions of the parameters in the vector

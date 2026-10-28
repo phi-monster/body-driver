@@ -17,11 +17,11 @@ package body Driver.Robot.Stillness is
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
 
    --  How many pixels of the frame differ from the settled view's mean
-   --  significantly against the noise view's per-pixel noise. Means and
-   --  Variances are the eye's buffers for the two views' pixels.
+   --  significantly against the noise view's per-pixel noise. Variances is
+   --  the eye's buffer for the noise view's pixels.
    function Changed_Pixels
-     (View, Noise : Driver.Pixels.View; Luma : Real_Array; Means, Variances : in out Real_Array) return Natural
-     with Pre => Means'Length = Luma'Length and then Variances'Length = Luma'Length
+     (View, Noise : Driver.Pixels.View; Luma : Real_Array; Variances : in out Real_Array) return Natural
+     with Pre => Variances'Length = Luma'Length
    is
       Settled : constant Natural := Driver.Pixels.Frames (View);
       --  The noise of a variance measured over K frames rests on K - 1
@@ -33,35 +33,31 @@ package body Driver.Robot.Stillness is
       --  The frame and the settled mean share the pixel's noise; the mean's
       --  is that over the settled frames.
       Scale   : constant Real := T * T * (1.0 + 1.0 / Real (Settled));
-      Count   : Natural := 0;
    begin
-      Driver.Pixels.Means (View, Means);
+      --  The variances are kept (Measure_Luma_Noise reads them); the means are read where the view holds them, a
+      --  frame no longer copied out at every judged beat (10-28).
       Driver.Pixels.Variances (Noise, Variances);
-      declare
-         --  Three arrays of the frame's length, the contract's: no check below can fail, at every still beat of an eye.
-         pragma Suppress (All_Checks);
-      begin
-         for K in 0 .. Luma'Length - 1 loop
-            if (Luma (Luma'First + K) - Means (Means'First + K)) ** 2 > Scale * Variances (Variances'First + K) then
-               Count := Count + 1;
-            end if;
-         end loop;
-      end;
-      return Count;
+      return Driver.Pixels.Count_Beyond (View, Luma, Variances, Scale);
    end Changed_Pixels;
 
    procedure Judge_Eye (S : in out Eye_Stream; Frame : Driver.Images.Image; Luma : Real_Array; Moved : Boolean) is
       W : constant Positive := Driver.Images.Width (Frame);
       H : constant Positive := Driver.Images.Height (Frame);
+      Handed : Boolean := False;   --  the still view just handed to the noise view
       --  The still view begins again at this frame; the run it ends measured the noise, when it was the longest so far
       --  and held two frames.
+      --  A view handed to the noise view is begun again anew (the noise view keeps its fields); one that is not, in its
+      --  own fields cleared: a still view begun again at every moved beat made a frame of zeros and copied it twice,
+      --  the largest copy of rec4/panda1's first thousand beats (callgrind, 10-28).
       procedure Start_Again is
       begin
          if S.Noise_Is_Settled and then Driver.Pixels.Frames (S.Settled) >= 2 then
             S.Noise_View := S.Settled;
             S.Noise_Is_Settled := False;
+            S.Settled := Driver.Pixels.Empty (W, H);
+         else
+            Driver.Pixels.Restart (S.Settled);
          end if;
-         S.Settled := Driver.Pixels.Empty (W, H);
          Driver.Pixels.Add (S.Settled, Frame);
          S.Run_Moved := False;
       end Start_Again;
@@ -90,18 +86,16 @@ package body Driver.Robot.Stillness is
          return;
       end if;
       S.Has_Judged := True;
-      if S.Means = null or else S.Means'Length /= W * H then
-         Free (S.Means);
+      if S.Variances = null or else S.Variances'Length /= W * H then
          Free (S.Variances);
-         S.Means := new Real_Array (1 .. W * H);
          S.Variances := new Real_Array (1 .. W * H);
       end if;
       declare
          --  Every pixel's test alarms by chance at this rate.
          P0      : constant Real := Driver.Distributions.Gaussian_Two_Sided_Tail (Driver.Conventions.Z);
          Changed : constant Natural :=
-           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Luma, S.Means.all, S.Variances.all)
-            else Changed_Pixels (S.Settled, S.Noise_View, Luma, S.Means.all, S.Variances.all));
+           (if S.Noise_Is_Settled then Changed_Pixels (S.Settled, S.Settled, Luma, S.Variances.all)
+            else Changed_Pixels (S.Settled, S.Noise_View, Luma, S.Variances.all));
       begin
          S.Is_Still := not Regression.Count_Significant (Changed, W * H, P0);
       end;
@@ -122,7 +116,8 @@ package body Driver.Robot.Stillness is
             S.Noise_Is_Settled := True;
          end if;
       else
-         if S.Noise_Is_Settled then
+         Handed := S.Noise_Is_Settled;
+         if Handed then
             S.Noise_View := S.Settled;
             S.Noise_Is_Settled := False;
          end if;
@@ -137,7 +132,11 @@ package body Driver.Robot.Stillness is
             Driver.Pixels.Add (S.Settled, Frame);
             S.Run_Moved := True;
          else
-            S.Settled := Driver.Pixels.Empty (W, H);
+            if Handed then
+               S.Settled := Driver.Pixels.Empty (W, H);
+            else
+               Driver.Pixels.Restart (S.Settled);
+            end if;
             Driver.Pixels.Add (S.Settled, Frame);
             S.Run_Moved := False;
          end if;

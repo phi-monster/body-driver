@@ -778,10 +778,23 @@ package body Driver.Robot.Kinematics.Fit is
          end loop;
          return S;
       end Cost;
+      --  No more rounds than halve every parameter's error, one after another, to the float's last bit: a fit that
+      --  converges is done long before (its rounds a few to tens), and one still moving there is crawling a curved
+      --  valley its damped steps cannot follow. ur5e1b's 3rd fit of round n32s2, a last bit off (the unit vector's
+      --  root, 10-28), took its joints for slides and then, fitting everything at once, crawled 84786 rounds in two
+      --  minutes, each lowering the cost by 0.0009 of 2147 and moving 0.13 of a standard error, and would have for
+      --  hours: 8 s the bit before.
+      Rounds : Natural := 0;
    begin
       Evaluate (X, R0.all);
       Cost0 := Cost (R0.all);
       loop
+         Rounds := Rounds + 1;
+         if Rounds > Parameters * Real'Machine_Mantissa then
+            Driver.Log.Line (Driver.Log.Robot, "kinematics: a robust fit of" & Parameters'Image & " parameters stopped at"
+                             & Natural'Image (Rounds - 1) & " rounds, still moving, its cost" & Cost0'Image);
+            exit;
+         end if;
          --  Forward differences at the square root of the float's resolution
          --  relative to each parameter's size.
          if not Normal_Given then
@@ -7661,23 +7674,25 @@ package body Driver.Robot.Kinematics.Fit is
                Track_Points : Point_Access := new Point_Table (1 .. S);   --  per sighting, its point at X's depth
                Has_Track    : Flags_Access := new Flags'(1 .. S => False);
 
-               function Joints_Of (V : Real_Array) return Joint_Array is
-                  Out_J : Joint_Array (1 .. N) := X.Joints;
+               --  Joint J at the terms V: its axis tilted, its point moved across the axis, its scale. The sums of the
+               --  general vector operators, term by term, without their secondary stack: the normal equations make
+               --  one joint again for every term of every keyframe that turns it, and made every joint each time, the
+               --  arm's whole Joints_Of a third of an order search's time (panda2a's 8th fit of round r31s2, sampled
+               --  on the Mac, 10-28).
+               function Joint_Of (V : Real_Array; J : Positive) return Joint is
+                  O     : constant Natural := V'First + Per * (J - 1);
+                  A     : Joint renames X.Joints (J);
+                  Out_J : Joint := A;
                begin
-                  for J in 1 .. N loop
-                     declare
-                        O : constant Natural := V'First + Per * (J - 1);
-                        A : Joint renames X.Joints (J);
-                     begin
-                        Out_J (J).W := Unit (A.W + V (O) * Tilt_1 (J) + V (O + 1) * Tilt_2 (J));
-                        if not A.Slide then
-                           Out_J (J).P := A.P + V (O + 2) * Side_1 (J) + V (O + 3) * Side_2 (J);
-                        end if;
-                        Out_J (J).C := A.C * Exp (V (O + 4));
-                     end;
-                  end loop;
+                  Out_J.W := Unit (Plus (Plus (A.W, Scaled (V (O), Tilt_1 (J))), Scaled (V (O + 1), Tilt_2 (J))));
+                  if not A.Slide then
+                     Out_J.P := Plus (Plus (A.P, Scaled (V (O + 2), Side_1 (J))), Scaled (V (O + 3), Side_2 (J)));
+                  end if;
+                  Out_J.C := A.C * Exp (V (O + 4));
                   return Out_J;
-               end Joints_Of;
+               end Joint_Of;
+
+               function Joints_Of (V : Real_Array) return Joint_Array is ([for J in 1 .. N => Joint_Of (V, J)]);
 
                --  Keyframe F's sightings' residuals across and down with joints Jx in order C, into R; a point the
                --  order puts behind the eye, as far off as the picture is wide.
@@ -7833,9 +7848,8 @@ package body Driver.Robot.Kinematics.Fit is
                               begin
                                  Vp (Vp'First + T - 1) := Vp (Vp'First + T - 1) + H;
                                  declare
-                                    Jp : constant Joint_Array := Joints_Of (Vp);
                                     Mk : constant Rigid :=
-                                      Eye_At (Jp (C (K) .. C (K)), [1], [Ch (Ch'First + C (K) - 1)]);
+                                      Eye_At ([Joint_Of (Vp, C (K))], [1], [Ch (Ch'First + C (K) - 1)]);
                                     D  : constant Rigid :=
                                       Inverse (After (K + 1)) * (Inverse (Steps (K)) * Mk) * After (K + 1);
                                  begin

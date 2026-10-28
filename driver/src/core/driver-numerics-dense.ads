@@ -17,6 +17,12 @@ package Driver.Numerics.Dense with Preelaborate is
      with Pre => L'Length (1) = L'Length (2) and then B'Length = L'Length (1);
    --  Solves L * Transpose (L) * X = B for a factor from Cholesky.
 
+   procedure Cholesky_Solve (L : Real_Matrix; B : Real_Vector; X : out Real_Vector)
+     with Pre => L'Length (1) = L'Length (2) and then B'Length = L'Length (1) and then X'Length = B'Length;
+   --  The same solve, the same sums in the same order, into X: the function's result went through the secondary stack
+   --  and two copies, and the aligner solves eight a peak fit for its covariance (2.5 million in rec4/panda1's first
+   --  thousand beats, callgrind, 10-28).
+
    procedure Small_Eigensystem (A : Real_Matrix; Values : out Real_Vector; Vectors : out Real_Matrix)
      with Pre => A'Length (1) = A'Length (2) and then Values'Length = A'Length (1)
                  and then Vectors'Length (1) = A'Length (1) and then Vectors'Length (2) = A'Length (1);

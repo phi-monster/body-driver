@@ -72,6 +72,33 @@ package body Driver.Numerics.Dense is
       end return;
    end Cholesky_Solve;
 
+   procedure Cholesky_Solve (L : Real_Matrix; B : Real_Vector; X : out Real_Vector) is
+      --  The contract's square and vectors: no check below can fail (the function's, written into X).
+      pragma Suppress (All_Checks);
+      N  : constant Natural := L'Length (1);
+      I0 : constant Integer := L'First (1);
+      J0 : constant Integer := L'First (2);
+      B0 : constant Integer := B'First;
+      X0 : constant Integer := X'First;
+      Y  : Real_Vector (1 .. N);
+      Sum : Real;
+   begin
+      for I in 1 .. N loop
+         Sum := B (B0 + I - 1);
+         for K in 1 .. I - 1 loop
+            Sum := Sum - L (I0 + I - 1, J0 + K - 1) * Y (K);
+         end loop;
+         Y (I) := Sum / L (I0 + I - 1, J0 + I - 1);
+      end loop;
+      for I in reverse 1 .. N loop
+         Sum := Y (I);
+         for K in I + 1 .. N loop
+            Sum := Sum - L (I0 + K - 1, J0 + I - 1) * X (X0 + K - 1);
+         end loop;
+         X (X0 + I - 1) := Sum / L (I0 + I - 1, J0 + I - 1);
+      end loop;
+   end Cholesky_Solve;
+
    type Matrix_Access is access Real_Matrix;
    type Vector_Access is access Real_Vector;
    procedure Free is new Ada.Unchecked_Deallocation (Real_Matrix, Matrix_Access);

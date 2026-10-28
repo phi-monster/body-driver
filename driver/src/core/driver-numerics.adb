@@ -16,18 +16,22 @@ package body Driver.Numerics is
    --  Where the length overflows the float (a component beyond the square root of its largest), the vector over
    --  its largest component first: V over an infinite length is nought, no direction, and a fit's axis tilted past
    --  the float's range went to nought so and ended the estimates (n17s2 shadow2a, 10-27). Every other vector as
-   --  before, to the bit.
+   --  before, to the bit. Each part over the length, as the general operator divides, without its secondary stack.
+   --  The length stays the general "abs" (its root by Babylonian steps, a bit off the rounded root in a quarter of
+   --  sums): the processor's root moved robot.kinematics.desktop's fit to a wrong lens told fitted and
+   --  action.run.touch's arm off its bar (10-28).
    function Unit (V : Vec3) return Vec3 is
       Length : constant Real := abs V;
    begin
       if Length <= Real'Last then
-         return V / Length;
+         return [V (1) / Length, V (2) / Length, V (3) / Length];
       end if;
       declare
          Largest : constant Real := Real'Max (abs V (1), Real'Max (abs V (2), abs V (3)));
          W       : constant Vec3 := [V (1) / Largest, V (2) / Largest, V (3) / Largest];
+         Wl      : constant Real := abs W;
       begin
-         return W / abs W;
+         return [W (1) / Wl, W (2) / Wl, W (3) / Wl];
       end;
    end Unit;
 

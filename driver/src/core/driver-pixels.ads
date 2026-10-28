@@ -27,6 +27,11 @@ package Driver.Pixels is
 
    function Empty (Width, Height : Positive) return View;
 
+   procedure Restart (V : in out View)
+     with Post => Frames (V) = 0 and then Width (V) = Width (V'Old) and then Height (V) = Height (V'Old);
+   --  V as Empty of its size makes it, its fields cleared where they are: Empty fills a frame of zeros and copies it
+   --  into each field, and a still view begun again at every moved beat did so (10-28).
+
    procedure Add (V : in out View; I : Driver.Images.Image)
      with Pre => Driver.Images.Width (I) = Width (V) and then Driver.Images.Height (I) = Height (V);
 
@@ -49,6 +54,11 @@ package Driver.Pixels is
      with Pre => Frames (V) > 0 and then Into'Length = Width (V) * Height (V);
    --  Mean and Variance of every pixel at once, row after row as
    --  Driver.Images.Luma lays them out: a frame's worth without a call per pixel.
+
+   function Count_Beyond (V : View; Luma, Variances : Real_Array; Scale : Real) return Natural
+     with Pre => Frames (V) > 0 and then Luma'Length = Width (V) * Height (V) and then Variances'Length = Luma'Length;
+   --  The pixels whose luma's squared difference from V's mean is more than Scale times the variance given, row
+   --  after row: the means read where they are, not copied out as Means copies them.
 
    type Comparison is record
       Trusted : Boolean := False;

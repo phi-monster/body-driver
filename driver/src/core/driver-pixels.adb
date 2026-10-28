@@ -36,6 +36,19 @@ package body Driver.Pixels is
       end return;
    end Empty;
 
+   procedure Restart (V : in out View) is
+      Mr : constant Real_Holders.Reference_Type := V.Means.Reference;
+      Sr : constant Real_Holders.Reference_Type := V.Sums.Reference;
+   begin
+      for M of Mr.Element.all loop
+         M := 0.0;
+      end loop;
+      for S of Sr.Element.all loop
+         S := 0.0;
+      end loop;
+      V.Count := 0;
+   end Restart;
+
    function Width (V : View) return Natural is (V.Width);
    function Height (V : View) return Natural is (V.Height);
    function Frames (V : View) return Natural is (V.Count);
@@ -94,6 +107,21 @@ package body Driver.Pixels is
    begin
       Into := M.Element.all;
    end Means;
+
+   function Count_Beyond (V : View; Luma, Variances : Real_Array; Scale : Real) return Natural is
+      --  Three arrays of the frame's length, the contract's: no check below can fail, at every still beat of an eye.
+      pragma Suppress (All_Checks);
+      Mr    : constant Real_Holders.Constant_Reference_Type := V.Means.Constant_Reference;
+      M     : Real_Array renames Mr.Element.all;
+      Count : Natural := 0;
+   begin
+      for K in 0 .. Luma'Length - 1 loop
+         if (Luma (Luma'First + K) - M (M'First + K)) ** 2 > Scale * Variances (Variances'First + K) then
+            Count := Count + 1;
+         end if;
+      end loop;
+      return Count;
+   end Count_Beyond;
 
    procedure Variances (V : View; Into : out Real_Array) is
       --  One sum a pixel of the view and one answer a pixel (its precondition): no check can fail.

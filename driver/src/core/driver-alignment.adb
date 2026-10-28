@@ -471,8 +471,9 @@ package body Driver.Alignment is
       Driver.Numerics.Dense.Cholesky (Scaled, Chol, Ok);
       if Ok then
          declare
-            Y : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Chol, Rhs);
+            Y : Real_Vector (1 .. Parameters);
          begin
+            Driver.Numerics.Dense.Cholesky_Solve (Chol, Rhs, Y);
             for K in Step'Range loop
                Step (K) := Scale (K) * Y (K);
             end loop;
@@ -508,8 +509,9 @@ package body Driver.Alignment is
             begin
                Unit (J) := 1.0;
                declare
-                  Column : constant Real_Vector := Driver.Numerics.Dense.Cholesky_Solve (Chol, Unit);
+                  Column : Real_Vector (1 .. Parameters);
                begin
+                  Driver.Numerics.Dense.Cholesky_Solve (Chol, Unit, Column);
                   for I in 1 .. Parameters loop
                      Inv (I, J) := Scale (I) * Column (I) * Scale (J);
                   end loop;
@@ -577,11 +579,17 @@ package body Driver.Alignment is
                         Row : constant array (1 .. Parameters) of Real :=
                           [Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];
                      begin
+                        --  Every pair, both halves: a product is the same either way round, so each sum below
+                        --  the diagonal is the one above it to the bit, and a row of eight the processor adds several
+                        --  at a time (four on the big machine, two on the Mac) where the upper half's rows, one to
+                        --  eight long, it added one by one (the line of the half's sum alone was a twelfth of
+                        --  rec4/panda1's first thousand beats, callgrind, 10-28).
                         for A in 1 .. Parameters loop
                            declare
                               Ra : constant Real := Row (A);
                            begin
-                              for B in A .. Parameters loop
+                              for B in 1 .. Parameters loop
+                                 pragma Loop_Optimize (Vector);
                                  H (A, B) := H (A, B) + Ra * Row (B);
                               end loop;
                               G (A) := G (A) + Ra * R;
@@ -596,11 +604,6 @@ package body Driver.Alignment is
                   end if;
                end;
             end if;
-         end loop;
-      end loop;
-      for A in 1 .. Parameters loop
-         for B in 1 .. A - 1 loop
-            H (A, B) := H (B, A);
          end loop;
       end loop;
       Result.Rss := Rss;
@@ -642,18 +645,15 @@ package body Driver.Alignment is
                   Own : constant array (1 .. Parameters) of Real :=
                     [Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];
                begin
+                  --  Every pair, both halves, a row several at a time, as Pass sums its information.
                   for A in 1 .. Parameters loop
-                     for B in A .. Parameters loop
+                     for B in 1 .. Parameters loop
+                        pragma Loop_Optimize (Vector);
                         H (A, B) := H (A, B) + Own (A) * Own (B);
                      end loop;
                   end loop;
                end;
             end if;
-         end loop;
-      end loop;
-      for A in 1 .. Parameters loop
-         for B in 1 .. A - 1 loop
-            H (A, B) := H (B, A);
          end loop;
       end loop;
       Own_H := H;

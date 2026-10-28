@@ -1551,8 +1551,6 @@ package body Driver.Alignment.Keyframes is
          Rho      : Reals_Access := new Real_Array'(1 .. Across * Down => -2.0);   --  -2: no candidate there
          Count    : Natural := 0;
          function Cell (X, Y : Integer) return Positive is ((Y - Y0) * Across + (X - X0) + 1);
-         function In_Picture (X, Y : Integer) return Boolean is
-           (X >= 0 and then Y >= 0 and then X < B_Level.Width and then Y < B_Level.Height);
       begin
          Peaks (K) := null;
          if Riding'Length > 0 and then Riding (Riding'First + K - 1) then
@@ -1586,25 +1584,35 @@ package body Driver.Alignment.Keyframes is
                   declare
                      Sum_S, Sum_T, Sum_SS, Sum_TT, Sum_ST : Real := 0.0;
                      N : Natural := 0;
-                     I : Natural := 0;
+                     --  The template's rows and columns that fall in the picture at this place, taken in the same
+                     --  order as a test at every pixel took them (the same sums to the bit): that test was a fifth of
+                     --  the scan (rec4/panda1's first thousand beats, callgrind, 10-28).
+                     J0 : constant Integer := Integer'Max (-Integer (Half), -Y);
+                     J1 : constant Integer := Integer'Min (Integer (Half), B_Level.Height - 1 - Y);
+                     I0 : constant Integer := Integer'Max (-Integer (Half), -X);
+                     I1 : constant Integer := Integer'Min (Integer (Half), B_Level.Width - 1 - X);
                   begin
-                     for J in -Integer (Half) .. Integer (Half) loop
-                        for Ii in -Integer (Half) .. Integer (Half) loop
-                           I := I + 1;
-                           if Valid (I) and then In_Picture (X + Ii, Y + J) then
-                              declare
-                                 S : constant Real := B_Luma (B_Luma'First + (Y + J) * B_Level.Width + X + Ii);
-                                 T : constant Real := Template (I);
-                              begin
-                                 N := N + 1;
-                                 Sum_S := Sum_S + S;
-                                 Sum_T := Sum_T + T;
-                                 Sum_SS := Sum_SS + S * S;
-                                 Sum_TT := Sum_TT + T * T;
-                                 Sum_ST := Sum_ST + S * T;
-                              end;
-                           end if;
-                        end loop;
+                     for J in J0 .. J1 loop
+                        declare
+                           Row_T : constant Integer := (J + Integer (Half)) * Side + Integer (Half) + 1;
+                           Row_S : constant Integer := B_Luma'First + (Y + J) * B_Level.Width + X;
+                        begin
+                           for Ii in I0 .. I1 loop
+                              if Valid (Row_T + Ii) then
+                                 declare
+                                    S : constant Real := B_Luma (Row_S + Ii);
+                                    T : constant Real := Template (Row_T + Ii);
+                                 begin
+                                    N := N + 1;
+                                    Sum_S := Sum_S + S;
+                                    Sum_T := Sum_T + T;
+                                    Sum_SS := Sum_SS + S * S;
+                                    Sum_TT := Sum_TT + T * T;
+                                    Sum_ST := Sum_ST + S * T;
+                                 end;
+                              end if;
+                           end loop;
+                        end;
                      end loop;
                      if 2 * N >= Side * Side then
                         declare

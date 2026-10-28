@@ -624,7 +624,7 @@ private
       Previous      : Luma_Access;           --  luma of the last frame
       Current       : Luma_Access;           --  luma of this beat's frame
       Before        : Luma_Access;           --  luma of the frame two beats ago
-      Means, Variances : Luma_Access;        --  the stillness test's per-pixel reads of its views
+      Variances        : Luma_Access;        --  the stillness test's per-pixel read of its noise view
       Deviations       : Luma_Access;        --  the square roots of Variances, for the settle watch
       Has_Previous  : Boolean := False;      --  Previous is the frame of the beat before, of the grid's size
       Has_Before    : Boolean := False;      --  Before is the frame two beats ago, of the grid's size
