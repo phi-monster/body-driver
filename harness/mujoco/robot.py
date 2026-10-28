@@ -33,6 +33,7 @@ import numpy as np
 import mujoco
 import msgpack
 import websocket
+import websocket._abnf as ws_abnf
 from PIL import Image
 # The pictures' sensor noise and stream codec made on a GPU where torch has one, the same noise and the same codec's
 # quality: on the big machine (10-28) a 320x240 picture took 4.8 ms of noise and 1.6 of JPEG on the robot's CPU, and 60
@@ -42,6 +43,18 @@ try:
     import torchvision
 except ImportError:
     torch = None
+
+
+
+def mask_frame(mask_value, data_value):
+    """websocket-client's masking of a frame the robot sends, its result byte for byte: the frame's bytes XOR its four-byte
+    key repeated, by numpy. websocket-client did it through two integers the frame's size and back, about 2 ms a beat
+    (cProfile, 10-28: int.from_bytes and to_bytes); its own note says wsaccel would give only a tenth."""
+    data = np.frombuffer(data_value, dtype=np.uint8)
+    return np.bitwise_xor(data, np.resize(np.frombuffer(mask_value, dtype=np.uint8), data.size)).tobytes()
+
+
+ws_abnf._mask = mask_frame
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bodies
@@ -85,6 +98,13 @@ for g in groups:
         g["vadr"] = [m.jnt_dofadr[m.actuator_trnid[i, 0]] for i in g["ids"]]
     g["hinge"] = [m.actuator_trntype[i] == mujoco.mjtTrn.mjTRN_JOINT
                   and m.jnt_type[m.actuator_trnid[i, 0]] == mujoco.mjtJoint.mjJNT_HINGE for i in g["ids"]] or [False] * g["n"]
+    if g["kind"] in ("pd", "velocity"):   # the loops' constants as arrays, for control() to take a group at once
+        g["lo"], g["hi"] = m.actuator_ctrlrange[g["ids"], 0].copy(), m.actuator_ctrlrange[g["ids"], 1].copy()
+    if g["kind"] == "pd":
+        g["kp_n"] = np.array(np.broadcast_to(g["kp"], g["n"]), dtype=np.float64)   # one gain, or one a joint
+        g["kd_n"] = np.array(np.broadcast_to(g["kd"], g["n"]), dtype=np.float64)
+
+servos = bodies.ServoBank(m, [g for g in groups if g["kind"] == "servo"])   # every servo group's actuators at once
 
 # Each sensor as the real one is (bodies.SENSORS): drawn once from the seed in a stream of its own, and the noise of every
 # beat from another, so the robot, its cameras and its scramble are the same robot whatever its sensors drew.
@@ -221,20 +241,17 @@ for g in groups:
 
 
 def control():
-    """The robot's own loops, every step of the model."""
+    """The robot's own loops, every step of the model: every servo in one call (bodies.ServoBank), every other loop a
+    group at once, the same commands to the bit as joint by joint (controltest.py)."""
+    if servos.ids:
+        servos.command(d)
     for g in groups:
-        if g["kind"] == "servo":
-            for k, i in enumerate(g["ids"]):
-                d.ctrl[i] = bodies.servo_command(m, d, g, i, g["ref"][k])
-        elif g["kind"] == "pd":
-            kp, kd = np.broadcast_to(g["kp"], g["n"]), np.broadcast_to(g["kd"], g["n"])   # one gain, or one a joint
-            for k, i in enumerate(g["ids"]):
-                u = kp[k] * (g["ref"][k] - d.qpos[g["qadr"][k]]) - kd[k] * d.qvel[g["vadr"][k]]
-                d.ctrl[i] = min(max(u, m.actuator_ctrlrange[i, 0]), m.actuator_ctrlrange[i, 1])
+        if g["kind"] == "pd":
+            u = g["kp_n"] * (g["ref"] - d.qpos[g["qadr"]]) - g["kd_n"] * d.qvel[g["vadr"]]
+            d.ctrl[g["ids"]] = np.minimum(np.maximum(u, g["lo"]), g["hi"])
         elif g["kind"] == "velocity":
-            for k, i in enumerate(g["ids"]):
-                u = g["gain"] * (g["ref"][k] - d.actuator_velocity[i])
-                d.ctrl[i] = min(max(u, m.actuator_ctrlrange[i, 0]), m.actuator_ctrlrange[i, 1])
+            u = g["gain"] * (g["ref"] - d.actuator_velocity[g["ids"]])
+            d.ctrl[g["ids"]] = np.minimum(np.maximum(u, g["lo"]), g["hi"])
         elif g["kind"] == "flight":
             flight_control(g["ref"])
         elif g["kind"] == "walk":

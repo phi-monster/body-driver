@@ -89,8 +89,7 @@ class Walker:
                                   d.qpos[self.q] - self.default, d.qvel[self.v], self.action]).astype(np.float32)[None, :]
             self.action = self.session.run(None, {self.input: obs})[0][0].astype(float)
             target = self.action * self.scale + self.offset
-            for i, a in zip(self.own, self.own_act):
-                d.ctrl[a] = target[i]
+            d.ctrl[self.own_act] = target[self.own]
         self.k += 1
 
     def odometry(self):
@@ -166,6 +165,10 @@ class GearWbc:
         self.target = self.default.copy()
         self.k = 0
         self.speed = np.zeros(3)
+        # Its motors' limits as arrays, for control() to command them at once.
+        self.lo = m.actuator_ctrlrange[self.own_act, 0].copy()
+        self.hi = m.actuator_ctrlrange[self.own_act, 1].copy()
+        self.limited = m.actuator_ctrllimited[self.own_act].astype(bool)
 
     def pose(self, height):
         """The legs and the waist at its defaults, the arms straight down (its arms' zeros), the root at HEIGHT."""
@@ -198,9 +201,7 @@ class GearWbc:
             self.action = policy.run(None, {policy.get_inputs()[0].name: x})[0][0].astype(float)
             self.target = self.action * self.action_scale + self.default
         tau = self.kp * (self.target - d.qpos[self.q[:self.n_act]]) - self.kd * d.qvel[self.v[:self.n_act]]
-        for a, t in zip(self.own_act, tau):
-            lo, hi = self.m.actuator_ctrlrange[a]
-            d.ctrl[a] = min(max(t, lo), hi) if self.m.actuator_ctrllimited[a] else t
+        d.ctrl[self.own_act] = np.where(self.limited, np.minimum(np.maximum(tau, self.lo), self.hi), tau)
         self.k += 1
 
     odometry = Walker.odometry

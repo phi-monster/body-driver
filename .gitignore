@@ -2,3 +2,5 @@ fast/obj/
 fast/objlib/
 fast/lib/
 slow/target/
+harness/mujoco/libservobank.so
+harness/mujoco/libservobank.so.*

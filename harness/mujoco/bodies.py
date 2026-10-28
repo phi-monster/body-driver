@@ -199,6 +199,80 @@ def servo_command(m, d, g, i, ref):
     return u
 
 
+_SERVOBANK = None
+
+
+def servobank_library():
+    """servobank.c built once beside this file (cc, -O2 without fused multiply-adds) and loaded: the step every servo of
+    a robot takes at once. There is no other way: a robot whose servo bank cannot be built does not run."""
+    global _SERVOBANK
+    if _SERVOBANK is None:
+        import ctypes, subprocess
+        here = os.path.dirname(os.path.abspath(__file__))
+        src, lib = os.path.join(here, "servobank.c"), os.path.join(here, "libservobank.so")
+        if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(src):
+            tmp = "%s.%d" % (lib, os.getpid())
+            subprocess.run(["cc", "-O2", "-ffp-contract=off", "-fPIC", "-shared", src, "-o", tmp, "-lm"], check=True)
+            os.replace(tmp, lib)
+        so = ctypes.CDLL(lib)
+        # Plain pointers, taken once (ServoBank.command): ndpointer's checks of every array at every call took
+        # 60 us a call, more than the step itself.
+        so.servo_bank_step.argtypes = [ctypes.c_int, ctypes.c_double] + [ctypes.c_void_p] * 15
+        so.servo_bank_step.restype = None
+        _SERVOBANK = so
+    return _SERVOBANK
+
+
+class ServoBank:
+    """Every servo group's actuators at once: servo_command for each of them, the same arithmetic in the same order, in
+    one call a step of servobank.c (built without fused multiply-adds), so the same commands to the bit
+    (controltest.py). A Python call a joint a step was RB-Y1's 16 ms a beat (its planned joints at a hundred steps a
+    beat); numpy over its handful of joints a group was 22, over all of them at once 5.5 (10-28)."""
+
+    def __init__(self, m, groups):
+        self.m, self.groups = m, groups
+        self.ids = [i for g in groups for i in g["ids"]]
+        self.c = None
+
+    def command(self, d):
+        m = self.m
+        if self.c is None:   # a path begins where its joint stands, at rest
+            ids = np.asarray(self.ids)
+            j = m.actuator_trnid[ids, 0]
+            planned, gravity, vmax, amax = [], [], [], []
+            for g in self.groups:
+                plan = g.get("plan")
+                for i in g["ids"]:
+                    v, a = plan["limits"].get(m.joint(int(m.actuator_trnid[i, 0])).name, (None, None)) if plan else (None, None)
+                    planned.append(bool(plan))
+                    gravity.append(bool(plan and plan.get("gravity")))
+                    vmax.append(np.nan if v is None else v)
+                    amax.append(np.nan if a is None else a)
+            vmax, amax = np.array(vmax, dtype=np.float64), np.array(amax, dtype=np.float64)
+            kp = np.ascontiguousarray(-m.actuator_biasprm[ids, 1], dtype=np.float64)
+            kv = np.ascontiguousarray(-m.actuator_biasprm[ids, 2], dtype=np.float64)
+            with np.errstate(divide="ignore", invalid="ignore"):   # an unplanned velocity servo has no spring
+                kv_kp = kv / kp
+            c = self.c = {"planned": np.array(planned, dtype=np.uint8), "gravity": np.array(gravity, dtype=np.uint8),
+                      "has_v": (~np.isnan(vmax)).astype(np.uint8), "has_a": (~np.isnan(amax)).astype(np.uint8),
+                      "vmax": vmax, "amax": amax, "kp": kp, "kv_kp": kv_kp,
+                      "dof": np.ascontiguousarray(m.jnt_dofadr[j], dtype=np.int32),
+                      "p0": np.array(d.qpos[m.jnt_qposadr[j]], dtype=np.float64), "p1": np.zeros(len(ids)),
+                      "ids": np.ascontiguousarray(ids, dtype=np.int32), "refs": np.zeros(len(ids))}
+            # The step's arguments, every array's address taken once: the arrays are this bank's own and the model's
+            # data's (d.qfrc_bias, d.ctrl), none of them ever reallocated.
+            for k in ("planned", "gravity", "has_v", "has_a", "vmax", "amax", "kp", "kv_kp", "dof", "p0", "p1", "ids"):
+                assert c[k].flags["C_CONTIGUOUS"]
+            assert d.qfrc_bias.flags["C_CONTIGUOUS"] and d.ctrl.flags["C_CONTIGUOUS"]
+            c["step"] = servobank_library().servo_bank_step
+            c["args"] = (len(self.ids), m.opt.timestep) + tuple(
+                a.ctypes.data for a in (c["planned"], c["gravity"], c["has_v"], c["has_a"], c["vmax"], c["amax"],
+                                        c["kp"], c["kv_kp"], c["refs"], d.qfrc_bias, c["dof"], c["p0"], c["p1"],
+                                        d.ctrl, c["ids"]))
+        c = self.c
+        np.concatenate([np.asarray(g["ref"], dtype=np.float64) for g in self.groups], out=c["refs"])
+        c["step"](*c["args"])
+
 def kind_panda(rng):
     spec = mujoco.MjSpec.from_file(MENAGERIE + "/franka_emika_panda/scene.xml")
     center, size = [0.3, 0.0, 0.4], 0.8
