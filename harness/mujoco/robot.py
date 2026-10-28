@@ -20,7 +20,6 @@ import argparse
 import collections
 import concurrent.futures
 import ctypes
-import io
 import json
 import math
 import os
@@ -405,19 +404,21 @@ t_capture = [0.0]
 # renders (the call lets go of the interpreter). numpy drew a picture's 230 thousand normals in 2.5 ms on the big machine
 # and added them in 0.34 (10-28), from threads a camera drawing ahead, a quarter of the robots' CPU; sensor.c makes both
 # in 1.06 ms (sensortest.py: every level's pictures against their exact law). A picture's noise is its own, its key the
-# robot's seed, the camera and the beat. (A GPU made them only where asked, and its 30 robots' contexts took turns on
-# the GPU, slower than the CPU: round f2s2, 10-28.)
+# robot's seed, the camera and the beat. The stream's codec in the same call (sensor.c: the same pixels as PIL made).
+# (A GPU made them only where asked, and its 30 robots' contexts took turns on the GPU, slower than the CPU: round f2s2,
+# 10-28.)
 def sensor_library():
     here = os.path.dirname(os.path.abspath(__file__))
     src, lib = os.path.join(here, "sensor.c"), os.path.join(here, "libsensor.so")
     if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(src):
         tmp = "%s.%d" % (lib, os.getpid())
-        subprocess.run(["cc", "-O2", "-ffp-contract=off", "-fPIC", "-shared", src, "-o", tmp, "-lm"], check=True)
+        subprocess.run(["cc", "-O2", "-ffp-contract=off", "-fPIC", "-shared", src, "-o", tmp, "-lm", "-ljpeg"], check=True)
         os.replace(tmp, lib)
     so = ctypes.CDLL(lib)
     so.sensor_setup.argtypes = []
     so.sensor_setup.restype = None
-    so.sensor_sense.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p, ctypes.c_uint64]
+    so.sensor_sense.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                                ctypes.c_uint64, ctypes.c_int]
     so.sensor_sense.restype = None
     so.sensor_setup()
     return so
@@ -443,12 +444,9 @@ def capture(c):
 
 def sensed(c, raw, coded, at):
     img = np.empty_like(raw)
-    sensor.sensor_sense(raw.ctypes.data, img.ctypes.data, raw.size, c["sd"].ctypes.data,
-                        (args.seed & 0xFFFF) << 48 | 13 << 40 | (c["k"] & 0xFF) << 32 | (at & 0xFFFFFFFF))
-    if coded:
-        buf = io.BytesIO()
-        Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
-        img = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB")).copy()
+    sensor.sensor_sense(raw.ctypes.data, img.ctypes.data, args.width, args.height, c["sd"].ctypes.data,
+                        (args.seed & 0xFFFF) << 48 | 13 << 40 | (c["k"] & 0xFF) << 32 | (at & 0xFFFFFFFF),
+                        int(c["sensor"]["jpeg"]) if coded else 0)
     return img
 
 

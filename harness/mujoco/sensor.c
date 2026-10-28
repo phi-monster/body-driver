@@ -5,9 +5,16 @@
    64-bit draw apart (the paper took both from the same bits), over xoshiro256** seeded by splitmix64 from the picture's
    own key (the robot's seed, the camera, the beat), so every picture's noise is its own whatever thread makes it. numpy
    drew a picture's 230 thousand in 2.5 ms on the big machine (10-28), an indirect call a draw, and then 0.34 ms more to
-   add them; the robots' noise was a quarter of their CPU. */
+   add them; the robots' noise was a quarter of their CPU. The stream's codec after it, when the camera has one: the
+   picture through libjpeg-turbo and back in memory, as PIL's save and open did it (its quality, the library's default
+   4:2:0 sampling and accurate DCT, no optimized tables): the same pixels to the bit (sensortest.py) at 0.46 to 0.68 ms
+   against PIL's 1.32 to 1.43, and the whole of a picture in one call that lets go of the interpreter, where PIL's
+   steps between took it, against the robot's own thread (Panda's pictures held its beat 1.2 ms, 10-28). */
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <jpeglib.h>
 
 static uint32_t kn[128];
 static float wn[128], fn[128];
@@ -110,7 +117,7 @@ static inline float nearest(float v)
     return (v + big) - big;
 }
 
-void sensor_sense(const uint8_t *in, uint8_t *out, long n, const float *sd, uint64_t key)
+static void noise(const uint8_t *in, uint8_t *out, long n, const float *sd, uint64_t key)
 {
     rng g;
     uint64_t x = key;
@@ -120,4 +127,58 @@ void sensor_sense(const uint8_t *in, uint8_t *out, long n, const float *sd, uint
         const float v = nearest((float) in[i] + sd[in[i]] * rnor(&g));
         out[i] = v <= 0.0f ? 0 : (v >= 255.0f ? 255 : (uint8_t) v);
     }
+}
+
+/* PICTURE (WIDTH x HEIGHT, RGB) through libjpeg at QUALITY and back into OUT. */
+static void codec(const uint8_t *picture, uint8_t *out, int width, int height, int quality)
+{
+    struct jpeg_compress_struct c;
+    struct jpeg_decompress_struct d;
+    struct jpeg_error_mgr ec, ed;
+    unsigned char *mem = NULL;
+    unsigned long size = 0;
+    c.err = jpeg_std_error(&ec);
+    jpeg_create_compress(&c);
+    jpeg_mem_dest(&c, &mem, &size);
+    c.image_width = (JDIMENSION) width;
+    c.image_height = (JDIMENSION) height;
+    c.input_components = 3;
+    c.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&c);
+    jpeg_set_quality(&c, quality, TRUE);
+    jpeg_start_compress(&c, TRUE);
+    while (c.next_scanline < c.image_height) {
+        JSAMPROW row = (JSAMPROW) (picture + (size_t) c.next_scanline * (size_t) width * 3);
+        jpeg_write_scanlines(&c, &row, 1);
+    }
+    jpeg_finish_compress(&c);
+    jpeg_destroy_compress(&c);
+    d.err = jpeg_std_error(&ed);
+    jpeg_create_decompress(&d);
+    jpeg_mem_src(&d, mem, size);
+    jpeg_read_header(&d, TRUE);
+    d.out_color_space = JCS_RGB;
+    jpeg_start_decompress(&d);
+    while (d.output_scanline < d.output_height) {
+        JSAMPROW row = (JSAMPROW) (out + (size_t) d.output_scanline * (size_t) width * 3);
+        jpeg_read_scanlines(&d, &row, 1);
+    }
+    jpeg_finish_decompress(&d);
+    jpeg_destroy_decompress(&d);
+    free(mem);
+}
+
+/* A camera's picture as its sensor and its stream make it: IN (WIDTH x HEIGHT, RGB) with its noise into OUT, and then,
+   QUALITY above nought, through the codec. */
+void sensor_sense(const uint8_t *in, uint8_t *out, int width, int height, const float *sd, uint64_t key, int quality)
+{
+    const long n = (long) width * height * 3;
+    if (quality <= 0) {
+        noise(in, out, n, sd, key);
+        return;
+    }
+    uint8_t *noisy = malloc((size_t) n);
+    noise(in, noisy, n, sd, key);
+    codec(noisy, out, width, height, quality);
+    free(noisy);
 }

@@ -2,17 +2,19 @@
 # several levels with a webcam's noise, the noise each leaves (the rounded picture less the level) against the
 # sensor's own (its variance the level's sd squared and a twelfth for the rounding, its mean nought, its kurtosis a
 # Gaussian's, its tails beyond three and four sds a Gaussian's), the same key the same picture and the next key
-# another; and its time against numpy's draws and sums, as robot.py made them before.
+# another; the codec in the same call against PIL's round trip of the noisy picture (robot.py's before), the same pixels;
+# and its time against numpy's draws and sums, as robot.py made them before.
 import ctypes, math, os, subprocess, sys, time
 import numpy as np
 here = os.path.dirname(os.path.abspath(__file__))
 lib = os.path.join(here, "libsensor.so")
 if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(os.path.join(here, "sensor.c")):
     subprocess.run(["cc", "-O2", "-ffp-contract=off", "-fPIC", "-shared", os.path.join(here, "sensor.c"), "-o", lib,
-                    "-lm"], check=True)
+                    "-lm", "-ljpeg"], check=True)
 so = ctypes.CDLL(lib)
 so.sensor_setup.argtypes = []
-so.sensor_sense.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p, ctypes.c_uint64]
+so.sensor_sense.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+                            ctypes.c_uint64, ctypes.c_int]
 so.sensor_setup()
 K, read = 255.0 / 6000.0, 2.5 * 255.0 / 6000.0
 sd = np.sqrt(np.float32(K) * np.arange(256, dtype=np.float32) + np.float32(read) ** 2).astype(np.float32)
@@ -26,7 +28,7 @@ n = 2_000_000
 for level in (0, 3, 5, 40, 128, 220, 252, 255):
     a = np.full(n, level, dtype=np.uint8)
     out = np.empty_like(a)
-    so.sensor_sense(a.ctypes.data, out.ctypes.data, n, sd.ctypes.data, 1000 + level)
+    so.sensor_sense(a.ctypes.data, out.ctypes.data, n // 3, 1, sd.ctypes.data, 1000 + level, 0)
     s = float(sd[level])
     p = np.array([(phi((0.5 - level) / s) if j == 0 else 1.0 - phi((254.5 - level) / s) if j == 255
                    else phi((j + 0.5 - level) / s) - phi((j - 0.5 - level) / s)) for j in range(256)])
@@ -47,15 +49,32 @@ for level in (0, 3, 5, 40, 128, 220, 252, 255):
           % (level, s, e.mean(), e.std(), chi, df, crit, "" if ok else "  FAILED"))
 pic = np.random.default_rng(3).integers(0, 256, (240, 320, 3), dtype=np.uint8)
 o1, o2, o3 = (np.empty_like(pic) for _ in range(3))
-so.sensor_sense(pic.ctypes.data, o1.ctypes.data, pic.size, sd.ctypes.data, 77)
-so.sensor_sense(pic.ctypes.data, o2.ctypes.data, pic.size, sd.ctypes.data, 77)
-so.sensor_sense(pic.ctypes.data, o3.ctypes.data, pic.size, sd.ctypes.data, 78)
+so.sensor_sense(pic.ctypes.data, o1.ctypes.data, 320, 240, sd.ctypes.data, 77, 0)
+so.sensor_sense(pic.ctypes.data, o2.ctypes.data, 320, 240, sd.ctypes.data, 77, 0)
+so.sensor_sense(pic.ctypes.data, o3.ctypes.data, 320, 240, sd.ctypes.data, 78, 0)
 same, other = bool(np.array_equal(o1, o2)), bool(not np.array_equal(o1, o3))
 bad += (not same) + (not other)
+# The codec: a smooth picture (the random one is no camera's) through the call at each of the robots' qualities, against
+# the call without it and PIL's round trip of that.
+import io
+from PIL import Image
+yy, xx = np.mgrid[0:240, 0:320]
+smooth = np.stack([(128 + 100 * np.sin(xx / 17.0) * np.cos(yy / 23.0)), (128 + 90 * np.cos(xx / 29.0)),
+                   (100 + 80 * np.sin((xx + yy) / 31.0))], axis=2).astype(np.uint8)
+codec_bad = 0
+for q in (55, 70, 80, 90):
+    noisy, coded = np.empty_like(smooth), np.empty_like(smooth)
+    so.sensor_sense(smooth.ctypes.data, noisy.ctypes.data, 320, 240, sd.ctypes.data, 500 + q, 0)
+    so.sensor_sense(smooth.ctypes.data, coded.ctypes.data, 320, 240, sd.ctypes.data, 500 + q, q)
+    buf = io.BytesIO(); Image.fromarray(noisy).save(buf, format="JPEG", quality=q)
+    pil = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert("RGB"))
+    codec_bad += not np.array_equal(pil, coded)
+bad += codec_bad
+print("sensortest: the codec against PIL's round trip at qualities 55, 70, 80, 90: %d differ" % codec_bad)
 N = 200
 t = time.perf_counter()
 for k in range(N):
-    so.sensor_sense(pic.ctypes.data, o1.ctypes.data, pic.size, sd.ctypes.data, k)
+    so.sensor_sense(pic.ctypes.data, o1.ctypes.data, 320, 240, sd.ctypes.data, k, 0)
 ours = (time.perf_counter() - t) / N * 1000
 g = np.random.default_rng([1, 13, 0])
 t = time.perf_counter()
