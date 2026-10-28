@@ -39,16 +39,27 @@ project Driver is
    --  a fit's sums a bit apart from run to run of the same program on the same input (RB-Y1 seed 3b's first fit,
    --  replayed serially on the big machine, 10-24: two results, 181.3658 and 181.3654 px, as the heap fell; the second
    --  descent round's cost apart in its 16th digit). Without them it gave one result in every run and at every count
-   --  of workers, fused multiply-adds and vectorizing kept.
-   Same_Every_Run := ("--param=vect-max-peeling-for-alignment=0", "--param=vect-max-version-for-alignment-checks=0");
+   --  of workers, fused multiply-adds and vectorizing kept. And no multiply-add fused at all (-ffp-contract=off), in any
+   --  build: where the compiler fused one depended on how the code around it was compiled, so a value made in two
+   --  places, or in two builds, was not always the same float, and the fit leans on such values agreeing (Model_Of's
+   --  Part_At; the error model's and the order search's sums). The fast build without the language's checks fused
+   --  elsewhere and fitted worse: of round n32s2's 790 fit dumps against the truth (10-28), 443 within 2 % against 457
+   --  with the checks (17 fits within it only with them, 3 only without: p 0.002); fusing nothing, 454 (13 against 10,
+   --  p 0.5), and as fast (5834 s of CPU against 5921).
+   Same_Every_Run := ("--param=vect-max-peeling-for-alignment=0", "--param=vect-max-version-for-alignment-checks=0",
+                      "-ffp-contract=off");
    Common_Switches := ("-gnat2022", "-gnata", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g") & Same_Every_Run;
    --  The body on a robot: without the assertions (the contracts the tests prove, checked on every call of the
    --  aligner's sampling), the language's own checks kept.
    Release_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O2", "-g") & Same_Every_Run;
-   --  BD_BUILD=fast: what a robot runs (the release build's checks: the language's own, no assertions), optimized for
-   --  the machine that builds it (-O3, its own instruction set, inlining across units), for the hall's rounds on the
-   --  big machine. The self tests run the normal build, assertions and all.
-   Fast_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-g")
+   --  BD_BUILD=fast: what a robot runs, optimized for the machine that builds it (-O3, its own instruction set,
+   --  inlining across units), for the hall's rounds on the big machine; without the assertions and without the
+   --  language's own checks (-gnatp), which no run of the driver fails (the self tests run the normal build, checks,
+   --  assertions and all) and which held the code they guard from its fastest form. On the big machine (10-28) round
+   --  n32s2's 790 fit dumps replayed on one worker took 5834 s of CPU against 8304 with the checks, as many of them
+   --  within 2 % of the truth as with the normal build (454 against 455), and rec3/panda1's estimates 24.9 s against
+   --  29.7.
+   Fast_Switches := ("-gnat2022", "-gnatwa", "-gnatyg", "-gnatyM120", "-O3", "-march=native", "-gnatn", "-gnatp", "-g")
      & Same_Every_Run;
 
    package Compiler is

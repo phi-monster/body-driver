@@ -548,9 +548,10 @@ package body Driver.Alignment is
       H     : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
       G     : Real_Vector (1 .. Parameters) := [others => 0.0];
    begin
+      --  A pixel's residual and value are read only where it is present (Inflation, Fit_Level's sums): they are
+      --  written there, and what a pass before left elsewhere is never read (two arrays of the patch cleared every
+      --  pass, 10-28).
       Result.Present := [others => False];
-      Result.Residual := [others => 0.0];
-      Result.Seen := [others => 0.0];
       for J in -Integer (Half) .. Integer (Half) loop
          for I in -Integer (Half) .. Integer (Half) loop
             K := K + 1;
@@ -911,8 +912,12 @@ package body Driver.Alignment is
          Place_VV => Ridge_Level.UU / Ridge_Det,
          Linear => Query.Linear, Sigma_Linear => Sigma_Linear);
 
-      Current : Pass_Result (N);
-      Trial   : Pass_Result (N);
+      --  The current pass and the trial, two results in turn: a trial accepted becomes the current one by a swap of
+      --  the two, where the whole result (the patch's three arrays and the sums) was copied at every step.
+      Results : array (1 .. 2) of aliased Pass_Result (N);
+      type Result_Access is access all Pass_Result;
+      Current : Result_Access := Results (1)'Access;
+      Trial   : Result_Access := Results (2)'Access;
       T       : Warp := (Qu => Start.Qu / Scale, Qv => Start.Qv / Scale, Linear => Start.Linear,
                          Gain => Start.Gain, Offset => Start.Offset);
       Noise   : Real;
@@ -946,12 +951,12 @@ package body Driver.Alignment is
             end loop;
          end;
       end if;
-      Run (T, Current);
+      Run (T, Current.all);
       if Current.Count <= Parameters then
          Info.Count := Current.Count;
          return;
       end if;
-      Noise := Noise_Of (Current);
+      Noise := Noise_Of (Current.all);
       Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));
       Info.Informative := True;
       for Iteration in 1 .. Real'Machine_Mantissa loop
@@ -1005,7 +1010,7 @@ package body Driver.Alignment is
                                    VV => T.Linear.VV + Fraction * Increment (6)),
                                 Gain => T.Gain + Fraction * Increment (7),
                                 Offset => T.Offset + Fraction * Increment (8));
-                  Run (Candidate, Trial);
+                  Run (Candidate, Trial.all);
                   if Trial.Count > Parameters then
                      Trial_Cost := 0.5 * (Trial.Rss + Penalty (Candidate, Held, Noise));
                      if Trial_Cost <= Cost then
@@ -1024,8 +1029,13 @@ package body Driver.Alignment is
                   Moved : constant Real := Length_Of (Fraction);
                begin
                   T := Candidate;
-                  Current := Trial;
-                  Noise := Noise_Of (Current);
+                  declare
+                     Was : constant Result_Access := Current;
+                  begin
+                     Current := Trial;
+                     Trial := Was;
+                  end;
+                  Noise := Noise_Of (Current.all);
                   Cost := 0.5 * (Current.Rss + Penalty (T, Held, Noise));
                   --  Settled when a step is a hundredth of the place's standard error, or when steps shrink by a ratio
                   --  and what the ones to come would add up to (a geometric series: the last step squared over how
@@ -1050,7 +1060,7 @@ package body Driver.Alignment is
          return;
       end if;
       declare
-         S2  : constant Real := Noise_Of (Current);
+         S2  : constant Real := Noise_Of (Current.all);
          H   : Real_Matrix (1 .. Parameters, 1 .. Parameters) := Current.H;
          G   : Real_Vector (1 .. Parameters) := Current.G;
       begin

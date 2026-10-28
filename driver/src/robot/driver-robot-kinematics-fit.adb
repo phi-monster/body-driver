@@ -598,15 +598,31 @@ package body Driver.Robot.Kinematics.Fit is
          return Sqrt (Real'Max (0.0, (if Upper_Rank = Lower_Rank then Low_Value else (Low_Value + High_Value) / 2.0)));
       end Floor_At;
 
-      --  Whether the half that states the more lies beyond Typical scales by its median, at Gain and its floor.
+      --  Whether the half that states the more lies beyond Typical scales by its median, at Gain and its floor: its
+      --  residuals counted in pieces at once (Driver.Parallel_For, a piece a worker), each judged as one loop judged
+      --  it, the counts then summed. Up to the float's bits of halvings a model, each over half the residuals, ran on
+      --  the main task while the workers waited: with the floor's medians, a quarter of its busy time in a fit
+      --  replayed on eight workers (10-28).
       function Above_Typical (Gain : Real) return Boolean is
          Model   : constant Error_Model := (Floor => Floor_At (Gain), Gain => Gain);
+         Pieces  : constant Positive := Driver.Workers.Size;
+         Counts  : array (1 .. Pieces) of Natural := [others => 0];
          At_Most : Natural := 0;
+         procedure Piece (P : Positive) is
+            Here : Natural := 0;
+         begin
+            for J in (P - 1) * Judged / Pieces + 1 .. P * Judged / Pieces loop
+               if Judged_R (J) <= Typical * Scale_Of (Model, Judged_O (J)) then
+                  Here := Here + 1;
+               end if;
+            end loop;
+            Counts (P) := Here;
+         end Piece;
+         procedure Pieces_All is new Driver.Parallel_For (Piece);
       begin
-         for J in 1 .. Judged loop
-            if Judged_R (J) <= Typical * Scale_Of (Model, Judged_O (J)) then
-               At_Most := At_Most + 1;
-            end if;
+         Pieces_All (1, Pieces);
+         for C of Counts loop
+            At_Most := At_Most + C;
          end loop;
          return 2 * At_Most < Judged;
       end Above_Typical;
@@ -2914,12 +2930,6 @@ package body Driver.Robot.Kinematics.Fit is
                            Every_Frame_Sum (1, Frames);
                            Rows (1, Count + 1);
                            Crosses (1, Tracks);
-                           Bt := new Driver.Numerics.Arrays.Real_Matrix (1 .. Tracks, 1 .. Count);
-                           for T in 1 .. Tracks loop
-                              for P in 1 .. Count loop
-                                 Bt (T, P) := Bm (P, T);
-                              end loop;
-                           end loop;
                            Free (Sums);
                            Free (Cross);
                            Free (Anchor_Cross);
@@ -2955,6 +2965,16 @@ package body Driver.Robot.Kinematics.Fit is
                               end loop;
                            end if;
                         end loop;
+                        --  The cross terms by track for the solve, made once they are final: made before the two noughts
+                        --  above (0b31d0b0, 10-28), a track whose depth no residual moves kept its cross terms, which its
+                        --  damping's floor alone then divided in the elimination (Inf, then no number in the step's
+                        --  depths: panda3a/arm_1_6 of round r27s2, every unset value made invalid, 10-28).
+                        Bt := new Driver.Numerics.Arrays.Real_Matrix (1 .. Tracks, 1 .. Count);
+                        for T in 1 .. Tracks loop
+                           for P in 1 .. Count loop
+                              Bt (T, P) := Bm (P, T);
+                           end loop;
+                        end loop;
                         --  The focal search's measurement of the two focal lengths (Prior_W, the header).
                         if Prior_W > 0.0 then
                            A (1, 1) := A (1, 1) + Prior_W;
@@ -2989,18 +3009,29 @@ package body Driver.Robot.Kinematics.Fit is
                               --  sums over the tracks in their order, as the normal equations' are (above). Its upper
                               --  half only, the lower made from it: Sm is A mirrored (above), and a product is the same
                               --  either way round, so each entry below is the one above it to the bit, at half the
-                              --  work (the elimination was 11 % of a fit's replay, 10-28).
+                              --  work (the elimination was 11 % of a fit's replay, 10-28). A track's share of the row
+                              --  divided once (W), its terms then products the processor makes several at a time, where
+                              --  each was a division of its own; the row's right-hand side summed apart from its
+                              --  neighbours', which the workers wrote side by side in one array at every track. The
+                              --  sums so differ from the divisions' in their last bits, as the fast build's do
+                              --  (driver.gpr).
                               declare
                                  procedure Eliminate (P : Positive) is
+                                    Rhs_P : Real := Rhs (P);
                                  begin
                                     for T in 1 .. Tracks loop
                                        if Cl (T) > 0.0 and then Bt (T, P) /= 0.0 then
-                                          Rhs (P) := Rhs (P) - Bt (T, P) * Gd (T) / Cl (T);
-                                          for Q in P .. Count loop
-                                             Sm (P, Q) := Sm (P, Q) - Bt (T, P) * Bt (T, Q) / Cl (T);
-                                          end loop;
+                                          declare
+                                             W : constant Real := Bt (T, P) / Cl (T);
+                                          begin
+                                             Rhs_P := Rhs_P - W * Gd (T);
+                                             for Q in P .. Count loop
+                                                Sm (P, Q) := Sm (P, Q) - W * Bt (T, Q);
+                                             end loop;
+                                          end;
                                        end if;
                                     end loop;
+                                    Rhs (P) := Rhs_P;
                                  end Eliminate;
                                  procedure Eliminate_All is new Driver.Parallel_For (Eliminate);
                               begin
@@ -7509,12 +7540,11 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
             end Prepare;
 
-            --  Order C's residuals across and down at the sightings of keyframes of several joints, in Residuals
-            --  (1 .. Cheap_Count): its cheap score is their median (Cheap).
-            procedure Fill_Cheap (C : Chain_Order) is
+            --  Order C's residuals across and down at the sightings of keyframes of several joints, in Into
+            --  (1 .. Got): its cheap score is their median (Cheap).
+            procedure Fill_Into (C : Chain_Order; Into : out Real_Array; Got : out Natural) is
                K : Natural := 0;
             begin
-               Cheaps := Cheaps + 1;
                for M in 1 .. Multi_Count loop
                   declare
                      F    : constant Positive := Multi_Frames (M);
@@ -7533,15 +7563,24 @@ package body Driver.Robot.Kinematics.Fit is
                         begin
                            if Has_Point (I) then
                               Project (Lens_Now, Back * Points (I), U, V, Ahead);
-                              Residuals (K + 1) := (if Ahead then abs (U - Sight (Sight'First + I - 1).U) else Real'Last);
-                              Residuals (K + 2) := (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);
+                              Into (Into'First + K) :=
+                                (if Ahead then abs (U - Sight (Sight'First + I - 1).U) else Real'Last);
+                              Into (Into'First + K + 1) :=
+                                (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);
                               K := K + 2;
                            end if;
                         end;
                      end loop;
                   end;
                end loop;
-               Cheap_Count := K;
+               Got := K;
+            end Fill_Into;
+
+            --  In Residuals (1 .. Cheap_Count), counted among the orders scored.
+            procedure Fill_Cheap (C : Chain_Order) is
+            begin
+               Cheaps := Cheaps + 1;
+               Fill_Into (C, Residuals.all, Cheap_Count);
             end Fill_Cheap;
 
             function Cheap (C : Chain_Order) return Real is
@@ -7550,27 +7589,61 @@ package body Driver.Robot.Kinematics.Fit is
                return (if Cheap_Count = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. Cheap_Count)));
             end Cheap;
 
-            --  Whether order C's cheap score is below Bar, and then the score (Cheap's, to the bit). Fewer of its
-            --  residuals below Bar than the median's rank, (K + 1) / 2, leave its median at Bar or above, the mean of
-            --  two values at or above Bar being so too: told so by a count, without the median's selection, which was
-            --  three quarters of the cheap score and 6 % of a fit's replay (the search's thousands of orders, 10-28).
-            procedure Cheap_Below (C : Chain_Order; Bar : Real; Below : out Boolean; Score : out Real) is
-               Under : Natural := 0;
+
+            --  Orders by the dozens to thousands, Cs (K, 1 .. N) the K-th in a sequence, scored in pieces at once
+            --  (Driver.Parallel_For, a piece a worker, each with residuals of its own), each order against the least
+            --  its piece found before it, from Bar. Scores (K) is order K's cheap score, to the bit, where it lies below
+            --  that, else Real'Last. Taken in the sequence, the least below the bar that the sequence found before it
+            --  is then the order a single pass would keep, whatever the pieces: what lies below the sequence's least so
+            --  far lies below its piece's, never above. Fewer of an order's residuals below its piece's least than the
+            --  median's rank, (K + 1) / 2, leave its median at that or above, the mean of two values at or above it
+            --  being so too: told so by a count, without the median's selection, which was three quarters of the cheap
+            --  score and 6 % of a fit's replay (10-28). The search scored its orders one after another on the main task
+            --  while the workers waited (a Panda arm's 5114 at every pass, 10-28).
+            type Order_Grid is array (Positive range <>, Positive range <>) of Positive;
+            type Order_Grid_Access is access Order_Grid;
+            procedure Free is new Ada.Unchecked_Deallocation (Order_Grid, Order_Grid_Access);
+
+            procedure Score_All (Cs : Order_Grid; Bar : Real; Scores : out Real_Array) is
+               Count  : constant Natural := Cs'Length (1);
+               Pieces : constant Positive := Driver.Workers.Size;
+               procedure Piece (P : Positive) is
+                  First : constant Positive := Cs'First (1) + (P - 1) * Count / Pieces;
+                  Last  : constant Integer := Cs'First (1) + P * Count / Pieces - 1;
+                  Own   : Real_Access := new Real_Array (Residuals'Range);
+                  Least : Real := Bar;
+               begin
+                  for K in First .. Last loop
+                     declare
+                        C     : constant Chain_Order (1 .. N) := [for J in 1 .. N => Cs (K, J)];
+                        Got   : Natural;
+                        Under : Natural := 0;
+                        Score : Real := Real'Last;
+                     begin
+                        Fill_Into (C, Own.all, Got);
+                        for I in 1 .. Got loop
+                           if Own (I) < Least then
+                              Under := Under + 1;
+                           end if;
+                        end loop;
+                        if Under >= (Got + 1) / 2 and then Got > 0 then
+                           Score := Driver.Stats.Median (Own (1 .. Got));
+                        end if;
+                        if Score < Least then
+                           Least := Score;
+                           Scores (Scores'First + K - Cs'First (1)) := Score;
+                        else
+                           Scores (Scores'First + K - Cs'First (1)) := Real'Last;
+                        end if;
+                     end;
+                  end loop;
+                  Free (Own);
+               end Piece;
+               procedure Pieces_All is new Driver.Parallel_For (Piece);
             begin
-               Fill_Cheap (C);
-               for I in 1 .. Cheap_Count loop
-                  if Residuals (I) < Bar then
-                     Under := Under + 1;
-                  end if;
-               end loop;
-               if Under < (Cheap_Count + 1) / 2 then
-                  Below := False;
-                  Score := Real'Last;
-               else
-                  Score := (if Cheap_Count = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. Cheap_Count)));
-                  Below := Score < Bar;
-               end if;
-            end Cheap_Below;
+               Pieces_All (1, Pieces);
+               Cheaps := Cheaps + Count;
+            end Score_All;
 
             --  Order C fitted in itself on the lens and every track's depth of the joints of the keyframes of one joint
             --  each (X), which no order changes: its joints alone, from X's, by robust least squares of every sighting's
@@ -7917,41 +7990,42 @@ package body Driver.Robot.Kinematics.Fit is
                Steps_Cost : constant Real := Real (N) * Real (N - 1) ** 4;
                Drawn      : Sampler;
 
-               --  From C, to the least order one move from it (Two: or two moves), until none is less.
+               --  From C, to the least order one move from it (Two: or two moves), until none is less: each step's
+               --  moves in the sequence the search takes them, every move from C and after each (Two) every move from
+               --  it, scored at once (Score_All) and kept as that sequence keeps them.
                procedure Descend (C : in out Chain_Order; M : in out Real; Two : Boolean) is
+                  Moves : constant Natural := (N - 1) ** 2;   --  the moves from an order: every I to every K but I, I - 1
+                  Each  : constant Positive := (if Two then 1 + Moves else 1);
                begin
                   loop
                      declare
+                        Cs     : Order_Grid_Access := new Order_Grid (1 .. Moves * Each, 1 .. N);
+                        Scores : Real_Access := new Real_Array (1 .. Moves * Each);
                         Next   : Chain_Order (1 .. N) := C;
                         Next_M : Real := M;
+                        Row    : Natural := 0;
                      begin
                         for I in 1 .. N loop
                            for K in 1 .. N loop
                               if K /= I and then K /= I - 1 then
                                  declare
-                                    C1     : constant Chain_Order := Moved (C, I, K);
-                                    M1     : Real;
-                                    Below1 : Boolean;
+                                    C1 : constant Chain_Order := Moved (C, I, K);
                                  begin
-                                    Cheap_Below (C1, Next_M, Below1, M1);
-                                    if Below1 then
-                                       Next_M := M1;
-                                       Next := C1;
-                                    end if;
+                                    Row := Row + 1;
+                                    for J in 1 .. N loop
+                                       Cs (Row, J) := C1 (J);
+                                    end loop;
                                     if Two then
                                        for I2 in 1 .. N loop
                                           for K2 in 1 .. N loop
                                              if K2 /= I2 and then K2 /= I2 - 1 then
                                                 declare
-                                                   C2     : constant Chain_Order := Moved (C1, I2, K2);
-                                                   M2     : Real;
-                                                   Below2 : Boolean;
+                                                   C2 : constant Chain_Order := Moved (C1, I2, K2);
                                                 begin
-                                                   Cheap_Below (C2, Next_M, Below2, M2);
-                                                   if Below2 then
-                                                      Next_M := M2;
-                                                      Next := C2;
-                                                   end if;
+                                                   Row := Row + 1;
+                                                   for J in 1 .. N loop
+                                                      Cs (Row, J) := C2 (J);
+                                                   end loop;
                                                 end;
                                              end if;
                                           end loop;
@@ -7961,6 +8035,16 @@ package body Driver.Robot.Kinematics.Fit is
                               end if;
                            end loop;
                         end loop;
+                        pragma Assert (Row = Moves * Each);
+                        Score_All (Cs.all, Next_M, Scores.all);
+                        for K in 1 .. Row loop
+                           if Scores (K) < Next_M then
+                              Next_M := Scores (K);
+                              Next := [for J in 1 .. N => Cs (K, J)];
+                           end if;
+                        end loop;
+                        Free (Cs);
+                        Free (Scores);
                         exit when Next_M >= M;
                         C := Next;
                         M := Next_M;
@@ -7976,20 +8060,19 @@ package body Driver.Robot.Kinematics.Fit is
                   Every := Every * Real (K);
                end loop;
                if Every <= Steps_Cost then
+                  --  Every order in the lexicographic sequence, scored at once (Score_All) and kept as that sequence
+                  --  keeps them.
                   declare
-                     C : Chain_Order (1 .. N) := [for I in 1 .. N => I];
+                     C      : Chain_Order (1 .. N) := [for I in 1 .. N => I];
+                     Cs     : Order_Grid_Access := new Order_Grid (1 .. Natural (Every), 1 .. N);
+                     Scores : Real_Access := new Real_Array (1 .. Natural (Every));
+                     Row    : Natural := 0;
                   begin
                      loop
-                        declare
-                           M     : Real;
-                           Below : Boolean;
-                        begin
-                           Cheap_Below (C, Best_M, Below, M);
-                           if Below then
-                              Best_M := M;
-                              Best := C;
-                           end if;
-                        end;
+                        Row := Row + 1;
+                        for J in 1 .. N loop
+                           Cs (Row, J) := C (J);
+                        end loop;
                         declare
                            I : Natural := N - 1;
                         begin
@@ -8019,6 +8102,16 @@ package body Driver.Robot.Kinematics.Fit is
                            end;
                         end;
                      end loop;
+                     pragma Assert (Row = Natural (Every));
+                     Score_All (Cs.all, Best_M, Scores.all);
+                     for K in 1 .. Row loop
+                        if Scores (K) < Best_M then
+                           Best_M := Scores (K);
+                           Best := [for J in 1 .. N => Cs (K, J)];
+                        end if;
+                     end loop;
+                     Free (Cs);
+                     Free (Scores);
                   end;
                   return;
                end if;

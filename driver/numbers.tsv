@@ -393,6 +393,7 @@ driver-alignment.adb	Real'Max (0.0, Real'Min (1.0 - 1.0 / Real (Field'Length), C
 driver-alignment.adb	Result : Real := 1.0;	1.0	math	no inflation: the factor of independent values
 driver-alignment.adb	Result := Result * (1.0 + R) / (1.0 - R);	1.0	statistics	the variance of a mean of values with autocorrelation r is (1 + r) / (1 - r) times that of independent ones
 driver-alignment.adb	Result.Linear := Scaled (Result.Linear, 1.0 / Size);	1.0	math	carried back by the inverse of the factor it was scaled by
+driver-alignment.adb	Results : array (1 .. 2) of aliased Pass_Result (N);	2	structure	the current pass and the trial, in turn
 driver-alignment.adb	Rho : Reals_Access := new Real_Array'(1 .. Count => -2.0);	2.0	structure	the value of a place that is not a candidate: below any correlation, as before
 driver-alignment.adb	S := [-(U * U) / 2.0,	2.0	math	the cubic B-spline's pieces at the four taps (Basis, Basis_Slope written out)
 driver-alignment.adb	Scale (K) := 1.0 / Sqrt (H (K, K));	1.0	numerics	the unknown is scaled by the inverse root of its curvature, so the scaled matrix has a unit diagonal
@@ -2724,6 +2725,7 @@ driver-robot-kinematics-fit.adb	E : array (1 .. 3) of Real_Vector (1 .. Reduced)
 driver-robot-kinematics-fit.adb	E : array (1 .. Levels, -1 .. 1) of Real := [others => [others => Real'Last]];	1	structure	where the slack stood at the reference: either end of it or its middle
 driver-robot-kinematics-fit.adb	E : array (1 .. Levels, -1 .. 1) of Real := [others => [others => Real'Last]];	1	structure	where the slack stood at the reference: either end of it or its middle
 driver-robot-kinematics-fit.adb	E : constant Vec3 := (if Axis = 1 then E_1 (J) else E_2 (J));	1	structure	a turning joint's axis point across its axis: the first direction, then the second
+driver-robot-kinematics-fit.adb	Each : constant Positive := (if Two then 1 + Moves else 1);	1	structure	a step's own move, and with two moves every move from it after it
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (K + Transpose (K)), Values, Vectors);	0.5	math	the symmetric part of a matrix is half the matrix and its transpose
 driver-robot-kinematics-fit.adb	Eigensystem (0.5 * (Whitened + Transpose (Whitened)), Values, Vectors);	0.5	math	the symmetric part of a matrix
 driver-robot-kinematics-fit.adb	Eliminate_All (1, Count);	1	structure	the parameters' rows from the first
@@ -2935,6 +2937,8 @@ driver-robot-kinematics-fit.adb	Per_Joint : constant Positive := (if Slacked the
 driver-robot-kinematics-fit.adb	Per_Joint : constant Positive := (if Slacked then 8 else 6);	8	structure	the parameters' layout: six of the lens, then per joint its tilt (2), its point (3), its reading scale (1) and, slacked, its half slack and where its slack stood at the reference (2)
 driver-robot-kinematics-fit.adb	Per_Reduced : constant Positive := (if Slacked then 7 else 5);	5	structure	the reduced terms' layout: six of the lens, then per joint its tilt (2), its point across the axis (2), its reading scale (1) and, slacked, its slack's two
 driver-robot-kinematics-fit.adb	Per_Reduced : constant Positive := (if Slacked then 7 else 5);	7	structure	the reduced terms' layout: six of the lens, then per joint its tilt (2), its point across the axis (2), its reading scale (1) and, slacked, its slack's two
+driver-robot-kinematics-fit.adb	Pieces_All (1, Pieces);	1	structure	the pieces numbered from the first
+driver-robot-kinematics-fit.adb	Pieces_All (1, Pieces);	1	structure	the pieces numbered from the first
 driver-robot-kinematics-fit.adb	Place : constant Real := Real'Max (-Half, Real'Min (Half, Slack (Slack'First + 2 * J - 1)));	2	structure	two slack terms a joint, where it stood the second (Slack_Of's order)
 driver-robot-kinematics-fit.adb	Plane_Of : array (1 .. 2) of Vec3 := [others => Zero3];	2	structure	the two ways a joint turned, its widest keyframe each way
 driver-robot-kinematics-fit.adb	Plane_Way : array (1 .. 2) of Boolean := [others => False];	2	structure	the two ways a joint turned, its widest keyframe each way
@@ -2987,7 +2991,6 @@ driver-robot-kinematics-fit.adb	Report.Focal_Design := (if Q_Alone > 0.0 then Re
 driver-robot-kinematics-fit.adb	Report.Slack_Places.Append (Real'Max (-H, Real'Min (H, Slack_Start (Slack_Start'First + 2 * J - 1))));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	Report.Slack_Places.Append (Two (2 * J));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
 driver-robot-kinematics-fit.adb	Report.Slacks.Append (Two (2 * J - 1));	2	structure	two slack terms a joint: its half slack, then where its slack stood at the reference
-driver-robot-kinematics-fit.adb	Residuals (K + 2) := (if Ahead then abs (V - Sight (Sight'First + I - 1).V) else Real'Last);	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Residuals := new Real_Array (1 .. Natural'Max (1, 2 * Multi_Sightings));	1	structure	at least one element, for an array that may hold none
 driver-robot-kinematics-fit.adb	Residuals := new Real_Array (1 .. Natural'Max (1, 2 * Multi_Sightings));	2	structure	two residuals a sighting, across and down
 driver-robot-kinematics-fit.adb	Result (2 * J - 1) := (Above + Below) / 2.0;	2	structure	two slack terms a joint, its half slack the first
@@ -3396,7 +3399,7 @@ driver-robot-kinematics-fit.adb	if Ta > 1 and then Pair_Of (Fz (K), Ta) = 0 then
 driver-robot-kinematics-fit.adb	if Ta > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if Ta > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if Track_Anchor (T) > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
-driver-robot-kinematics-fit.adb	if Under < (Cheap_Count + 1) / 2 then	2	math	the median's rank among K values, the lower middle one when K is even
+driver-robot-kinematics-fit.adb	if Under >= (Got + 1) / 2 and then Got > 0 then	2	math	the median's rank among K values, the lower middle one when K is even
 driver-robot-kinematics-fit.adb	if X.Anchor > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if X.Anchor > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (V (1, 1)))	1	structure	the first focal length's logarithm, the first reduced term
