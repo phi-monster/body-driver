@@ -45,21 +45,13 @@ except ImportError:
     torch = None
 
 
-
-def mask_frame(mask_value, data_value):
-    """websocket-client's masking of a frame the robot sends, its result byte for byte: the frame's bytes XOR its four-byte
-    key repeated, by numpy. websocket-client did it through two integers the frame's size and back, about 2 ms a beat
-    (cProfile, 10-28: int.from_bytes and to_bytes); its own note says wsaccel would give only a tenth."""
-    data = np.frombuffer(data_value, dtype=np.uint8)
-    return np.bitwise_xor(data, np.resize(np.frombuffer(mask_value, dtype=np.uint8), data.size)).tobytes()
-
-
-ws_abnf._mask = mask_frame
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bodies
 import legged
 import truth as truth_file
+from wiremask import mask_frame
+
+ws_abnf._mask = mask_frame   # the robot's frames masked as websocket-client masks them, faster (wiremask.py)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--connect", required=True)
@@ -496,12 +488,26 @@ if ws is None:
     raise SystemExit("robot: no driver at " + args.connect)
 
 
+# A message's time in parts, summed over the beats: packing, sending (the frame's masking among it), waiting for the
+# driver's answer, unpacking it. Logged with the beat's timing: the wire's share was told apart from the driver's by
+# none of it, and a mask 13 to 23 ms a beat went unseen through round r27s2 (10-28).
+t_wire_parts = [0.0, 0.0, 0.0, 0.0]
+
+
 def exchange(msg):
-    ws.send(msgpack.packb(packable(msg), use_bin_type=True), opcode=websocket.ABNF.OPCODE_BINARY)
+    t0 = time.perf_counter()
+    packed = msgpack.packb(packable(msg), use_bin_type=True)
+    t1 = time.perf_counter()
+    ws.send(packed, opcode=websocket.ABNF.OPCODE_BINARY)
+    t2 = time.perf_counter()
     raw = ws.recv()
+    t3 = time.perf_counter()
     if isinstance(raw, str):
         raw = raw.encode("latin-1")
-    return msgpack.unpackb(raw, raw=False, strict_map_key=False)
+    reply = msgpack.unpackb(raw, raw=False, strict_map_key=False)
+    for k, dt in enumerate((t1 - t0, t2 - t1, t3 - t2, time.perf_counter() - t3)):
+        t_wire_parts[k] += dt
+    return reply
 
 
 def call(func, beat, obs=None):
@@ -592,8 +598,9 @@ while True:
             root = ", its root at %.2f %.2f %.2f m leaning %.1f deg" % (d.qpos[0], d.qpos[1], d.qpos[2],
                                                                       math.degrees(math.acos(max(-1.0, min(1.0, z[8])))))
         print("robot: beat %d, a beat takes the world %.2f ms (the pictures' %.2f), the readings %.2f ms, the scramble and "
-              "the driver %.2f ms%s" % (beat, 1000 * t_step / beat, 1000 * t_capture[0] / beat, 1000 * t_render / beat,
-                                       1000 * t_wire / beat, root), flush=True)
+              "the driver %.2f ms (packing %.2f, sending %.2f, the driver's answers %.2f, unpacking %.2f)%s"
+              % (beat, 1000 * t_step / beat, 1000 * t_capture[0] / beat, 1000 * t_render / beat, 1000 * t_wire / beat,
+                 *(1000 * x / beat for x in t_wire_parts), root), flush=True)
     if args.show_refs and beat % args.show_refs == 0 and m.njnt and m.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE:
         print("robot: beat %d, root %.2f %.2f %.2f, asked %s" % (beat, d.qpos[0], d.qpos[1], d.qpos[2], " ".join(
             "%s %s" % (g["name"], [round(float(x), 3) for x in g["ref"]]) for g in groups if g["kind"] in ("flight", "walk"))),
