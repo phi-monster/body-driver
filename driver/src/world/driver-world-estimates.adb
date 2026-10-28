@@ -923,7 +923,8 @@ package body Driver.World.Estimates is
    --  place, as nothing places a point from one place alone.
    procedure Ask_Scene (S : in out State; Eyes : Natural; Still : Boolean; O : Observation) is
    begin
-      if Still and then S.Due and then not S.Scene_Asked and then Settled (S) and then Driver.Geometry.Known (S.Table)
+      if Still and then S.Due and then not S.Booting and then not S.Scene_Asked and then Settled (S)
+        and then Driver.Geometry.Known (S.Table)
         and then (for some E in 1 .. Eye_Id'Base (Eyes) => Driver.World.Sight.Views_Of (S.Views, E) > 1)
       then
          S.Round := S.Round + 1;
@@ -1546,6 +1547,16 @@ package body Driver.World.Estimates is
    end Free_Pixel;
 
    function Scene_Pending (S : State) return Boolean is (S.Due or else S.Scene_Asked);
+
+   procedure Boot_Begins (S : in out State) is
+   begin
+      S.Booting := True;
+   end Boot_Begins;
+
+   procedure Boot_Ends (S : in out State) is
+   begin
+      S.Booting := False;
+   end Boot_Ends;
 
    procedure Seen_Anew (S : in out State) is
    begin

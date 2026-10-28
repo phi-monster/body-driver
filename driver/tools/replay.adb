@@ -644,6 +644,9 @@ begin
       return;
    end if;
    Path := To_Unbounded_String (Argument (1));
+   --  The scene held while the body boots, as the main program holds it (Driver.World.Boot_Begins); the decider's
+   --  "boot ends" in the recording lets it go.
+   Driver.World.Boot_Begins (Scene);
    for I in 2 .. Argument_Count loop
       if Argument (I) = "--graphs" then
          Graphs := True;

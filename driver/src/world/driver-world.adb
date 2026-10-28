@@ -218,6 +218,27 @@ package body Driver.World is
       Driver.Recording.Write_Shared (Driver.Recording.World_Written, B.To_Array);
    end Record_Write;
 
+   procedure Boot_Begins (S : in out Scene) is
+   begin
+      Ensure (S);
+      Driver.World.Estimates.Boot_Begins (S.Data.State);
+   end Boot_Begins;
+
+   procedure Boot_Ends (S : in out Scene) is
+   begin
+      if Driver.Recording.Shared_Started then
+         declare
+            B : Driver.Bytes.Buffer;
+         begin
+            Driver.Msgpack.Put_Array_Header (B, 1);
+            Driver.Msgpack.Put_String (B, "boot ends");
+            Record_Write (B);
+         end;
+      end if;
+      Ensure (S);
+      Driver.World.Estimates.Boot_Ends (S.Data.State);
+   end Boot_Ends;
+
    procedure Seen_Anew (S : in out Scene) is
    begin
       if Driver.Recording.Shared_Started then
@@ -560,6 +581,8 @@ package body Driver.World is
       begin
          if What = "seen anew" and then N = 1 then
             Seen_Anew (S);
+         elsif What = "boot ends" and then N = 1 then
+            Boot_Ends (S);
          elsif What = "remember" and then N = 2 then
             declare
                Place : Place_Id;

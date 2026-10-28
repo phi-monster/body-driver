@@ -4969,6 +4969,7 @@ driver-world.adb	Bits (Driver.Bytes.Offset ((Y * W + X) / 8 + 1)) or 2 ** ((Y * 
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	7	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Bits : Driver.Bytes.Byte_Array (1 .. Driver.Bytes.Offset ((W * H + 7) / 8)) := [others => 0];	8	format	a mask packed eight pixels to a byte, the first pixel in the lowest bit (the W record)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 1);	1	format	the record of the write: its name alone
+driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 1);	1	format	the record of the write: its name alone
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 2);	2	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count of a W record (Replay_Write): the hold's name, its thing and its hand
 driver-world.adb	Driver.Msgpack.Put_Array_Header (B, 3);	3	format	the field count or a field's place in a W record (Replay_Write)
@@ -4994,6 +4995,7 @@ driver-world.adb	V => Number (Doc, Element (Doc, P, 2))),	2	format	a placed poin
 driver-world.adb	W : constant Natural := Natural (Whole (4));	4	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	What : constant String := Text (Doc, Element (Doc, R, 1));	1	format	the field count or a field's place in a W record (Replay_Write)
 driver-world.adb	and then Kind_Of (Doc, Element (Doc, R, 1)) = String_Value;	1	format	the field count or a field's place in a W record (Replay_Write)
+driver-world.adb	elsif What = "" and then N = 1 then	1	format	the record of the write: its name alone
 driver-world.adb	elsif What = "" and then N = 2 then	2	format	the record of a remembered place: its name and the point
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count of a W record (Replay_Write): the hold's
 driver-world.adb	elsif What = "" and then N = 3 then	3	format	the field count or a field's place in a W record (Replay_Write)

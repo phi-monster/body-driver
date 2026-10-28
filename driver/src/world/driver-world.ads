@@ -100,6 +100,15 @@ package Driver.World is
    --  Forgets the episode's things and places; surfaces measured before are
    --  kept but marked as belonging to the previous episode.
 
+   procedure Boot_Begins (S : in out Scene);
+   --  The body's boot is under way: the scene is not measured until it ends (its views are kept meanwhile). Nothing
+   --  in the boot reads the scene, and measured at an arm's sweep it held a robot still for seconds to minutes. The
+   --  main program and a replay both call it before their first message.
+
+   procedure Boot_Ends (S : in out Scene);
+   --  The boot has ended: the scene is measured at the next still beat it is due at. A decider's write, made within
+   --  a beat's window (recorded, so that a replay lets the scene go at the same place).
+
    function Thing_Count (S : Scene) return Natural;
 
    procedure Adopt

@@ -137,6 +137,11 @@ procedure Body_Driver is
       Ok          : Boolean;
       Instruction : Unbounded_String;
       Context     : Driver.Action.Context (Robot'Access, Hands'Access, Scene'Access);
+      --  The scene, held while the body was booted (Driver.World.Boot_Begins), is measured from now on.
+      procedure Boot_Ended is
+      begin
+         Driver.World.Boot_Ends (Scene);
+      end Boot_Ended;
    begin
       --  When the program ends before it starts (a port that cannot be bound), the
       --  decider ends with it rather than keeping the program alive.
@@ -147,6 +152,7 @@ procedure Body_Driver is
       end select;
       Driver.Robot.Boot.Run (Robot, Hands, To_String (Body_File), Ok);
       if Ok then
+         Driver.Beats.Within_A_Beat (Boot_Ended'Access);
          loop
             Tasks.Wait (Instruction);
             begin
@@ -440,6 +446,7 @@ begin
       Line (Core, "estimates within the beat that asks for them (--in-beat): the main loop waits for them");
    end if;
    Driver.Robot.Compute_Apart (Robot);
+   Driver.World.Boot_Begins (Scene);
    Decider.Start;
    loop
       Driver.Wire.Accept_Client (Connection, Ok);

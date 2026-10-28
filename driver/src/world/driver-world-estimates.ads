@@ -106,6 +106,10 @@ private package Driver.World.Estimates is
    --  apart at the next still beat it holds the thing at (Measure), unless the points are given (Place_Points).
    procedure New_Episode (S : in out State);
 
+   procedure Boot_Begins (S : in out State);
+   procedure Boot_Ends (S : in out State);
+   --  As Driver.World's: while the boot is under way the scene is not measured.
+
    function Thing_Count (S : State) return Natural;
    function Seen_In (S : State; T : Thing_Id; E : Eye_Id) return Boolean;
    function Region_In (S : State; T : Thing_Id; E : Eye_Id) return Driver.Images.Mask;
@@ -279,6 +283,10 @@ private
       --  episode (New_Episode) and when it changed; nothing before an episode reads it, and measured during the boot
       --  it held the robot still (s77's cold boot, seed 6, 10-18: the scene measured at the arm's sweep kept the
       --  robot's models back 355 beats, a seventh of the sweep, and was measured again when the episode began).
+      Booting     : Boolean := False;
+      --  The body's boot is under way (Boot_Begins, Boot_Ends): the scene is not measured, its views kept. Nothing in
+      --  the boot reads it, and measured at an arm's sweep it held the hall's robots 3 to 155 s of five minutes, the
+      --  robot standing still meanwhile (f8s2, 10-28: Shadow seed 2 155 s, 18234 messages kept back).
       Round       : Natural := 0;                 --  the latest measurement of the scene
       Scene_Asked : Boolean := False;             --  it is due, to be measured apart (Measure)
       Round_Seen  : Observation_Holders.Holder;   --  the observation it is measured at
