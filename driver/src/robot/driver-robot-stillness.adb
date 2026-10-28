@@ -154,26 +154,35 @@ package body Driver.Robot.Stillness is
             return;
          end if;
          S.Luma_Variance.Clear;
-         for Cell in 1 .. N loop
-            declare
-               X0, X1, Y0, Y1 : Natural;
-            begin
-               Flow.Bounds (S.Grid, Cell, X0, X1, Y0, Y1);
+         declare
+            --  Every pixel's variance at once, as Variance gives each (2.5 million calls of it in rec4/panda1's first
+            --  thousand beats, each through the view's holder, callgrind, 10-28).
+            W   : constant Positive := S.Grid.Width;
+            All_V : Luma_Access := new Real_Array (1 .. W * S.Grid.Height);
+         begin
+            Driver.Pixels.Variances (Noise, All_V.all);
+            for Cell in 1 .. N loop
                declare
-                  V : Luma_Access := new Real_Array (1 .. (X1 - X0) * (Y1 - Y0));
-                  K : Natural := 0;
+                  X0, X1, Y0, Y1 : Natural;
                begin
-                  for Row in Y0 .. Y1 - 1 loop
-                     for Column in X0 .. X1 - 1 loop
-                        K := K + 1;
-                        V (K) := Driver.Pixels.Variance (Noise, Column, Row);
+                  Flow.Bounds (S.Grid, Cell, X0, X1, Y0, Y1);
+                  declare
+                     V : Luma_Access := new Real_Array (1 .. (X1 - X0) * (Y1 - Y0));
+                     K : Natural := 0;
+                  begin
+                     for Row in Y0 .. Y1 - 1 loop
+                        for Column in X0 .. X1 - 1 loop
+                           K := K + 1;
+                           V (K) := All_V (Row * W + Column + 1);
+                        end loop;
                      end loop;
-                  end loop;
-                  S.Luma_Variance.Append (Driver.Stats.Median (V.all));
-                  Free (V);
+                     S.Luma_Variance.Append (Driver.Stats.Median (V.all));
+                     Free (V);
+                  end;
                end;
-            end;
-         end loop;
+            end loop;
+            Free (All_V);
+         end;
       end Measure;
    begin
       if S.Noise_Is_Settled then
