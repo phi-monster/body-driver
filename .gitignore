@@ -4,3 +4,5 @@ fast/lib/
 slow/target/
 harness/mujoco/libservobank.so
 harness/mujoco/libservobank.so.*
+harness/mujoco/libsensor.so
+harness/mujoco/libsensor.so.*

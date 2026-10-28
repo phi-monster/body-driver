@@ -19,13 +19,13 @@
 import argparse
 import collections
 import concurrent.futures
+import ctypes
 import io
 import json
 import math
 import os
-import queue
+import subprocess
 import sys
-import threading
 import time
 
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -400,41 +400,34 @@ for c in cameras:
 t_capture = [0.0]
 
 
-# Only where asked (BD_GPU_PICTURES=1): one CUDA context a robot, 30 robots a GPU beside their renderers, spent the
-# GPUs time-slicing (round f2s2 on the big machine, 10-28: the GPUs 84 and 94 % busy, pictures 28 to 64 ms a beat
-# against 16 to 82 on the CPU), so a GPU serves the pictures only once one process or the GPU's own sharing does it
-# for every robot at once.
-# The pictures' sensor noise and stream codec made there, the same noise and the same codec's quality: on the big
-# machine (10-28) a 320x240 picture took 4.8 ms of noise and 1.6 of JPEG on the robot's CPU. torch is imported only
-# then: every robot imported it at its start, for nothing (a robot that asks for a GPU and has none stops).
-GPU = None
-if os.environ.get("BD_GPU_PICTURES") == "1":
-    import torch
-    import torchvision
-    if not torch.cuda.is_available():
-        raise SystemExit("robot: BD_GPU_PICTURES=1 and no GPU")
-    GPU = torch.device("cuda:%d" % (int(os.environ.get("MUJOCO_EGL_DEVICE_ID", "0")) % torch.cuda.device_count()))
-    gpu_rng = torch.Generator(device=GPU)
-    gpu_rng.manual_seed(args.seed * 1000003 + 11)
+# The pictures' sensor: each picture's read and shot noise drawn, added and rounded in one pass of sensor.c (built once
+# beside this file, as the servos' bank is), on the cameras' own threads while the world steps on and the next camera
+# renders (the call lets go of the interpreter). numpy drew a picture's 230 thousand normals in 2.5 ms on the big machine
+# and added them in 0.34 (10-28), from threads a camera drawing ahead, a quarter of the robots' CPU; sensor.c makes both
+# in 1.06 ms (sensortest.py: every level's pictures against their exact law). A picture's noise is its own, its key the
+# robot's seed, the camera and the beat. (A GPU made them only where asked, and its 30 robots' contexts took turns on
+# the GPU, slower than the CPU: round f2s2, 10-28.)
+def sensor_library():
+    here = os.path.dirname(os.path.abspath(__file__))
+    src, lib = os.path.join(here, "sensor.c"), os.path.join(here, "libsensor.so")
+    if not os.path.exists(lib) or os.path.getmtime(lib) < os.path.getmtime(src):
+        tmp = "%s.%d" % (lib, os.getpid())
+        subprocess.run(["cc", "-O2", "-ffp-contract=off", "-fPIC", "-shared", src, "-o", tmp, "-lm"], check=True)
+        os.replace(tmp, lib)
+    so = ctypes.CDLL(lib)
+    so.sensor_setup.argtypes = []
+    so.sensor_setup.restype = None
+    so.sensor_sense.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p, ctypes.c_uint64]
+    so.sensor_sense.restype = None
+    so.sensor_setup()
+    return so
 
 
-# The pictures' read and shot noise drawn ahead, a thread a camera, while the world steps and the pictures render:
-# numpy's normal draws let go of the interpreter, and a picture's 230 thousand of them took 2.7 to 3.6 ms of the robot's
-# beat on the big machine (10-28; one thread for three cameras kept ALOHA's pictures at 36 ms a beat). Each camera's
-# from its own generator, two of its beats waiting drawn.
+sensor = sensor_library()
 for k, c in enumerate(cameras):
-    c["noise"] = queue.Queue(maxsize=2)
-
-
-def draw_noise(c, k):
-    g = np.random.default_rng([args.seed, 13, k])
-    while True:
-        c["noise"].put(g.standard_normal((args.height, args.width, 3), dtype=np.float32))
-
-
-if GPU is None:
-    for k, c in enumerate(cameras):
-        threading.Thread(target=draw_noise, args=(c, k), daemon=True).start()
+    c["k"] = k
+    c["sd"] = np.sqrt(np.float32(c["K"]) * np.arange(256, dtype=np.float32)
+                      + np.float32(c["read_levels"]) ** 2).astype(np.float32)   # the noise at each level
 
 
 def capture(c):
@@ -443,26 +436,15 @@ def capture(c):
     # BD_NO_JPEG=1: a diagnostic, never a hall's world: the pictures as the sensor makes them, no codec's loss (what of a
     # fit's error the compression makes, 10-27: step 3's flows against the rigid-point model on SO-101's base camera).
     coded = c["sensor"]["jpeg"] and not os.environ.get("BD_NO_JPEG")
-    if GPU is not None:
-        x = torch.from_numpy(renderer.render()).to(GPU).float()
-        x += torch.sqrt(c["K"] * x + c["read_levels"] ** 2) * torch.randn(x.shape, device=GPU, generator=gpu_rng)
-        x = torch.clamp(torch.round(x), 0, 255).to(torch.uint8)
-        if coded:
-            enc = torchvision.io.encode_jpeg(x.permute(2, 0, 1).contiguous(), quality=int(c["sensor"]["jpeg"]))
-            x = torchvision.io.decode_jpeg(enc.cpu() if enc.is_cuda else enc, device=GPU).permute(1, 2, 0)
-        img = x.contiguous().cpu().numpy()
-    else:
-        # Rendered here (the GL context is this thread's), the noise and the codec on the cameras' own threads, while
-        # the world steps on and the next camera renders: numpy and the codec let go of the interpreter.
-        img = processing.submit(sensed, c, renderer.render(), coded)
-    c["queue"].append(img)
+    # Rendered here (the GL context is this thread's), the sensor and the codec on the cameras' own threads.
+    c["queue"].append(processing.submit(sensed, c, renderer.render(), coded, beat))
     t_capture[0] += time.perf_counter() - t
 
 
-def sensed(c, raw, coded):
-    img = raw.astype(np.float32)
-    img += np.sqrt(c["K"] * img + c["read_levels"] ** 2) * c["noise"].get()
-    img = np.clip(np.rint(img), 0, 255).astype(np.uint8)
+def sensed(c, raw, coded, at):
+    img = np.empty_like(raw)
+    sensor.sensor_sense(raw.ctypes.data, img.ctypes.data, raw.size, c["sd"].ctypes.data,
+                        (args.seed & 0xFFFF) << 48 | 13 << 40 | (c["k"] & 0xFF) << 32 | (at & 0xFFFFFFFF))
     if coded:
         buf = io.BytesIO()
         Image.fromarray(img).save(buf, format="JPEG", quality=c["sensor"]["jpeg"])
