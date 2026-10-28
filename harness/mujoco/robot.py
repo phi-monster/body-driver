@@ -29,20 +29,19 @@ import threading
 import time
 
 os.environ.setdefault("MUJOCO_GL", "egl")
+# The robot's libraries on the robot's own threads. numpy's OpenBLAS and any OpenMP opened a pool of a thread a core
+# (the big machine's 128) at their import and spun: 65 threads and 8.4 s of CPU before a robot's first beat, 30 robots
+# at a round's start (threads, 10-28). The GL driver sleeps while it waits for the GPU, where it spun through every
+# picture's readback (ALOHA's 3.5 ms a camera all CPU; 0.9 to 1.2 ms of it so, the picture's time the same).
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["__GL_YIELD"] = "USLEEP"
 import numpy as np
 import mujoco
 import msgpack
 import websocket
 import websocket._abnf as ws_abnf
 from PIL import Image
-# The pictures' sensor noise and stream codec made on a GPU where torch has one, the same noise and the same codec's
-# quality: on the big machine (10-28) a 320x240 picture took 4.8 ms of noise and 1.6 of JPEG on the robot's CPU, and 60
-# robots at once spent 18 to 82 ms a beat on their pictures, beside the drivers' fits on the same cores.
-try:
-    import torch
-    import torchvision
-except ImportError:
-    torch = None
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -405,8 +404,15 @@ t_capture = [0.0]
 # GPUs time-slicing (round f2s2 on the big machine, 10-28: the GPUs 84 and 94 % busy, pictures 28 to 64 ms a beat
 # against 16 to 82 on the CPU), so a GPU serves the pictures only once one process or the GPU's own sharing does it
 # for every robot at once.
+# The pictures' sensor noise and stream codec made there, the same noise and the same codec's quality: on the big
+# machine (10-28) a 320x240 picture took 4.8 ms of noise and 1.6 of JPEG on the robot's CPU. torch is imported only
+# then: every robot imported it at its start, for nothing (a robot that asks for a GPU and has none stops).
 GPU = None
-if os.environ.get("BD_GPU_PICTURES") == "1" and torch is not None and torch.cuda.is_available():
+if os.environ.get("BD_GPU_PICTURES") == "1":
+    import torch
+    import torchvision
+    if not torch.cuda.is_available():
+        raise SystemExit("robot: BD_GPU_PICTURES=1 and no GPU")
     GPU = torch.device("cuda:%d" % (int(os.environ.get("MUJOCO_EGL_DEVICE_ID", "0")) % torch.cuda.device_count()))
     gpu_rng = torch.Generator(device=GPU)
     gpu_rng.manual_seed(args.seed * 1000003 + 11)

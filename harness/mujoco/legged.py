@@ -22,13 +22,27 @@ STAND = 0.1                     # the deploy program's and the training's standi
 FELL = 1.2217304763960306       # the training's fell_over: bad_orientation's limit_angle, 70 degrees
 
 
+def policy_session(path):
+    """One of a robot's policy networks, run on the robot's own thread, which sleeps between runs: onnxruntime's own pool
+    (a thread a core, 64 on the big machine, spinning after every run, a pool a network) kept a G1 at 167 ms of CPU a
+    beat (cpu1, 10-28). The outputs are the same to the bit (ortcheck: 2000 random observations each of G1's two
+    networks and the Go2's)."""
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = 1
+    so.inter_op_num_threads = 1
+    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    so.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return ort.InferenceSession(path, sess_options=so, providers=["CPUExecutionProvider"])
+
+
 class Walker:
     def __init__(self, m, d, cfg):
         """CFG: the policy's folder (exported/policy.onnx and params/deploy.yaml, as Unitree's deploy program reads
         them), the model's prefix for the robot's names, its root body and its IMU site."""
         self.m, self.d = m, d
         p = yaml.safe_load(open(cfg["policy"] + "/params/deploy.yaml"))
-        self.session = ort.InferenceSession(cfg["policy"] + "/exported/policy.onnx", providers=["CPUExecutionProvider"])
+        self.session = policy_session(cfg["policy"] + "/exported/policy.onnx")
         self.input = self.session.get_inputs()[0].name
         # The joints in the policy's order: the training's natural order, as the exported policy names them.
         order = self.session.get_modelmeta().custom_metadata_map["joint_names"].split(",")
@@ -152,8 +166,7 @@ class GearWbc:
         self.legs = list(range(self.n_act))   # the joints it drives (the legs and the waist)
         self.padded = np.zeros(len(self.names))
         self.padded[:self.n_act] = self.default
-        sessions = [ort.InferenceSession(base + "/policy/GR00T-WholeBodyControl-%s.onnx" % w,
-                                         providers=["CPUExecutionProvider"]) for w in ("Balance", "Walk")]
+        sessions = [policy_session(base + "/policy/GR00T-WholeBodyControl-%s.onnx" % w) for w in ("Balance", "Walk")]
         self.balance, self.walk = sessions
         self.history = collections.deque([np.zeros(86, np.float32)] * int(c["obs_history_len"]),
                                          maxlen=int(c["obs_history_len"]))
