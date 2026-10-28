@@ -1412,7 +1412,8 @@ driver-robot-boot.adb	("" & Driver.Log.Image (Driver.Robot.Kinematics.Counted_Tu
 driver-robot-boot.adb	((Lost_Least (I) - Followed_Most (I)) / 2.0 >= Least (Channel)	2.0	structure	half the gap: the next halfway level must be a step a keyframe counts
 driver-robot-boot.adb	(Now_N - Then_N, Now_N / Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0 * Real (Dof)), Dof));	2.0	statistics	the standard error of a scale estimate from Dof degrees of freedom is the scale over the root of twice Dof
 driver-robot-boot.adb	(Text, "" & C'Image & "" & Driver.Log.Image (First (C), 3) & ""	3	format	digits printed in a log line or a message
-driver-robot-boot.adb	(not Answered (Out_Report) or else Back > 0.5);	0.5	statistics	halfway: more than half the way back, as a step is reached that delivered more than half its ask
+driver-robot-boot.adb	(not Answered (Out_Report) or else Back > 0.5	0.5	statistics	halfway: more than half the way back, as a step is reached that delivered more than half its ask
+driver-robot-boot.adb	(0.5 - Back, Out_Report.Delivered.Sigma / Out_Report.Delivered.Value,	0.5	statistics	halfway: the readings short of half the way back, by more than they can tell
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	1.0	math	the signs of a row of a Sylvester-Hadamard matrix
 driver-robot-boot.adb	+ (if Bits mod 2 = 0 then 1.0 else -1.0) * At_Scale * Share (Swept (K));	2	math	the parity of the bits two indices share (Sylvester-Hadamard)
@@ -1496,7 +1497,7 @@ driver-robot-boot.adb	Tried_Up : array (1 .. 2 * Size) of Boolean := [others => 
 driver-robot-boot.adb	Up_From (I) := 2.0 * Offset (I);	2.0	structure	the ladder climbs by doubling the level (the sweep's levels double)
 driver-robot-boot.adb	Up_From : array (1 .. 2 * Size) of Real := [others => 0.0];	2	structure	a channel has two ways, up and down, and a ladder state for each
 driver-robot-boot.adb	Whole_Amounts.Append (0.0);	0.0	format	nought marks a group whose channels are probed one at a time
-driver-robot-boot.adb	and then (Off - Asked_Most (I)) / 2.0 > Bound);	2.0	structure	two levels' readings, each standing off its target by up to the standoff or the farthest carry: their difference by up to twice it
+driver-robot-boot.adb	and then (Off - Asked_Most (I)) / 2.0 > Bound	2.0	structure	two levels' readings, each standing off its target by up to the standoff or the farthest carry: their difference by up to twice it
 driver-robot-boot.adb	and then Report.Delivered.Value > 0.5)));	0.5	structure	the level below asked half as much: more than half of this ask delivered is further than all of that one (as Push_Group)
 driver-robot-boot.adb	and then not Lockin.Still_A_Patch (2 * Now (G, E), Cells (G, E))));	2	structure	one more doubling of the push: the responding cells grew at most as the push did
 driver-robot-boot.adb	else 2.0 * Off);	2.0	structure	the ladder doubles: each level twice the one before

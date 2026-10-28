@@ -168,8 +168,18 @@ package body Driver.Robot.Boot is
       --  The way back is read once the pictures have settled, from the readings then (Back_Share): read at the end of
       --  the return's step, the drone's speed estimates, answering a beat or more late, had come none of the way back,
       --  and its flight was no speed by it (seed 1, paced rounds p153a and p158a, 10-24).
+      --  Short of half the way back by more than the readings can tell, that is: the way back's share is a difference
+      --  of two readings over the way out (Back_Share), its sigma the delivered share's over the share delivered. A
+      --  push the readings followed only a little, by noisy ones, tells nothing of the way back: the drone's flight
+      --  controller's speed estimates, 0.15 of an ask out and 0.30 of the way back once settled, took its flight for
+      --  no speed and its four rotors for an arm, its body's camera seen whole the while (seed 2, round r35s2, 10-28;
+      --  seed 1 a speed by its push the other way). Stretch's lift, 0.29 out and none of the way back by readings
+      --  to 1e-5 of a unit, stays no speed.
       function Readings_Allow_Stay (Out_Report : Driver.Robot.Motion.Step_Report; Back : Real) return Boolean is
-        (not Answered (Out_Report) or else Back > 0.5);
+        (not Answered (Out_Report) or else Back > 0.5
+         or else not Driver.Uncertain.Significant
+                       (0.5 - Back, Out_Report.Delivered.Sigma / Out_Report.Delivered.Value,
+                        Out_Report.Delivered.Degrees_Of_Freedom));
 
       --  The group's readings at the latest beat, read in a beat; Fallback where it has none.
       function Readings_Of (G : Group_Id; Size : Positive; Fallback : Real_Array) return Real_Array is
@@ -1301,9 +1311,16 @@ package body Driver.Robot.Boot is
                         Driver.Beats.Within_A_Beat (Read_Along'Access);
                         Carried_Most (I) := Real'Max (Carried_Most (I), Real'Max (Along - Off, -Along));
                         Bound := Real'Max (Stands, Carried_Most (I));
+                        --  And only a level its reading fell short of by more than the bound: one it reached met no
+                        --  end, however little further than before it read (Panda 1a's second joint, its first level
+                        --  0.0068 units read 0.0092 along, carried 0.0024 beyond, its second 0.0136 read 0.0138,
+                        --  0.0046 further, less than an eye sees it move, was judged at its end both ways, swept to
+                        --  0.014 units of the others' 0.3 to 2.8, and the arm never fitted, its joint undetermined:
+                        --  round r33s2, 10-28).
                         Mark.Short := (Report.Outcome = Driver.Robot.Motion.Blocked and then Off - Previous > Bound)
                           or else (Off > Asked_Most (I) and then Asked_Most (I) > 0.0 and then not Further
-                                   and then (Off - Asked_Most (I)) / 2.0 > Bound);
+                                   and then (Off - Asked_Most (I)) / 2.0 > Bound
+                                   and then Off - Along > Bound);
                         --  Said with the readings it was judged from: SO-101 seed 1's fifth channel (n7s2 1b, n9s2 1a,
                         --  10-26), its readings in steps of 4 units, was judged at its end in its second pass both ways
                         --  and never pushed again, and the log named neither reading.
