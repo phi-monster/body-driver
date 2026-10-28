@@ -3313,6 +3313,7 @@ driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	2	structure	the four entrie
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	2	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
 driver-robot-kinematics-fit.adb	for P in 2 .. 4 loop	4	structure	the four entries of the planar essential matrix: its normal matrix, eigenvectors and rows
+driver-robot-kinematics-fit.adb	for P in 2 .. Count loop	2	structure	the lower half mirrored from the upper: the first row has nothing below its diagonal
 driver-robot-kinematics-fit.adb	for P in 2 .. Entries loop	2	structure	the rest after the first, or the lower triangle from the second row
 driver-robot-kinematics-fit.adb	for P in 2 .. Entries loop	2	structure	the rest after the first, or the lower triangle from the second row
 driver-robot-kinematics-fit.adb	for P in 6 + Per_Joint * (J - 1) + 7 .. 6 + Per_Joint * J loop	6	structure	the parameters' layout: six of the lens, then per joint its tilt (2), its point (3), its reading scale (1) and, slacked, its slack's room above where it stood at the reference and below it (2): six of the lens before the joints
@@ -3395,6 +3396,7 @@ driver-robot-kinematics-fit.adb	if Ta > 1 and then Pair_Of (Fz (K), Ta) = 0 then
 driver-robot-kinematics-fit.adb	if Ta > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if Ta > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if Track_Anchor (T) > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
+driver-robot-kinematics-fit.adb	if Under < (Cheap_Count + 1) / 2 then	2	math	the median's rank among K values, the lower middle one when K is even
 driver-robot-kinematics-fit.adb	if X.Anchor > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if X.Anchor > 1 then	1	structure	the reference is the first keyframe: a point it chose is anchored there, and no term moves its eye
 driver-robot-kinematics-fit.adb	if not Driver.Uncertain.Significant (L.Fx, L.Fx * Sqrt (V (1, 1)))	1	structure	the first focal length's logarithm, the first reduced term

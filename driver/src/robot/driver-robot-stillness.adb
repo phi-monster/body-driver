@@ -190,24 +190,47 @@ package body Driver.Robot.Stillness is
 
    function Eye_Still (M : Model; E : Eye_Id) return Boolean is (M.Eyes (E).Is_Still);
 
-   --  The mean change of A against B, each pixel's in units of its noise at
-   --  rest (Variance: its luma variance over the eye's noise view, which
-   --  Driver.Pixels never takes below the 8-bit quantization).
-   --  (Deviation: the square roots of those variances, taken once for both
-   --  of a beat's comparisons.)
-   function Mean_Change (A, B, Deviation : Real_Array) return Real
-     with Pre => A'Length = B'Length and then A'Length = Deviation'Length and then A'Length > 0
+   --  The mean change of A against each of B1 .. B4 that is not null, each pixel's in units of its noise at rest
+   --  (Deviation: the square roots of its luma variances over the eye's noise view, which Driver.Pixels never takes
+   --  below the 8-bit quantization), all in one pass over A and Deviation: every sum the same terms in the same order
+   --  as the one change a pass it replaced, so each mean the same to the bit. Watch asked for up to four, each a pass
+   --  of its own over the frame (10-28).
+   procedure Mean_Changes
+     (A, Deviation   : Real_Array;
+      B1, B2, B3, B4 : Luma_Access;
+      M1, M2, M3, M4 : out Real)
+     with Pre => A'Length = Deviation'Length and then A'Length > 0
+                 and then (B1 = null or else B1'Length = A'Length) and then (B2 = null or else B2'Length = A'Length)
+                 and then (B3 = null or else B3'Length = A'Length) and then (B4 = null or else B4'Length = A'Length)
    is
-      --  Three arrays of one length, the contract's: no check below can fail, over every pixel up to four times a
-      --  beat an eye (Watch).
+      --  Arrays of one length, the contract's: no check below can fail.
       pragma Suppress (All_Checks);
-      Sum : Real := 0.0;
+      S1, S2, S3, S4 : Real := 0.0;
    begin
       for I in A'Range loop
-         Sum := Sum + abs (A (I) - B (I - A'First + B'First)) / Deviation (I - A'First + Deviation'First);
+         declare
+            X : constant Real := A (I);
+            D : constant Real := Deviation (I - A'First + Deviation'First);
+         begin
+            if B1 /= null then
+               S1 := S1 + abs (X - B1 (I - A'First + B1'First)) / D;
+            end if;
+            if B2 /= null then
+               S2 := S2 + abs (X - B2 (I - A'First + B2'First)) / D;
+            end if;
+            if B3 /= null then
+               S3 := S3 + abs (X - B3 (I - A'First + B3'First)) / D;
+            end if;
+            if B4 /= null then
+               S4 := S4 + abs (X - B4 (I - A'First + B4'First)) / D;
+            end if;
+         end;
       end loop;
-      return Sum / Real (A'Length);
-   end Mean_Change;
+      M1 := S1 / Real (A'Length);
+      M2 := S2 / Real (A'Length);
+      M3 := S3 / Real (A'Length);
+      M4 := S4 / Real (A'Length);
+   end Mean_Changes;
 
    procedure Watch (S : in out Eye_Stream; Began_Moving : Boolean) is
       --  How much more a change over two beats is than over one when successive changes do not push the same
@@ -231,28 +254,40 @@ package body Driver.Robot.Stillness is
          for I in S.Variances'Range loop
             S.Deviations (I) := Sqrt (S.Variances (I));
          end loop;
-         S.Change_1 := Mean_Change (S.Current.all, S.Previous.all, S.Deviations.all);
-         if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then
-            S.Change_2 := Mean_Change (S.Current.all, S.Before.all, S.Deviations.all);
-         end if;
-         --  The change from the frame the latest push began from (Set_Origin).
-         if S.Has_Origin and then S.Origin /= null and then S.Origin'Length = S.Current'Length then
-            S.From_Origin := Mean_Change (S.Current.all, S.Origin.all, S.Deviations.all);
-         end if;
-         --  The change from the anchor, against what rest makes (the stationary beats' median change and its scale): a
-         --  picture farther from it than rest moves one, and farther than at the beat before.
-         if S.Has_Anchor and then S.Anchor /= null and then S.Anchor'Length = S.Current'Length
-           and then S.Watch_Rest < Real'Last
-         then
-            declare
-               Away_Now : constant Real := Mean_Change (S.Current.all, S.Anchor.all, S.Deviations.all);
-               Away     : constant Boolean :=
-                 Away_Now > S.Watch_Rest + Driver.Conventions.Z * S.Watch_Rest_Scale and then Away_Now > S.Away_Last;
-            begin
-               S.Away_Run := (if Away then S.Away_Run + 1 else 0);
-               S.Away_Last := Away_Now;
-            end;
-         end if;
+         declare
+            --  The changes asked for, in one pass (Mean_Changes): from the frame before; from the one before it; from
+            --  the frame the latest push began from (Set_Origin); and from the anchor, against what rest makes (the
+            --  stationary beats' median change and its scale): a picture farther from it than rest moves one, and
+            --  farther than at the beat before.
+            Two_Back  : constant Boolean :=
+              S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length;
+            By_Origin : constant Boolean :=
+              S.Has_Origin and then S.Origin /= null and then S.Origin'Length = S.Current'Length;
+            By_Anchor : constant Boolean :=
+              S.Has_Anchor and then S.Anchor /= null and then S.Anchor'Length = S.Current'Length
+              and then S.Watch_Rest < Real'Last;
+            C1, C2, From_Origin, Away_Now : Real;
+         begin
+            Mean_Changes (S.Current.all, S.Deviations.all, S.Previous, (if Two_Back then S.Before else null),
+                          (if By_Origin then S.Origin else null), (if By_Anchor then S.Anchor else null),
+                          C1, C2, From_Origin, Away_Now);
+            S.Change_1 := C1;
+            if Two_Back then
+               S.Change_2 := C2;
+            end if;
+            if By_Origin then
+               S.From_Origin := From_Origin;
+            end if;
+            if By_Anchor then
+               declare
+                  Away : constant Boolean :=
+                    Away_Now > S.Watch_Rest + Driver.Conventions.Z * S.Watch_Rest_Scale and then Away_Now > S.Away_Last;
+               begin
+                  S.Away_Run := (if Away then S.Away_Run + 1 else 0);
+                  S.Away_Last := Away_Now;
+               end;
+            end if;
+         end;
       end if;
       if Began_Moving then
          S.Watch_Have := False;

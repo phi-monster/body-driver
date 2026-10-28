@@ -2986,14 +2986,17 @@ package body Driver.Robot.Kinematics.Fit is
                                  Cl (T) := C (T) * (1.0 + Lambda) + Lambda * Real'Model_Small;
                               end loop;
                               --  The depths eliminated, each parameter's row at once (Driver.Parallel_For), every row's
-                              --  sums over the tracks in their order, as the normal equations' are (above).
+                              --  sums over the tracks in their order, as the normal equations' are (above). Its upper
+                              --  half only, the lower made from it: Sm is A mirrored (above), and a product is the same
+                              --  either way round, so each entry below is the one above it to the bit, at half the
+                              --  work (the elimination was 11 % of a fit's replay, 10-28).
                               declare
                                  procedure Eliminate (P : Positive) is
                                  begin
                                     for T in 1 .. Tracks loop
                                        if Cl (T) > 0.0 and then Bt (T, P) /= 0.0 then
                                           Rhs (P) := Rhs (P) - Bt (T, P) * Gd (T) / Cl (T);
-                                          for Q in 1 .. Count loop
+                                          for Q in P .. Count loop
                                              Sm (P, Q) := Sm (P, Q) - Bt (T, P) * Bt (T, Q) / Cl (T);
                                           end loop;
                                        end if;
@@ -3002,6 +3005,11 @@ package body Driver.Robot.Kinematics.Fit is
                                  procedure Eliminate_All is new Driver.Parallel_For (Eliminate);
                               begin
                                  Eliminate_All (1, Count);
+                                 for P in 2 .. Count loop
+                                    for Q in 1 .. P - 1 loop
+                                       Sm (P, Q) := Sm (Q, P);
+                                    end loop;
+                                 end loop;
                               end;
                               --  A slack's room on its bound that the step would take below it is held there, out
                               --  of the solve, and the rest solved again, until the step takes none held below its
@@ -7501,7 +7509,9 @@ package body Driver.Robot.Kinematics.Fit is
                end loop;
             end Prepare;
 
-            function Cheap (C : Chain_Order) return Real is
+            --  Order C's residuals across and down at the sightings of keyframes of several joints, in Residuals
+            --  (1 .. Cheap_Count): its cheap score is their median (Cheap).
+            procedure Fill_Cheap (C : Chain_Order) is
                K : Natural := 0;
             begin
                Cheaps := Cheaps + 1;
@@ -7532,8 +7542,35 @@ package body Driver.Robot.Kinematics.Fit is
                   end;
                end loop;
                Cheap_Count := K;
-               return (if K = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. K)));
+            end Fill_Cheap;
+
+            function Cheap (C : Chain_Order) return Real is
+            begin
+               Fill_Cheap (C);
+               return (if Cheap_Count = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. Cheap_Count)));
             end Cheap;
+
+            --  Whether order C's cheap score is below Bar, and then the score (Cheap's, to the bit). Fewer of its
+            --  residuals below Bar than the median's rank, (K + 1) / 2, leave its median at Bar or above, the mean of
+            --  two values at or above Bar being so too: told so by a count, without the median's selection, which was
+            --  three quarters of the cheap score and 6 % of a fit's replay (the search's thousands of orders, 10-28).
+            procedure Cheap_Below (C : Chain_Order; Bar : Real; Below : out Boolean; Score : out Real) is
+               Under : Natural := 0;
+            begin
+               Fill_Cheap (C);
+               for I in 1 .. Cheap_Count loop
+                  if Residuals (I) < Bar then
+                     Under := Under + 1;
+                  end if;
+               end loop;
+               if Under < (Cheap_Count + 1) / 2 then
+                  Below := False;
+                  Score := Real'Last;
+               else
+                  Score := (if Cheap_Count = 0 then Real'Last else Driver.Stats.Median (Residuals (1 .. Cheap_Count)));
+                  Below := Score < Bar;
+               end if;
+            end Cheap_Below;
 
             --  Order C fitted in itself on the lens and every track's depth of the joints of the keyframes of one joint
             --  each (X), which no order changes: its joints alone, from X's, by robust least squares of every sighting's
@@ -7892,10 +7929,12 @@ package body Driver.Robot.Kinematics.Fit is
                            for K in 1 .. N loop
                               if K /= I and then K /= I - 1 then
                                  declare
-                                    C1 : constant Chain_Order := Moved (C, I, K);
-                                    M1 : constant Real := Cheap (C1);
+                                    C1     : constant Chain_Order := Moved (C, I, K);
+                                    M1     : Real;
+                                    Below1 : Boolean;
                                  begin
-                                    if M1 < Next_M then
+                                    Cheap_Below (C1, Next_M, Below1, M1);
+                                    if Below1 then
                                        Next_M := M1;
                                        Next := C1;
                                     end if;
@@ -7904,10 +7943,12 @@ package body Driver.Robot.Kinematics.Fit is
                                           for K2 in 1 .. N loop
                                              if K2 /= I2 and then K2 /= I2 - 1 then
                                                 declare
-                                                   C2 : constant Chain_Order := Moved (C1, I2, K2);
-                                                   M2 : constant Real := Cheap (C2);
+                                                   C2     : constant Chain_Order := Moved (C1, I2, K2);
+                                                   M2     : Real;
+                                                   Below2 : Boolean;
                                                 begin
-                                                   if M2 < Next_M then
+                                                   Cheap_Below (C2, Next_M, Below2, M2);
+                                                   if Below2 then
                                                       Next_M := M2;
                                                       Next := C2;
                                                    end if;
@@ -7940,9 +7981,11 @@ package body Driver.Robot.Kinematics.Fit is
                   begin
                      loop
                         declare
-                           M : constant Real := Cheap (C);
+                           M     : Real;
+                           Below : Boolean;
                         begin
-                           if M < Best_M then
+                           Cheap_Below (C, Best_M, Below, M);
+                           if Below then
                               Best_M := M;
                               Best := C;
                            end if;
