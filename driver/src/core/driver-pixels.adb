@@ -1,12 +1,15 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Driver.Bytes;
 with Driver.Distributions;
 with Driver.Stats;
 with Driver.Uncertain;
+with Driver.Roots;
 
 package body Driver.Pixels is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
 
    Quantization : constant := 1.0 / 12.0;
    --  The variance of a value rounded to whole levels: a uniform step of one level.
@@ -43,21 +46,29 @@ package body Driver.Pixels is
       M  : Real_Array renames Mr.Element.all;
       S  : Real_Array renames Sr.Element.all;
       N  : constant Real := Real (V.Count + 1);
-      --  The frame's luma in one pass over its bytes, on the heap: a frame
-      --  does not fit on every task's stack.
-      Frame : Real_Array_Access := new Real_Array (M'Range);
+
+      --  Welford's update, one pass and numerically stable, each pixel's luma taken from its bytes in place as
+      --  Images.Luma takes it: the frame's luma was a frame-sized array on the heap first, made and freed at every
+      --  still beat of every hand's view (10-28).
+      procedure Update (RGB : Driver.Bytes.Byte_Array) is
+         --  Three bytes a pixel of the precondition's frame, one mean and one sum a pixel: no check can fail.
+         pragma Suppress (All_Checks);
+         use type Driver.Bytes.Offset;
+         B : Driver.Bytes.Offset := RGB'First;
+      begin
+         for K in M'Range loop
+            declare
+               X            : constant Real := Driver.Images.Luma_Of (RGB (B), RGB (B + 1), RGB (B + 2));
+               Delta_Before : constant Real := X - M (K);
+            begin
+               M (K) := M (K) + Delta_Before / N;
+               S (K) := S (K) + Delta_Before * (X - M (K));
+            end;
+            B := B + 3;
+         end loop;
+      end Update;
    begin
-      Driver.Images.Luma (I, Frame.all);
-      --  Welford's update, one pass and numerically stable.
-      for K in M'Range loop
-         declare
-            Delta_Before : constant Real := Frame (K) - M (K);
-         begin
-            M (K) := M (K) + Delta_Before / N;
-            S (K) := S (K) + Delta_Before * (Frame (K) - M (K));
-         end;
-      end loop;
-      Free (Frame);
+      Driver.Images.Query (I, Update'Access);
       V.Count := V.Count + 1;
    end Add;
 
@@ -85,6 +96,8 @@ package body Driver.Pixels is
    end Means;
 
    procedure Variances (V : View; Into : out Real_Array) is
+      --  One sum a pixel of the view and one answer a pixel (its precondition): no check can fail.
+      pragma Suppress (All_Checks);
       S : constant Real_Holders.Constant_Reference_Type := V.Sums.Constant_Reference;
    begin
       for K in 0 .. Into'Length - 1 loop

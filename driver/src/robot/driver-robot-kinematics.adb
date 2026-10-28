@@ -26,8 +26,12 @@ with Driver.Robot.Steps;
 with Driver.Recording;
 with Driver.Bytes;
 with Driver.Robot.Regression;
+with Driver.Roots;
 
 package body Driver.Robot.Kinematics is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
 
    --  Everything sized by beats, keyframes, queries or matches lives on the
    --  heap: the estimates also run in the decider's task, whose stack is
@@ -336,7 +340,6 @@ package body Driver.Robot.Kinematics is
    --  focal lengths' common scale. A camera of pixels not square (ALOHA's, 158.5 by 216.4 px) was fitted at
    --  158.17 x 224.04 +- 1.51 px, the second focal length's error unstated (n5s2, seed 2a, 10-26).
    function Aspect_Image (Report : Fit.Fit_Report; Lens : Fit.Lens) return String is
-      use Ada.Numerics.Long_Elementary_Functions;
       T : constant Natural := Natural (Real'Floor (Sqrt (Real (Natural (Report.Covariance.Length)))));
    begin
       if Report.Focal_Sigma >= Real'Last or else T < 2 or else T * T /= Natural (Report.Covariance.Length)
@@ -2079,7 +2082,6 @@ package body Driver.Robot.Kinematics is
    --  them how often a point stands by chance (Patch_Rate). Neither a field of the view nor the arm's fit is asked:
    --  a field told from the jaws themselves, or the table's grain, put them still or moving at will (w18, below).
    procedure Patch_Evidence (R : in out Arm_Evidence; F : Positive; Change, Noise : Real_Array) is
-      use Ada.Numerics.Long_Elementary_Functions;
       Queries : constant Natural := Natural (R.Query_U.Length);
       W       : constant Natural := Driver.Images.Width (R.Frames (F).Image);
       H       : constant Natural := Driver.Images.Height (R.Frames (F).Image);
@@ -4542,7 +4544,6 @@ package body Driver.Robot.Kinematics is
 
    function Standing_Near (M : Model; A : Arm_Id; Point : Vec3; Within : Real) return Natural is
       use Driver.Numerics.Arrays;
-      use Ada.Numerics.Long_Elementary_Functions;
       K     : constant Natural := Index_Of (M, A);
       Count : Natural := 0;
    begin
@@ -4633,7 +4634,6 @@ package body Driver.Robot.Kinematics is
       Free_About    : Vec3 := [0.0, 0.0, 0.0])
    is
       use Driver.Numerics.Arrays;
-      use Ada.Numerics.Long_Elementary_Functions;
       N    : constant Natural := Start'Length;
       --  What a residual holds: the eye's place alone, its place and its whole turn, or its place and where
       --  Free_About points (their cross product: the sine of the angle between them, along the axis it turns about).
@@ -4777,7 +4777,6 @@ package body Driver.Robot.Kinematics is
 
    function Conditioning (M : Model; A : Arm_Id; Q : Real_Array) return Real is
       use Driver.Numerics.Arrays;
-      use Ada.Numerics.Long_Elementary_Functions;
       N : constant Natural := Q'Length;
    begin
       if N = 0 or else Index_Of (M, A) = 0 or else not M.Kinematics (Index_Of (M, A)).Result.Fitted then
@@ -4821,7 +4820,6 @@ package body Driver.Robot.Kinematics is
 
    function Easiest_Way (M : Model; A : Arm_Id; Q : Real_Array) return Vec3 is
       use Driver.Numerics.Arrays;
-      use Ada.Numerics.Long_Elementary_Functions;
       N : constant Natural := Q'Length;
       I : constant Natural := Index_Of (M, A);
    begin

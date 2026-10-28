@@ -1,4 +1,3 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
 with Driver.Conventions;
 with Driver.Distributions;
@@ -7,8 +6,12 @@ with Driver.Robot.Channels;
 with Driver.Robot.Flow;
 with Driver.Robot.Regression;
 with Driver.Stats;
+with Driver.Roots;
 
 package body Driver.Robot.Stillness is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
 
 
    procedure Free is new Ada.Unchecked_Deallocation (Real_Array, Luma_Access);
@@ -18,6 +21,7 @@ package body Driver.Robot.Stillness is
    --  Variances are the eye's buffers for the two views' pixels.
    function Changed_Pixels
      (View, Noise : Driver.Pixels.View; Luma : Real_Array; Means, Variances : in out Real_Array) return Natural
+     with Pre => Means'Length = Luma'Length and then Variances'Length = Luma'Length
    is
       Settled : constant Natural := Driver.Pixels.Frames (View);
       --  The noise of a variance measured over K frames rests on K - 1
@@ -33,11 +37,16 @@ package body Driver.Robot.Stillness is
    begin
       Driver.Pixels.Means (View, Means);
       Driver.Pixels.Variances (Noise, Variances);
-      for K in 0 .. Luma'Length - 1 loop
-         if (Luma (Luma'First + K) - Means (Means'First + K)) ** 2 > Scale * Variances (Variances'First + K) then
-            Count := Count + 1;
-         end if;
-      end loop;
+      declare
+         --  Three arrays of the frame's length, the contract's: no check below can fail, at every still beat of an eye.
+         pragma Suppress (All_Checks);
+      begin
+         for K in 0 .. Luma'Length - 1 loop
+            if (Luma (Luma'First + K) - Means (Means'First + K)) ** 2 > Scale * Variances (Variances'First + K) then
+               Count := Count + 1;
+            end if;
+         end loop;
+      end;
       return Count;
    end Changed_Pixels;
 
@@ -189,6 +198,9 @@ package body Driver.Robot.Stillness is
    function Mean_Change (A, B, Deviation : Real_Array) return Real
      with Pre => A'Length = B'Length and then A'Length = Deviation'Length and then A'Length > 0
    is
+      --  Three arrays of one length, the contract's: no check below can fail, over every pixel up to four times a
+      --  beat an eye (Watch).
+      pragma Suppress (All_Checks);
       Sum : Real := 0.0;
    begin
       for I in A'Range loop
@@ -202,7 +214,7 @@ package body Driver.Robot.Stillness is
       --  way: independent changes add as roots of squares, the square root of two, the most any noise that
       --  stays about its mean (flicker, or a pixel that wanders and is pulled back) does. A drift adds them
       --  all, twice. A22's three eyes at rest: the middle of the ratio was 1.43 to 1.46, its quartiles 1.37 to 1.53.
-      Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);
+      Adds_Up : constant Real := Sqrt (2.0);
    begin
       S.Change_1 := -1.0;
       S.Change_2 := -1.0;
@@ -217,7 +229,7 @@ package body Driver.Robot.Stillness is
             S.Deviations := new Real_Array (S.Variances'Range);
          end if;
          for I in S.Variances'Range loop
-            S.Deviations (I) := Ada.Numerics.Long_Elementary_Functions.Sqrt (S.Variances (I));
+            S.Deviations (I) := Sqrt (S.Variances (I));
          end loop;
          S.Change_1 := Mean_Change (S.Current.all, S.Previous.all, S.Deviations.all);
          if S.Before /= null and then S.Has_Before and then S.Before'Length = S.Current'Length then

@@ -40,6 +40,8 @@ package body Driver.Apart is
       procedure Go_Apart;
       procedure Go_Apart_With (M : Message);
       procedure Arrive (Held : out Boolean; Back : out Boolean);
+      entry Wait_Done;
+      --  Open once the models are home, or the estimator has given them everything and waits.
       procedure Episode (Kept_Back, Longest_Queue : out Natural);
       --  The messages kept back since the models went apart and the most that waited at once; counted again.
       procedure Append (M : Message);
@@ -82,6 +84,13 @@ package body Driver.Apart is
          end if;
          Held := Phase /= Home;
       end Arrive;
+
+      entry Wait_Done
+        when Phase = Home or else (Phase = Taking_In and then Queue.Is_Empty and then not Has_Rest
+                                   and then Next_Work'Count > 0) is
+      begin
+         null;
+      end Wait_Done;
 
       procedure Append (M : Message) is
       begin
@@ -266,6 +275,16 @@ package body Driver.Apart is
          Estimator.Start;
       end if;
    end After_Reply;
+
+   procedure Wait_Back is
+      Held : Boolean;
+   begin
+      --  Due again after the rest of the message they went apart with, they stay apart for another computing.
+      while Backlog.Apart loop
+         Backlog.Wait_Done;
+         Arrive (Held);
+      end loop;
+   end Wait_Back;
 
    function Is_Apart return Boolean is (Backlog.Apart);
 

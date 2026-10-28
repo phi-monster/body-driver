@@ -1,11 +1,13 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Numerics.Dense;
 with Driver.Stats;
+with Driver.Roots;
 
 package body Driver.Geometry is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
    use Driver.Numerics.Arrays;
 
    Half : constant := 0.5;

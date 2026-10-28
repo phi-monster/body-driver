@@ -1,4 +1,3 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Containers.Generic_Array_Sort;
 with Ada.Containers.Vectors;
 with Ada.Unchecked_Deallocation;
@@ -10,10 +9,13 @@ with Driver.Distributions;
 with Driver.Robot.Flow;
 with Driver.Robot.Regression;
 with Driver.Robot.Steps;
+with Driver.Roots;
 
 package body Driver.Robot.Lag is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
    use type Driver.Observations.Group_Id;
 
    --  Everything sized by beats lives on the heap: the estimates also run in

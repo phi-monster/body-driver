@@ -8,8 +8,12 @@ with Driver.Parallel_For;
 with Driver.Stats;
 with Driver.Uncertain;
 with System.Multiprocessors;
+with Driver.Roots;
 
 package body Driver.Alignment.Keyframes is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -101,9 +105,9 @@ package body Driver.Alignment.Keyframes is
 
          --  The fraction of the half picture from the centre, as Basis has it.
          function X_Of (I : Positive) return Real is
-           ((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));
+           ((C.Points.Element (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));
          function Y_Of (I : Positive) return Real is
-           ((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));
+           ((C.Points.Element (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));
 
          procedure Try (A, B, D : Positive) is
             M      : Real_Matrix (1 .. 3, 1 .. 3);
@@ -116,8 +120,8 @@ package body Driver.Alignment.Keyframes is
                M (R, 1) := 1.0;
                M (R, 2) := X_Of (Index (Rows (R)));
                M (R, 3) := Y_Of (Index (Rows (R)));
-               Bu (R) := Placed (Index (Rows (R))).Place.U - C.Points (Index (Rows (R))).U;
-               Bv (R) := Placed (Index (Rows (R))).Place.V - C.Points (Index (Rows (R))).V;
+               Bu (R) := Placed (Index (Rows (R))).Place.U - C.Points.Element (Index (Rows (R))).U;
+               Bv (R) := Placed (Index (Rows (R))).Place.V - C.Points.Element (Index (Rows (R))).V;
             end loop;
             Driver.Numerics.Dense.Least_Squares (M, Bu, Xu, Full_U);
             Driver.Numerics.Dense.Least_Squares (M, Bv, Xv, Full_V);
@@ -130,8 +134,8 @@ package body Driver.Alignment.Keyframes is
                   Pu : constant Real := Xu (1) + Xu (2) * X_Of (P) + Xu (3) * Y_Of (P);
                   Pv : constant Real := Xv (1) + Xv (2) * X_Of (P) + Xv (3) * Y_Of (P);
                begin
-                  Residual (S) := Sqrt ((Placed (P).Place.U - C.Points (P).U - Pu) ** 2
-                                        + (Placed (P).Place.V - C.Points (P).V - Pv) ** 2);
+                  Residual (S) := Sqrt ((Placed (P).Place.U - C.Points.Element (P).U - Pu) ** 2
+                                        + (Placed (P).Place.V - C.Points.Element (P).V - Pv) ** 2);
                end;
             end loop;
             declare
@@ -189,8 +193,8 @@ package body Driver.Alignment.Keyframes is
                P  : constant Positive := Index (S);
                Pu : constant Real := Plane (1) + Plane (2) * X_Of (P) + Plane (3) * Y_Of (P);
                Pv : constant Real := Plane (4) + Plane (5) * X_Of (P) + Plane (6) * Y_Of (P);
-               Du : constant Real := Placed (P).Place.U - C.Points (P).U - Pu;
-               Dv : constant Real := Placed (P).Place.V - C.Points (P).V - Pv;
+               Du : constant Real := Placed (P).Place.U - C.Points.Element (P).U - Pu;
+               Dv : constant Real := Placed (P).Place.V - C.Points.Element (P).V - Pv;
                Scale : constant Real := Best / Sqrt (2.0 * Log (2.0));
             begin
                Keep (P) := abs Du <= Z * Scale and then abs Dv <= Z * Scale;
@@ -338,13 +342,13 @@ package body Driver.Alignment.Keyframes is
                   if Keep (I) then
                      K := K + 1;
                      declare
-                        Row : constant Real_Array := Basis (C, C.Points (I));
+                        Row : constant Real_Array := Basis (C, C.Points.Element (I));
                      begin
                         for J in 1 .. Terms loop
                            A (K, J) := Row (J);
                         end loop;
-                        Bu (K) := Placed (I).Place.U - C.Points (I).U;
-                        Bv (K) := Placed (I).Place.V - C.Points (I).V;
+                        Bu (K) := Placed (I).Place.U - C.Points.Element (I).U;
+                        Bv (K) := Placed (I).Place.V - C.Points.Element (I).V;
                      end;
                   end if;
                end loop;
@@ -376,8 +380,8 @@ package body Driver.Alignment.Keyframes is
                for I in 1 .. Count loop
                   if Placed (I).Found then
                      K := K + 1;
-                     Ru (K) := Placed (I).Place.U - C.Points (I).U - Evaluate (C, Result.U, C.Points (I));
-                     Rv (K) := Placed (I).Place.V - C.Points (I).V - Evaluate (C, Result.V, C.Points (I));
+                     Ru (K) := Placed (I).Place.U - C.Points.Element (I).U - Evaluate (C, Result.U, C.Points.Element (I));
+                     Rv (K) := Placed (I).Place.V - C.Points.Element (I).V - Evaluate (C, Result.V, C.Points.Element (I));
                   end if;
                end loop;
                declare
@@ -542,7 +546,7 @@ package body Driver.Alignment.Keyframes is
    begin
       for K in Into'Range loop
          declare
-            P     : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+            P     : constant Driver.Images.Pixel := C.Points.Element (K - Into'First + 1);
             Move  : constant Displacement := Move_Of (C, P, Guess);
             Slope_1    : constant Linear_Part := Gradient (C, C.Frames (Guess.First).Field, P);
             Slope_2    : constant Linear_Part :=
@@ -616,7 +620,7 @@ package body Driver.Alignment.Keyframes is
    begin
       for K in Into'Range loop
          declare
-            P     : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+            P     : constant Driver.Images.Pixel := C.Points.Element (K - Into'First + 1);
             Move  : constant Displacement := Move_By (C, Combo, P);
             Sigma : constant Real := Stated_Sigma (C, Combo, P, Move);
             Slope : Linear_Part := Identity_Part;
@@ -748,7 +752,7 @@ package body Driver.Alignment.Keyframes is
       begin
          for K in Into'Range loop
             declare
-               P : constant Driver.Images.Pixel := C.Points (K - Into'First + 1);
+               P : constant Driver.Images.Pixel := C.Points.Element (K - Into'First + 1);
             begin
                Into (K) := (From => P, To => P, Linear => Identity_Part,
                             Cov => (UU => Spread ** 2, UV => 0.0, VV => Spread ** 2), Linear_Sigma => Real'Last);
@@ -796,7 +800,7 @@ package body Driver.Alignment.Keyframes is
          begin
             for K in 1 .. Count loop
                declare
-                  P    : constant Driver.Images.Pixel := C.Points (K);
+                  P    : constant Driver.Images.Pixel := C.Points.Element (K);
                   Best : Natural := 0;   --  the keyframe the point is asked from; 0: the reference
                   Gap  : Real := Apart (Changes, Origin);
                begin
@@ -951,9 +955,9 @@ package body Driver.Alignment.Keyframes is
          for J in 1 .. Frames loop
             if Usable (J) then
                for K in 1 .. Count loop
-                  Field_Var (J, K) := Variance (C, C.Frames (J).Field, C.Points (K));
-                  Field_U (J, K) := Evaluate (C, C.Frames (J).Field.U, C.Points (K));
-                  Field_V (J, K) := Evaluate (C, C.Frames (J).Field.V, C.Points (K));
+                  Field_Var (J, K) := Variance (C, C.Frames (J).Field, C.Points.Element (K));
+                  Field_U (J, K) := Evaluate (C, C.Frames (J).Field.U, C.Points.Element (K));
+                  Field_V (J, K) := Evaluate (C, C.Frames (J).Field.V, C.Points.Element (K));
                end loop;
             end if;
          end loop;
@@ -1037,7 +1041,7 @@ package body Driver.Alignment.Keyframes is
                   Combo.Valid := True;
                   Combo.Relative := Pooled_Sum (C) * Combo.Amount;
                   for K in Sigmas'Range loop
-                     Sigmas (K) := Stated_Sigma (C, Combo, C.Points (K), Move_By (C, Combo, C.Points (K)));
+                     Sigmas (K) := Stated_Sigma (C, Combo, C.Points.Element (K), Move_By (C, Combo, C.Points.Element (K)));
                   end loop;
                   Combo.Median := Driver.Stats.Median (Sigmas);
                   C.Combined := Combo;
@@ -1067,7 +1071,7 @@ package body Driver.Alignment.Keyframes is
                if Can (X) then
                   for K in 1 .. Count loop
                      declare
-                        P : constant Driver.Images.Pixel := C.Points (K);
+                        P : constant Driver.Images.Pixel := C.Points.Element (K);
                      begin
                         if X = 0 then
                            Moves (X, K) := Move_By (C, C.Combined, P);
@@ -1291,7 +1295,7 @@ package body Driver.Alignment.Keyframes is
                  or else Seen.Because = Not_Asked
                then
                   Todo (K) := True;
-                  Given (K) := Asked_From (C, Field, C.Points (K));
+                  Given (K) := Asked_From (C, Field, C.Points.Element (K));
                end if;
             end;
          end loop;
@@ -1367,7 +1371,7 @@ package body Driver.Alignment.Keyframes is
       for K in 1 .. Count loop
          declare
             Seen    : Answer renames Answers (Answers'First + K - 1);
-            P       : constant Driver.Images.Pixel := C.Points (K);
+            P       : constant Driver.Images.Pixel := C.Points.Element (K);
             Knowing : constant Real := Gradient_Sigma (P);
          begin
             if Agree (Agree'First + K - 1) and then Seen.Verdict = Found and then Seen.Narrow and then Knowing > 0.0
@@ -1529,7 +1533,7 @@ package body Driver.Alignment.Keyframes is
       B_Luma  : Real_Array renames B_Level.Luma.Held.Values.all;
 
       procedure One (K : Positive) is
-         P  : constant Driver.Images.Pixel := C.Points (K);
+         P  : constant Driver.Images.Pixel := C.Points.Element (K);
          Pu : constant Real := P.U / Scale;
          Pv : constant Real := P.V / Scale;
          --  The window's centre: where Around puts the point (the point itself for no field).
@@ -1730,8 +1734,8 @@ package body Driver.Alignment.Keyframes is
 
             --  The points at the size, kept as plain numbers: the draws read them on several tasks at once (Draw),
             --  and a vector's element is read through a reference that counts its readers.
-            Point_U : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points (K).U / Scale];
-            Point_V : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points (K).V / Scale];
+            Point_U : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points.Element (K).U / Scale];
+            Point_V : constant Real_Array (1 .. Count) := [for K in 1 .. Count => C.Points.Element (K).V / Scale];
 
             function U_Of (K : Positive) return Real is (Point_U (K));
             function V_Of (K : Positive) return Real is (Point_V (K));
@@ -2463,7 +2467,7 @@ package body Driver.Alignment.Keyframes is
                   for K in Into'Range loop
                      declare
                         Point  : constant Positive := K - Into'First + 1;
-                        P      : constant Driver.Images.Pixel := C.Points (Point);
+                        P      : constant Driver.Images.Pixel := C.Points.Element (Point);
                         Pu     : constant Real := P.U / Scale;
                         Pv     : constant Real := P.V / Scale;
                         Own, Within : Natural;
@@ -2826,7 +2830,7 @@ package body Driver.Alignment.Keyframes is
                      Done (K) := True;
                      Any := True;
                      if Next.Field.Valid and then not Own_Place (K) and then not Supplied_At (K) then
-                        Asked (K) := Asked_From (C, Next.Field, C.Points (K));
+                        Asked (K) := Asked_From (C, Next.Field, C.Points.Element (K));
                      end if;
                   end if;
                end loop;
@@ -2884,7 +2888,7 @@ package body Driver.Alignment.Keyframes is
                   --  there is in it, squared.
                   for K in 1 .. Count loop
                      declare
-                        P       : constant Driver.Images.Pixel := C.Points (K);
+                        P       : constant Driver.Images.Pixel := C.Points.Element (K);
                         Move    : constant Displacement := Move_Of (C, P, Guess);
                         Size    : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
                         Know    : constant Real := Variance (C, Next.Field, P);
@@ -2917,7 +2921,7 @@ package body Driver.Alignment.Keyframes is
             begin
                for K in 1 .. Count loop
                   declare
-                     P       : constant Driver.Images.Pixel := C.Points (K);
+                     P       : constant Driver.Images.Pixel := C.Points.Element (K);
                      Move    : constant Displacement := Move_By (C, Combo, P);
                      Size    : constant Real := (Move.Du ** 2 + Move.Dv ** 2) / 2.0;
                      Know    : constant Real := Variance (C, Next.Field, P);

@@ -167,10 +167,10 @@ driver-action-snapshots.adb	if N < 3 or else not (Pitch > 0.0) or else not (abs 
 driver-action-snapshots.adb	while J >= 1 and then (Pts (Order (J)).A > Pts (V).A	1	structure	the first place of the order
 driver-action-snapshots.adb	while Top >= 2 and then Turn (Hull (Top - 1), Hull (Top), Order (I)) <= 0.0 loop	2	math	a turn needs two points before the third
 driver-alignment-keyframes.adb	(((1.0 + F.M11) * U + F.M12 * V + F.Tu) / Weight_Of (F, U, V) - U);	1.0	math	the field's linear part: the identity plus its gradient
-driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
-driver-alignment-keyframes.adb	((C.Points (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
-driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
-driver-alignment-keyframes.adb	((C.Points (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points.Element (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points.Element (I).U - Real (C.Width) / 2.0) / (Real (C.Width) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points.Element (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
+driver-alignment-keyframes.adb	((C.Points.Element (I).V - Real (C.Height) / 2.0) / (Real (C.Height) / 2.0));	2.0	math	the half picture: a coordinate is taken as a fraction of the half from the picture's centre
 driver-alignment-keyframes.adb	((F.M21 * U + (1.0 + F.M22) * V + F.Tv) / Weight_Of (F, U, V) - V);	1.0	math	the field's linear part: the identity plus its gradient
 driver-alignment-keyframes.adb	(Du => Real (X) + 0.5 - Pu, Dv => Real (Y) + 0.5 - Pv, Rho => Rho (Cell (X, Y)));	0.5	math	a pixel's centre lies half a pixel from its corner
 driver-alignment-keyframes.adb	(Du => Real (X) + 0.5 - Pu, Dv => Real (Y) + 0.5 - Pv, Rho => Rho (Cell (X, Y)));	0.5	math	a pixel's centre lies half a pixel from its corner
@@ -429,6 +429,7 @@ driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0
 driver-alignment.adb	Work.Add (Retrying, (if Wider.Verdict = Found then 1 else 0), 0.0);	1	structure	one found retry counted, none otherwise
 driver-alignment.adb	X : constant Real := U - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
 driver-alignment.adb	Y : constant Real := V - 0.5;	0.5	math	a place's coefficient index is its coordinate less half a pixel
+driver-alignment.adb	[Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];	1.0	math	the Jacobian's last column: the brightness offset's derivative is minus one
 driver-alignment.adb	[Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];	1.0	math	the Jacobian's last column: the brightness offset's derivative is minus one
 driver-alignment.adb	and then (Axis = 2 or else (K - Field'First) mod Side < Side - 1)	2	structure	the second axis of a field on a grid, along its columns: it has a neighbour in every row but the last
 driver-alignment.adb	elsif Rho (Nearest) > -2.0 then	2.0	structure	a correlation is at least -1, so below -1 marks a cell that is not a candidate
@@ -952,11 +953,11 @@ driver-msgpack.adb	when Boolean_Value => (if R.Flag then 1.0 else 0.0),	1.0	form
 driver-msgpack.adb	when Map_Value => R.Kids_Count / 2,	2	format	MessagePack type codes, payload widths and length limits (msgpack spec)
 driver-msgpack.adb	when others => 16);	16	format	MessagePack type codes, payload widths and length limits (msgpack spec)
 driver-msgpack.ads	No_Node : constant Node := 0;	0	structure	the absent node
-driver-numerics-dense.adb	C := 1.0 / Ada.Numerics.Long_Elementary_Functions.Sqrt (T * T + 1.0);	1.0	math	a Jacobi rotation's cosine from its tangent: one over the root of one plus its square
-driver-numerics-dense.adb	C := 1.0 / Ada.Numerics.Long_Elementary_Functions.Sqrt (T * T + 1.0);	1.0	math	a Jacobi rotation's cosine from its tangent: one over the root of one plus its square
+driver-numerics-dense.adb	C := 1.0 / Sqrt (T * T + 1.0);	1.0	math	a Jacobi rotation's cosine from its tangent: one over the root of one plus its square
+driver-numerics-dense.adb	C := 1.0 / Sqrt (T * T + 1.0);	1.0	math	a Jacobi rotation's cosine from its tangent: one over the root of one plus its square
 driver-numerics-dense.adb	Q (K, K) := Q (K, K) + 1.0;	1.0	math	Householder vector normalized to v_k = 1 + x_k / norm
-driver-numerics-dense.adb	T := 1.0 / (abs Theta + Ada.Numerics.Long_Elementary_Functions.Sqrt (Theta * Theta + 1.0));	1.0	math	a Jacobi rotation's tangent, the smaller root of t squared plus two theta t less one
-driver-numerics-dense.adb	T := 1.0 / (abs Theta + Ada.Numerics.Long_Elementary_Functions.Sqrt (Theta * Theta + 1.0));	1.0	math	a Jacobi rotation's tangent, the smaller root of t squared plus two theta t less one
+driver-numerics-dense.adb	T := 1.0 / (abs Theta + Sqrt (Theta * Theta + 1.0));	1.0	math	a Jacobi rotation's tangent, the smaller root of t squared plus two theta t less one
+driver-numerics-dense.adb	T := 1.0 / (abs Theta + Sqrt (Theta * Theta + 1.0));	1.0	math	a Jacobi rotation's tangent, the smaller root of t squared plus two theta t less one
 driver-numerics-dense.adb	Tau := S / (1.0 + C);	1.0	math	a Jacobi rotation's tau, the sine over one plus the cosine (Rutishauser's update)
 driver-numerics-dense.adb	Theta : constant Real := H / (2.0 * Apq);	2.0	math	a Jacobi rotation's theta: the diagonal difference over twice the off-diagonal entry
 driver-numerics-dense.adb	V (P, P) := 1.0;	1.0	math	the identity, where the rotations accumulate
@@ -1034,11 +1035,13 @@ driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S
 driver-observations.adb	if T'Length >= 2 and then T (T'Last - 1) = '' and then S'Length = 2 then	2	format	a depth map is a two-dimensional float grid (numpy dtype kind letter before the width)
 driver-observations.ads	Key_Separator : constant Character := Character'Val (31);	31	format	ASCII unit separator
 driver-pixels.adb	(if Frames > 1 then Sum / Real (Frames - 1) else 0.0);	1	statistics	a sample variance needs two frames
+driver-pixels.adb	B := B + 3;	3	format	RGB bytes: three per pixel
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	1.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quantization : constant := 1.0 / 12.0;	12.0	math	the variance of a uniform step of one level is 1/12
 driver-pixels.adb	Quarter : constant Real := Driver.Distributions.Gaussian_Two_Sided_Quantile (0.75);	0.75	math	the lower quarter of a Gaussian's absolute values lies below the value whose two-sided tail is three quarters
 driver-pixels.adb	Result.Trusted := 2 * Changed < Pixels;	2	math	fewer than half the pixels changed: the median finds the typical difference only while the unchanged pixels are the majority
 driver-pixels.adb	Spread := Real'Max (Floor, (if Kept > 1 then Sqrt (Driver.Stats.Variance (Seen)) else 0.0));	1	statistics	a standard deviation needs two pixels
+driver-pixels.adb	X : constant Real := Driver.Images.Luma_Of (RGB (B), RGB (B + 1), RGB (B + 2));	2	format	RGB bytes: the blue byte is the pixel's third
 driver-protocol.adb	Pairs : Natural := 3;	3	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Array_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
 driver-protocol.adb	Put_Map_Header (Reply, 1);	1	format	pair and element counts of the reply maps (docs/body-protocol.md 4)
@@ -2814,8 +2817,8 @@ driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) 
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	2.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	Inv_Ratio : constant Real := (Sqrt (5.0) - 1.0) / 2.0;	5.0	math	the golden angle and the golden ratio
 driver-robot-kinematics-fit.adb	J : constant Positive := (P - 7) / Per_Joint + 1;	7	structure	the joints' terms after the lens's six: the first joint's first term is the seventh
-driver-robot-kinematics-fit.adb	J : constant Positive := (P - 7) / Per_Joint + 1;	7	structure	the positions of the parameters in the vector: the lens (6), then per joint its own
 driver-robot-kinematics-fit.adb	J : constant Positive := (P - 7) / Per_Joint + 1;	7	structure	the joints' terms after the lens's six: the first joint's first term is the seventh
+driver-robot-kinematics-fit.adb	J : constant Positive := (P - 7) / Per_Joint + 1;	7	structure	the positions of the parameters in the vector: the lens (6), then per joint its own
 driver-robot-kinematics-fit.adb	J : constant Positive := (Q - 7) / Per_Joint + 1;	7	structure	the joints' terms after the lens's six: the first joint's first term is the seventh
 driver-robot-kinematics-fit.adb	Jd : Real_Access := new Real_Array (1 .. 2 * Used);	2	structure	two residuals per sighting, across and down
 driver-robot-kinematics-fit.adb	Je (I1, 3 + L) := -Up (L);	3	structure	an eye's six freedoms: its step's three after its turn's three
@@ -3411,7 +3414,7 @@ driver-robot-kinematics-fit.adb	return (Floor => Noise_Of (R), Gain => 1.0);	1.0
 driver-robot-kinematics-fit.adb	return (case Half is when 0 => "", when 1 => "",	1	structure	the keyframes by halves: every one (0), the odd (1), the even (2)
 driver-robot-kinematics-fit.adb	return (if N >= Real (Positive'Last) then Positive'Last else Positive (Real'Max (1.0, N)));	1.0	numerics	at least one sample
 driver-robot-kinematics-fit.adb	return 1;	1	math	one sample when every point agrees
-driver-robot-kinematics-fit.adb	return 2 * At_Most < Total;	2	math	the median lies above when fewer than half lie at or below
+driver-robot-kinematics-fit.adb	return 2 * At_Most < Judged;	2	math	the median lies above when fewer than half lie at or below
 driver-robot-kinematics-fit.adb	return 2 * Inside > Total;	2	math	a majority: more than half of the plane's points lie inside the other's box
 driver-robot-kinematics-fit.adb	return C + 0.5 * Prior_W * ((Xv (Xv'First) - Ln_Fx0) ** 2 + (Xv (Xv'First + 1) - Ln_Fy0) ** 2);	0.5	math	the quadratic cost of a unit-scale residual, as Huber_Cost within Z
 driver-robot-kinematics-fit.adb	return Real_Matrix'(1 .. 3 => [1 .. Terms => 0.0]);	3	math	three coordinates of the plane's A
@@ -4516,7 +4519,7 @@ driver-robot-steps.adb	or else (S.Free_Short_Count (C - 1) <= 2 and then Natural
 driver-robot-steps.adb	or else (S.Free_Short_Count (C - 1) <= 2 and then Natural (S.Free_Shortfalls.Length) > 2	2	structure	the first three free pushes of a channel have nothing to be compared with: three shortfalls are the fewest that say what its free pushes fall short by; and those of the group, as before the channels were judged apart: the first three pushes of a group have nothing to be compared with and count as free: three free shortfalls are the fewest that say what free pushes fall short by
 driver-robot-steps.adb	or else Driver.Uncertain.Significant (Gain, Sqrt (2.0 * X.Spread / Real (X.Followed - 1)), X.Followed - 1));	2.0	math	a gain is the difference of two beats' values of the quantity, whose variance is twice one beat's
 driver-robot-steps.adb	return Real'Min (Real'Max (0.0, (Up + Down) / 2.0), Least);	2.0	math	the mean of the two ways' standoffs along their asks: a held load's offset, of opposite sense along the two, cancels in it
-driver-robot-stillness.adb	Adds_Up : constant Real := Ada.Numerics.Long_Elementary_Functions.Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
+driver-robot-stillness.adb	Adds_Up : constant Real := Sqrt (2.0);	2.0	math	changes that do not push the same way add as roots of squares: over two beats a picture that only makes noise changes by the square root of two times what it changes over one, a drift by twice
 driver-robot-stillness.adb	S.Change_1 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	S.Change_2 := -1.0;	1.0	format	a negative change marks a beat without two frames to compare
 driver-robot-stillness.adb	Scale : constant Real := T * T * (1.0 + 1.0 / Real (Settled));	1.0	math	a frame minus the mean of K frames has the variance of one frame times 1 + 1 / K

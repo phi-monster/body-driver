@@ -5,8 +5,12 @@ with Driver.Conventions;
 with Driver.Distributions;
 with Driver.Numerics;
 with Driver.Numerics.Dense;
+with Driver.Roots;
 
 package body Driver.Alignment is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
 
    use Ada.Numerics.Long_Elementary_Functions;
    use Driver.Numerics.Arrays;
@@ -224,6 +228,10 @@ package body Driver.Alignment is
       Value, Dx, Dy : out Real;
       Ok            : out Boolean)
    is
+      --  The sixteen taps read below lie in the picture once the test below has passed, so no check of an index, a
+      --  range or an overflow after it can fail: those checks were most of the instructions of the aligner's hottest
+      --  loop (10-28: Sample and Pass, 26 to 59 % of a hall boot's driver in the build the rounds run).
+      pragma Suppress (All_Checks);
       X : constant Real := U - 0.5;
       Y : constant Real := V - 0.5;
 
@@ -286,6 +294,7 @@ package body Driver.Alignment is
          Ok := True;
       end;
    end Sample;
+   pragma Inline_Always (Sample);   --  in the pass over every pixel, every pass
 
    function Level_Width (P : Pyramid; Level : Natural) return Natural is (P.Sizes (Level).Width);
 
@@ -528,12 +537,17 @@ package body Driver.Alignment is
       Width, Height : Natural;
       Result   : out Pass_Result)
    is
+      --  The pixels are those of Template and Valid, the sums of fixed sizes: no check below can fail.
+      pragma Suppress (All_Checks);
       K : Natural := 0;
+      --  The sums in variables of their own, written to the result once at the end, in the same order of addition:
+      --  kept in the result, every addition was a load and a store through a parameter the compiler could not tell
+      --  from the arrays written beside it.
+      Rss   : Real := 0.0;
+      Count : Natural := 0;
+      H     : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
+      G     : Real_Vector (1 .. Parameters) := [others => 0.0];
    begin
-      Result.Rss := 0.0;
-      Result.Count := 0;
-      Result.H := [others => [others => 0.0]];
-      Result.G := [others => 0.0];
       Result.Present := [others => False];
       Result.Residual := [others => 0.0];
       Result.Seen := [others => 0.0];
@@ -567,13 +581,13 @@ package body Driver.Alignment is
                               Ra : constant Real := Row (A);
                            begin
                               for B in A .. Parameters loop
-                                 Result.H (A, B) := Result.H (A, B) + Ra * Row (B);
+                                 H (A, B) := H (A, B) + Ra * Row (B);
                               end loop;
-                              Result.G (A) := Result.G (A) + Ra * R;
+                              G (A) := G (A) + Ra * R;
                            end;
                         end loop;
-                        Result.Rss := Result.Rss + R * R;
-                        Result.Count := Result.Count + 1;
+                        Rss := Rss + R * R;
+                        Count := Count + 1;
                         Result.Present (K) := True;
                         Result.Residual (K) := R;
                         Result.Seen (K) := S;
@@ -585,9 +599,13 @@ package body Driver.Alignment is
       end loop;
       for A in 1 .. Parameters loop
          for B in 1 .. A - 1 loop
-            Result.H (A, B) := Result.H (B, A);
+            H (A, B) := H (B, A);
          end loop;
       end loop;
+      Result.Rss := Rss;
+      Result.Count := Count;
+      Result.H := H;
+      Result.G := G;
    end Pass;
 
    --  The information the first picture's own slopes carry through the fitted gain and warp (the slopes the second
@@ -602,25 +620,30 @@ package body Driver.Alignment is
       Half     : Natural;
       Own_H    : out Real_Matrix)
    is
+      --  The pixels are those of the patch, the sums of a fixed size: no check below can fail.
+      pragma Suppress (All_Checks);
       Det : constant Real := T.Linear.UU * T.Linear.VV - T.Linear.UV * T.Linear.VU;
       K   : Natural := 0;
+      --  The sums in a matrix of its own, as Pass keeps them (written to Own_H once at the end), and the row of each
+      --  pixel written out as Jacobian_Row has it: that function's array, returned a pixel at a time, went through
+      --  the secondary stack.
+      H   : Real_Matrix (1 .. Parameters, 1 .. Parameters) := [others => [others => 0.0]];
    begin
-      Own_H := [others => [others => 0.0]];
       for J in -Integer (Half) .. Integer (Half) loop
          for I in -Integer (Half) .. Integer (Half) loop
             K := K + 1;
             if Present (K) then
                declare
-                  Own : constant Real_Vector (1 .. Parameters) :=
-                    Jacobian_Row
-                      (Real (I), Real (J),
-                       T.Gain * (T.Linear.VV * Slope_U (K) - T.Linear.VU * Slope_V (K)) / Det,
-                       T.Gain * (T.Linear.UU * Slope_V (K) - T.Linear.UV * Slope_U (K)) / Det,
-                       Template (K));
+                  Di  : constant Real := Real (I);
+                  Dj  : constant Real := Real (J);
+                  Sx  : constant Real := T.Gain * (T.Linear.VV * Slope_U (K) - T.Linear.VU * Slope_V (K)) / Det;
+                  Sy  : constant Real := T.Gain * (T.Linear.UU * Slope_V (K) - T.Linear.UV * Slope_U (K)) / Det;
+                  Own : constant array (1 .. Parameters) of Real :=
+                    [Sx, Sy, Sx * Di, Sx * Dj, Sy * Di, Sy * Dj, -Template (K), -1.0];
                begin
                   for A in 1 .. Parameters loop
                      for B in A .. Parameters loop
-                        Own_H (A, B) := Own_H (A, B) + Own (A) * Own (B);
+                        H (A, B) := H (A, B) + Own (A) * Own (B);
                      end loop;
                   end loop;
                end;
@@ -629,9 +652,10 @@ package body Driver.Alignment is
       end loop;
       for A in 1 .. Parameters loop
          for B in 1 .. A - 1 loop
-            Own_H (A, B) := Own_H (B, A);
+            H (A, B) := H (B, A);
          end loop;
       end loop;
+      Own_H := H;
    end Own_Information;
 
    ---------------------------------------------------------------------------

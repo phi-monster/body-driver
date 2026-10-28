@@ -15,8 +15,29 @@ with Driver.Alignment;
 with Driver.Stats;
 with Driver.Uncertain;
 with Driver.Workers;
+with Driver.Roots;
 
 package body Driver.Robot.Kinematics.Fit is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
+   type Joint_Index_Array is array (Natural range <>) of Positive;
+
+   --  A list of joints' entries as an array, read in place: indexed in place, the vector took a reference at every
+   --  element (its tamper check, and the finalization of that reference), and the order search's loops over its
+   --  orders were 5 to 8 % of a hall boot's driver in the build the rounds run (gprof, 10-28: Joint_Lists' With_Busy).
+   function Entries (L : Joint_Lists.Vector) return Joint_Index_Array is
+      R : Joint_Index_Array (0 .. Natural (L.Length) - 1);
+      K : Natural := 0;
+   begin
+      for E of L loop
+         R (K) := E;
+         K := K + 1;
+      end loop;
+      return R;
+   end Entries;
+
 
    --  Everything sized by sightings, tracks, keyframes or points lives on
    --  the heap: the fit runs in the decider's task, whose stack is small.
@@ -540,6 +561,10 @@ package body Driver.Robot.Kinematics.Fit is
       --  the bracket's bottom (Parts_Low) and at its top (Parts_High), in the candidates' order.
       Candidates : Natural_Access;
       Parts, Parts_Low, Parts_High, Scratch : Real_Access;
+      --  The half that states the more (Own at or above Cut, and above none), what Above_Typical judges at every
+      --  gain: its residuals' sizes and what they state, taken once (the same values every halving).
+      Judged_R, Judged_O : Real_Access;
+      Judged : Natural := 0;
       Kept, Below : Natural := 0;
       --  The parts' values at the median's lower and upper ranks at the last gain the floor was made at.
       Low_Value, High_Value : Real := 0.0;
@@ -577,21 +602,13 @@ package body Driver.Robot.Kinematics.Fit is
       function Above_Typical (Gain : Real) return Boolean is
          Model   : constant Error_Model := (Floor => Floor_At (Gain), Gain => Gain);
          At_Most : Natural := 0;
-         Total   : Natural := 0;
       begin
-         for I in 1 .. N loop
-            declare
-               O : constant Real := Own (Own'First + I - 1);
-            begin
-               if O > 0.0 and then O >= Cut then
-                  Total := Total + 1;
-                  if abs R (R'First + I - 1) <= Typical * Scale_Of (Model, O) then
-                     At_Most := At_Most + 1;
-                  end if;
-               end if;
-            end;
+         for J in 1 .. Judged loop
+            if Judged_R (J) <= Typical * Scale_Of (Model, Judged_O (J)) then
+               At_Most := At_Most + 1;
+            end if;
          end loop;
-         return 2 * At_Most < Total;
+         return 2 * At_Most < Judged;
       end Above_Typical;
 
       Low, High : Real := 0.0;
@@ -623,6 +640,19 @@ package body Driver.Robot.Kinematics.Fit is
          return (Floor => Noise_Of (R), Gain => 1.0);
       end if;
       Cut := Driver.Stats.Median (Own);
+      Judged_R := new Real_Array (1 .. N);
+      Judged_O := new Real_Array (1 .. N);
+      for I in 1 .. N loop
+         declare
+            O : constant Real := Own (Own'First + I - 1);
+         begin
+            if O > 0.0 and then O >= Cut then
+               Judged := Judged + 1;
+               Judged_R (Judged) := abs R (R'First + I - 1);
+               Judged_O (Judged) := O;
+            end if;
+         end;
+      end loop;
       Candidates := new Natural_Array (1 .. N);
       Parts := new Real_Array (1 .. N);
       Parts_Low := new Real_Array (1 .. N);
@@ -669,6 +699,8 @@ package body Driver.Robot.Kinematics.Fit is
       Free (Parts_Low);
       Free (Parts_High);
       Free (Scratch);
+      Free (Judged_R);
+      Free (Judged_O);
       return Result;
    end Model_Of;
 
@@ -8325,21 +8357,23 @@ package body Driver.Robot.Kinematics.Fit is
                   if From.Valid and then From.N = N and then not From.Fixed and then Here.Order = From.Chain
                     and then (From.Order_Told or else not From.Untold_Orders.Is_Empty)
                   then
-                     for K in 1 .. Closes loop
-                        if Close (K) /= G then
-                           declare
-                              Untold : Boolean := False;
-                           begin
-                              for W in 0 .. Natural (From.Untold_Orders.Length) / N - 1 loop
-                                 Untold := Untold or else
-                                   (for all P in 1 .. N =>
-                                      From.Untold_Orders (From.Untold_Orders.First_Index + W * N + P - 1)
-                                      = Close (K) (P));
-                              end loop;
-                              Skipped (K) := not Untold;
-                           end;
-                        end if;
-                     end loop;
+                     declare
+                        Untold_Orders : constant Joint_Index_Array := Entries (From.Untold_Orders);
+                     begin
+                        for K in 1 .. Closes loop
+                           if Close (K) /= G then
+                              declare
+                                 Untold : Boolean := False;
+                              begin
+                                 for W in 0 .. Untold_Orders'Length / N - 1 loop
+                                    Untold := Untold or else
+                                      (for all P in 1 .. N => Untold_Orders (W * N + P - 1) = Close (K) (P));
+                                 end loop;
+                                 Skipped (K) := not Untold;
+                              end;
+                           end if;
+                        end loop;
+                     end;
                   end if;
                   Fitted_Now := 0;
                   --  An order's own fit is judged where the orders differ: the median residual of the sightings of the
@@ -8804,11 +8838,13 @@ package body Driver.Robot.Kinematics.Fit is
                         Here := Refined (Beaten_By);
                         Beaten := True;
                         Again := True;
-                        for W in 0 .. Natural (Judged_From.Length) / N - 1 loop
-                           Again := Again and then
-                             (for some P in 1 .. N =>
-                                Judged_From (Judged_From.First_Index + W * N + P - 1) /= Here.Order (P));
-                        end loop;
+                        declare
+                           Judged : constant Joint_Index_Array := Entries (Judged_From);
+                        begin
+                           for W in 0 .. Judged'Length / N - 1 loop
+                              Again := Again and then (for some P in 1 .. N => Judged (W * N + P - 1) /= Here.Order (P));
+                           end loop;
+                        end;
                      end if;
                      Free (Fu);
                      Free (Fv);

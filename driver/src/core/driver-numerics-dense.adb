@@ -1,20 +1,27 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Unchecked_Deallocation;
+with Driver.Roots;
 
 package body Driver.Numerics.Dense is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
 
    procedure Cholesky (A : Real_Matrix; L : out Real_Matrix; Positive_Definite : out Boolean) is
+      --  Every index below runs over the square's own N, the contract's: no check after it can fail. A is read in
+      --  place (it was copied to bounds from one first), each index its first plus the place, less one, in that order:
+      --  an aggregate's first is Integer'First, and its first less one overflows (core.cholesky, 10-28).
+      pragma Suppress (All_Checks);
       N   : constant Natural := A'Length (1);
-      Src : constant Real_Matrix (1 .. N, 1 .. N) := A;
+      I0  : constant Integer := A'First (1);
+      J0  : constant Integer := A'First (2);
       F   : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
       Sum : Real;
    begin
       L := [others => [others => 0.0]];
       Positive_Definite := False;
       for J in 1 .. N loop
-         Sum := Src (J, J);
+         Sum := A (I0 + J - 1, J0 + J - 1);
          for K in 1 .. J - 1 loop
             Sum := Sum - F (J, K) ** 2;
          end loop;
@@ -23,7 +30,7 @@ package body Driver.Numerics.Dense is
          end if;
          F (J, J) := Sqrt (Sum);
          for I in J + 1 .. N loop
-            Sum := Src (I, J);
+            Sum := A (I0 + I - 1, J0 + J - 1);
             for K in 1 .. J - 1 loop
                Sum := Sum - F (I, K) * F (J, K);
             end loop;
@@ -35,8 +42,12 @@ package body Driver.Numerics.Dense is
    end Cholesky;
 
    function Cholesky_Solve (L : Real_Matrix; B : Real_Vector) return Real_Vector is
+      --  The contract's square and vector: no check below can fail. The factor is read in place (it was copied to
+      --  bounds from one at every solve), each index its first plus the place, less one, in that order (Cholesky).
+      pragma Suppress (All_Checks);
       N  : constant Natural := L'Length (1);
-      F  : constant Real_Matrix (1 .. N, 1 .. N) := L;
+      I0 : constant Integer := L'First (1);
+      J0 : constant Integer := L'First (2);
       Rh : constant Real_Vector (1 .. N) := B;
       Y  : Real_Vector (1 .. N) := [others => 0.0];
       X  : Real_Vector (1 .. N) := [others => 0.0];
@@ -45,16 +56,16 @@ package body Driver.Numerics.Dense is
       for I in 1 .. N loop
          Sum := Rh (I);
          for K in 1 .. I - 1 loop
-            Sum := Sum - F (I, K) * Y (K);
+            Sum := Sum - L (I0 + I - 1, J0 + K - 1) * Y (K);
          end loop;
-         Y (I) := Sum / F (I, I);
+         Y (I) := Sum / L (I0 + I - 1, J0 + I - 1);
       end loop;
       for I in reverse 1 .. N loop
          Sum := Y (I);
          for K in I + 1 .. N loop
-            Sum := Sum - F (K, I) * X (K);
+            Sum := Sum - L (I0 + K - 1, J0 + I - 1) * X (K);
          end loop;
-         X (I) := Sum / F (I, I);
+         X (I) := Sum / L (I0 + I - 1, J0 + I - 1);
       end loop;
       return Result : Real_Vector (B'Range) do
          Result := X;
@@ -175,6 +186,8 @@ package body Driver.Numerics.Dense is
    end Least_Squares;
 
    procedure Small_Eigensystem (A : Real_Matrix; Values : out Real_Vector; Vectors : out Real_Matrix) is
+      --  Every index runs over the contract's own N: no check below can fail.
+      pragma Suppress (All_Checks);
       N : constant Natural := A'Length (1);
       D : Real_Matrix (1 .. N, 1 .. N);
       V : Real_Matrix (1 .. N, 1 .. N) := [others => [others => 0.0]];
@@ -207,13 +220,13 @@ package body Driver.Numerics.Dense is
                            declare
                               Theta : constant Real := H / (2.0 * Apq);
                            begin
-                              T := 1.0 / (abs Theta + Ada.Numerics.Long_Elementary_Functions.Sqrt (Theta * Theta + 1.0));
+                              T := 1.0 / (abs Theta + Sqrt (Theta * Theta + 1.0));
                               if Theta < 0.0 then
                                  T := -T;
                               end if;
                            end;
                         end if;
-                        C := 1.0 / Ada.Numerics.Long_Elementary_Functions.Sqrt (T * T + 1.0);
+                        C := 1.0 / Sqrt (T * T + 1.0);
                         S := T * C;
                         Tau := S / (1.0 + C);
                         D (P, P) := D (P, P) - T * Apq;

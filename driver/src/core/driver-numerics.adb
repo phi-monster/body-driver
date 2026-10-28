@@ -1,6 +1,10 @@
 with Ada.Numerics.Long_Elementary_Functions;
+with Driver.Roots;
 
 package body Driver.Numerics is
+
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
 
    use Ada.Numerics.Long_Elementary_Functions;
 

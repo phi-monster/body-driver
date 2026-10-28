@@ -86,6 +86,12 @@ package Driver.Apart is
    --  When a decider asked for the estimates in the beat just answered
    --  (Driver.Robot.Estimate_Now), the models go apart (kind K).
 
+   procedure Wait_Back;
+   --  For a robot that waits for every answer (the driver's --in-beat): when the models are apart, waits until the
+   --  estimator has computed what was due and given the models all it held, then takes them back as Arrive does
+   --  (kind B). No message comes while it waits, so none is kept back: the robot holds still for no beat while the
+   --  estimates are made, and the recording has the same records as when the models went apart and came back.
+
    function Is_Apart return Boolean;
 
    --  Replay, record by record, in the recording's order.

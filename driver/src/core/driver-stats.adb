@@ -4,10 +4,13 @@ with Driver.Distributions;
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with Interfaces;
+with Driver.Roots;
 
 package body Driver.Stats is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
 
    Gaussian_MAD_To_Sigma : constant := 1.482_602_218_505_602;
    --  1 / Phi^-1 (3/4): the median absolute deviation of a unit Gaussian.

@@ -88,7 +88,10 @@ package Driver.Pixels is
 
 private
 
+   pragma Suppress (Tampering_Check);
    package Real_Holders is new Ada.Containers.Indefinite_Holders (Real_Array);
+   --  Read value by value over whole frames (Mean, Variance): a reference without the tampering check is a plain
+   --  pointer, as the masks' are (Driver.Images).
 
    type View is record
       Width, Height : Natural := 0;

@@ -28,6 +28,9 @@ package body Driver.Images is
    Blue_Weight  : constant := 0.114;
    --  ITU-R BT.601.
 
+   function Luma_Of (R, G, B : Driver.Bytes.Byte) return Real is
+     (Red_Weight * Real (R) + Green_Weight * Real (G) + Blue_Weight * Real (B));
+
    function Luma (I : Image; Column, Row : Natural) return Real is
      (Red_Weight * Real (Red (I, Column, Row)) + Green_Weight * Real (Green (I, Column, Row))
       + Blue_Weight * Real (Blue (I, Column, Row)));

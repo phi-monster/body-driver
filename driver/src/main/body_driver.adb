@@ -305,6 +305,8 @@ procedure Body_Driver is
 
    package Apart is new Driver.Apart (Input, Robot_Part, Rest, Due, Compute, Estimates_Failed, Lighten);
 
+   In_Beat : Boolean := False;   --  --in-beat: the main loop waits for the models while they are apart (Wait_Back)
+
    procedure Handle (Data : Driver.Bytes.Byte_Array) is
       Req        : Driver.Protocol.Request;
       Took       : Boolean;
@@ -354,6 +356,9 @@ procedure Body_Driver is
             --  A step for the services' replies, begun with this message's record.
             Driver.Services.Step_Begins (Place);
             Apart.Take_In (M, Went_Apart);
+            if Went_Apart and then In_Beat then
+               Apart.Wait_Back;
+            end if;
             Account (Modelling);
             if Went_Apart then
                Pending := Driver.Commands.Hold;
@@ -386,6 +391,9 @@ procedure Body_Driver is
       Driver.Wire.Send (Connection, Reply.To_Array, Ok);
       if not Held and then not Went_Apart then
          Apart.After_Reply;
+         if In_Beat then
+            Apart.Wait_Back;
+         end if;
       end if;
       Account (Replying);
       Messages := Messages + 1;
@@ -421,15 +429,17 @@ begin
    Line (Core, "listening on port" & Natural'Image (Port));
    --  The estimates are made apart from the main loop, which holds the robot still while they are made: a real
    --  robot's time goes on while the driver computes. A robot that waits for every answer and keeps no time of its own
-   --  (a simulator run as fast as the driver answers: --in-beat) has them made within the beat that asks for them, so
-   --  it holds still for no beats at all: there, a held beat is a picture rendered, sent and dropped, and the hall's
-   --  unpaced rounds (10-28) spent a third of their beats so, Panda seed 1a past 11800 of its 12000 in five minutes.
-   --  The driver's own time is then its beats and its estimates' seconds, both in its log.
-   if Flag ("--in-beat") then
-      Line (Core, "estimates within the beat that asks for them (--in-beat)");
-   else
-      Driver.Robot.Compute_Apart (Robot);
+   --  (a simulator run as fast as the driver answers: --in-beat) has the main loop wait for them instead (Wait_Back),
+   --  the robot's and the world's alike, so it holds still for no beats at all: there, a held beat is a picture
+   --  rendered, sent and dropped. The hall's unpaced rounds (10-28) spent a third of their beats so, Panda seed 1a past
+   --  11800 of its 12000 in five minutes; made in the beat for the robot's estimates only, the world's first measure
+   --  still kept Panda 2321 beats back (f7s2), and taking those beats in cost another 9.09 s. The driver's own time is
+   --  then its beats and its estimates' seconds, both in its log.
+   In_Beat := Flag ("--in-beat");
+   if In_Beat then
+      Line (Core, "estimates within the beat that asks for them (--in-beat): the main loop waits for them");
    end if;
+   Driver.Robot.Compute_Apart (Robot);
    Decider.Start;
    loop
       Driver.Wire.Accept_Client (Connection, Ok);

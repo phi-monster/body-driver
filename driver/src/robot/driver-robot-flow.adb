@@ -1,10 +1,12 @@
-with Ada.Numerics.Long_Elementary_Functions;
 with Driver.Conventions;
 with Driver.Parallel_For;
+with Driver.Roots;
 
 package body Driver.Robot.Flow is
 
-   use Ada.Numerics.Long_Elementary_Functions;
+   --  The processor's own square root, inline (Driver.Roots), where the library's was a call and two tests.
+   function Sqrt (X : Real) return Real renames Driver.Roots.Sqrt;
+
 
    function Grid_Of (Width, Height : Natural) return Cell_Grid is
      ((Width   => Width,
@@ -73,6 +75,10 @@ package body Driver.Robot.Flow is
       --  frames and writes only its own answers. The cells one after another took most of an eye's beat (a
       --  kiwi's step 3 alone on the big machine, 10-22: 2.6 to 2.9 ms of the 7 an eye took, a cell in a row).
       procedure One_Cell (Cell : Positive) is
+         --  The cell's bounds clamped inside the frame, its arrays sized for the largest cell and the moved places
+         --  clamped to the frame's last pixel but one (Place): no check below can fail, in the per-pixel passes of
+         --  every cell of every pictured beat.
+         pragma Suppress (All_Checks);
          Gx : Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
          Gy : Real_Array (1 .. Natural'Max (1, Most_X * Most_Y));
          Px : Index_Array (0 .. Natural'Max (1, Most_X));

@@ -48,6 +48,9 @@ package Driver.Images is
    procedure Query (I : Image; Process : not null access procedure (RGB : Driver.Bytes.Byte_Array));
    --  Reads the raw RGB bytes in place.
 
+   function Luma_Of (R, G, B : Driver.Bytes.Byte) return Real with Inline;
+   --  A pixel's luma from its bytes, as Luma computes it (ITU-R BT.601), for a pass over the bytes in place (Query).
+
    type Mask is private;
    --  A set of pixels of one image size.
 
